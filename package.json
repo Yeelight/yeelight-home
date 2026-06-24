@@ -1,0 +1,43 @@
+{
+  "name": "yeelight-home",
+  "version": "0.1.0",
+  "description": "Local Yeelight Home Runtime CLI installer and launcher.",
+  "license": "MIT",
+  "homepage": "https://github.com/Yeelight/yeelight-home#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yeelight/yeelight-home.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Yeelight/yeelight-home/issues"
+  },
+  "bin": {
+    "yeelight-home": "npm/bin/yeelight-home.js"
+  },
+  "files": [
+    "npm/",
+    "README.md",
+    "INSTALL.md",
+    "CONFIG.md",
+    "DISTRIBUTION.md"
+  ],
+  "scripts": {
+    "postinstall": "node npm/install.js",
+    "smoke": "node npm/bin/yeelight-home.js version"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

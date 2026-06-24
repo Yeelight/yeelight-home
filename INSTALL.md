@@ -48,6 +48,11 @@ Winget:
 - Submitted for review: https://github.com/microsoft/winget-pkgs/pull/392555
 - After merge: `winget install Yeelight.yeelight-home`
 
+npm:
+
+- Prepared as a thin GitHub Release downloader and launcher.
+- After registry publication: `npm install -g yeelight-home`
+
 ## Verify
 
 ```sh

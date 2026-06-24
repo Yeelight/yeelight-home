@@ -31,6 +31,8 @@ scoop install yeelight-home
 
 Winget publication is submitted for review at https://github.com/microsoft/winget-pkgs/pull/392555. Until it is merged, use GitHub Releases, Homebrew, Scoop, or set `YEELIGHT_HOME_BIN` to an absolute `yeelight-home` executable path.
 
+npm publication is prepared but should only be documented as an install command after the package appears in the npm registry.
+
 ## Quick Start
 
 ```sh

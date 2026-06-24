@@ -35,11 +35,11 @@ jobs:
       - name: Test
         run: go test ./...
 
-      - name: Build packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
+	      - name: Build packages
+	        shell: bash
+	        run: |
+	          set -euo pipefail
+	          mkdir -p dist
           targets=(
             "darwin amd64"
             "darwin arm64"
@@ -62,11 +62,12 @@ jobs:
             else
               tar -C "$package_dir" -czf "../yeelight-home-${goos}-${goarch}.tar.gz" yeelight-home
             fi
-          done
-          cp scripts/install.sh dist/install.sh
-          cp scripts/install.ps1 dist/install.ps1
-          (cd dist && sha256sum yeelight-home-* install.sh install.ps1 > checksums.txt)
-          cat > dist/manifest.json <<EOF
+	          done
+	          cp scripts/install.sh dist/install.sh
+	          cp scripts/install.ps1 dist/install.ps1
+	          npm pack --pack-destination dist
+	          (cd dist && sha256sum yeelight-home-* install.sh install.ps1 > checksums.txt)
+	          cat > dist/manifest.json <<EOF
           {
             "version": "${RELEASE_TAG}",
             "repository": "Yeelight/yeelight-home",
@@ -81,8 +82,17 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           files: |
             dist/yeelight-home-*.tar.gz
-            dist/yeelight-home-*.zip
-            dist/install.sh
-            dist/install.ps1
-            dist/checksums.txt
-            dist/manifest.json
+	            dist/yeelight-home-*.zip
+	            dist/yeelight-home-*.tgz
+	            dist/install.sh
+	            dist/install.ps1
+	            dist/checksums.txt
+	            dist/manifest.json
+
+	      - name: Publish npm package
+	        if: ${{ secrets.NPM_TOKEN != '' }}
+	        env:
+	          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+	        run: |
+	          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+	          npm publish --access public
