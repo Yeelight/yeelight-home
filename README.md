@@ -29,6 +29,8 @@ scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket
 scoop install yeelight-home
 ```
 
+Debian/Ubuntu users can download the `yeelight-home_0.1.0_amd64.deb` or `yeelight-home_0.1.0_arm64.deb` asset from the GitHub Release and install it with `apt` or `dpkg`.
+
 Winget publication is submitted for review at https://github.com/microsoft/winget-pkgs/pull/392555. Until it is merged, use GitHub Releases, Homebrew, Scoop, or set `YEELIGHT_HOME_BIN` to an absolute `yeelight-home` executable path.
 
 npm publication is prepared but should only be documented as an install command after the package appears in the npm registry.

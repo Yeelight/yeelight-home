@@ -46,9 +46,9 @@ jobs:
             "linux amd64"
             "linux arm64"
             "windows amd64"
-            "windows arm64"
-          )
-          for target in "${targets[@]}"; do
+	            "windows arm64"
+	          )
+	          for target in "${targets[@]}"; do
             read -r goos goarch <<<"$target"
             ext=""
             if [ "$goos" = "windows" ]; then
@@ -63,6 +63,7 @@ jobs:
               tar -C "$package_dir" -czf "../yeelight-home-${goos}-${goarch}.tar.gz" yeelight-home
             fi
 	          done
+	          sh scripts/package-deb.sh "${RELEASE_TAG#yeelight-home-v}" "dist/package-linux-amd64/yeelight-home" "dist/package-linux-arm64/yeelight-home"
 	          cp scripts/install.sh dist/install.sh
 	          cp scripts/install.ps1 dist/install.ps1
 	          npm pack --pack-destination dist
@@ -81,8 +82,9 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           files: |
-            dist/yeelight-home-*.tar.gz
+	            dist/yeelight-home-*.tar.gz
 	            dist/yeelight-home-*.zip
+	            dist/yeelight-home_*.deb
 	            dist/yeelight-home-*.tgz
 	            dist/install.sh
 	            dist/install.ps1

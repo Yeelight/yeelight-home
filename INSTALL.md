@@ -43,6 +43,13 @@ scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket
 scoop install yeelight-home
 ```
 
+Debian/Ubuntu:
+
+```sh
+curl -LO https://github.com/Yeelight/yeelight-home/releases/download/yeelight-home-v0.1.0/yeelight-home_0.1.0_amd64.deb
+sudo apt install ./yeelight-home_0.1.0_amd64.deb
+```
+
 Winget:
 
 - Submitted for review: https://github.com/microsoft/winget-pkgs/pull/392555
