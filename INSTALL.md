@@ -30,13 +30,23 @@ $env:YEELIGHT_HOME_VERSION="yeelight-home-v1.0.0"
 
 ## Package Managers
 
-Planned public channels:
+Homebrew:
 
-- Homebrew: `brew install yeelight/tap/yeelight-home`
-- Scoop: `scoop install yeelight-home`
-- Winget: `winget install Yeelight.yeelight-home`
+```sh
+brew install Yeelight/tap/yeelight-home
+```
 
-Use the GitHub release installer until the corresponding package is published.
+Scoop:
+
+```powershell
+scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket
+scoop install yeelight-home
+```
+
+Winget:
+
+- Submitted for review: https://github.com/microsoft/winget-pkgs/pull/392555
+- After merge: `winget install Yeelight.yeelight-home`
 
 ## Verify
 
@@ -55,4 +65,3 @@ rm -rf ~/.yeelight-home
 ```
 
 On Windows, remove `%LOCALAPPDATA%\Programs\YeelightHome\bin\yeelight-home.exe` and remove that directory from the user `Path` if it was added by the installer.
-

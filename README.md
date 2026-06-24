@@ -16,7 +16,20 @@ Windows PowerShell:
 iwr https://github.com/yeelight/yeelight-home/releases/latest/download/install.ps1 -UseB | iex
 ```
 
-Package-manager channels are intended for Homebrew, Scoop, and Winget. Until a channel is published, use GitHub Releases or set `YEELIGHT_HOME_BIN` to an absolute `yeelight-home` executable path.
+Homebrew:
+
+```sh
+brew install Yeelight/tap/yeelight-home
+```
+
+Scoop:
+
+```powershell
+scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket
+scoop install yeelight-home
+```
+
+Winget publication is submitted for review at https://github.com/microsoft/winget-pkgs/pull/392555. Until it is merged, use GitHub Releases, Homebrew, Scoop, or set `YEELIGHT_HOME_BIN` to an absolute `yeelight-home` executable path.
 
 ## Quick Start
 

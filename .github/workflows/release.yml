@@ -1,0 +1,88 @@
+name: Release yeelight-home
+
+on:
+  push:
+    tags:
+      - "yeelight-home-v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag, for example yeelight-home-v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Resolve release tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "RELEASE_TAG=${{ inputs.tag_name }}" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE_TAG=${{ github.ref_name }}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          targets=(
+            "darwin amd64"
+            "darwin arm64"
+            "linux amd64"
+            "linux arm64"
+            "windows amd64"
+            "windows arm64"
+          )
+          for target in "${targets[@]}"; do
+            read -r goos goarch <<<"$target"
+            ext=""
+            if [ "$goos" = "windows" ]; then
+              ext=".exe"
+            fi
+            package_dir="dist/package-${goos}-${goarch}"
+            mkdir -p "$package_dir"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$package_dir/yeelight-home${ext}" ./cmd/yeelight-home
+            if [ "$goos" = "windows" ]; then
+              (cd "$package_dir" && zip -q "../yeelight-home-${goos}-${goarch}.zip" "yeelight-home${ext}")
+            else
+              tar -C "$package_dir" -czf "../yeelight-home-${goos}-${goarch}.tar.gz" yeelight-home
+            fi
+          done
+          cp scripts/install.sh dist/install.sh
+          cp scripts/install.ps1 dist/install.ps1
+          (cd dist && sha256sum yeelight-home-* install.sh install.ps1 > checksums.txt)
+          cat > dist/manifest.json <<EOF
+          {
+            "version": "${RELEASE_TAG}",
+            "repository": "Yeelight/yeelight-home",
+            "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "checksums": "checksums.txt"
+          }
+          EOF
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            dist/yeelight-home-*.tar.gz
+            dist/yeelight-home-*.zip
+            dist/install.sh
+            dist/install.ps1
+            dist/checksums.txt
+            dist/manifest.json
