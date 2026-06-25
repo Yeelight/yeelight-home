@@ -43,7 +43,8 @@ function resolveTarget() {
   };
   const archMap = {
     x64: "amd64",
-    arm64: "arm64"
+    arm64: "arm64",
+    arm: "armv7"
   };
 
   const goos = platformMap[process.platform];
@@ -51,9 +52,12 @@ function resolveTarget() {
   if (!goos || !goarch) {
     throw new Error(`unsupported platform: ${process.platform}/${process.arch}`);
   }
+  if (goarch === "armv7" && process.platform !== "linux") {
+    throw new Error(`unsupported platform: ${process.platform}/${process.arch}`);
+  }
 
   const repo = process.env.YEELIGHT_HOME_REPO || "Yeelight/yeelight-home";
-  const version = process.env.YEELIGHT_HOME_VERSION || `yeelight-home-v${packageInfo.version}`;
+  const version = process.env.YEELIGHT_HOME_VERSION || `v${packageInfo.version}`;
   const extension = goos === "windows" ? "zip" : "tar.gz";
   const assetName = `yeelight-home-${goos}-${goarch}.${extension}`;
   const releasePath = version === "latest" ? "latest/download" : `download/${version}`;

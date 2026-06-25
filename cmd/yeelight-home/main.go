@@ -112,7 +112,6 @@ func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int
 		"authenticated": context.TokenPresent || authStatus.Authenticated,
 		"profile":       context.Profile,
 		"region":        context.Region,
-		"clientId":      context.ClientID,
 		"houseId":       context.HouseID,
 		"tokenPresent":  context.TokenPresent,
 		"tokenSource":   context.TokenSource,
@@ -122,7 +121,7 @@ func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int
 		"cacheDir":      paths.CacheDir,
 		"install": map[string]any{
 			"cli":        "yeelight-home",
-			"publicRepo": "yeelight/yeelight-home",
+			"publicRepo": "Yeelight/yeelight-home",
 		},
 		"memoryMigrations": map[string]any{
 			"status": "available",

@@ -35,7 +35,8 @@
   ],
   "cpu": [
     "x64",
-    "arm64"
+    "arm64",
+    "arm"
   ],
   "publishConfig": {
     "access": "public"

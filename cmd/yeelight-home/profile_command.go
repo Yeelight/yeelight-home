@@ -50,7 +50,6 @@ func (app *app) runProfileList(args []string, stdout io.Writer, stderr io.Writer
 			"profile":      profile.Profile,
 			"active":       profile.Profile == active,
 			"region":       profile.Region,
-			"clientId":     profile.ClientID,
 			"houseId":      profile.HouseID,
 			"tokenPresent": tokenOK,
 		})
@@ -85,7 +84,6 @@ func (app *app) runProfileShow(args []string, stdout io.Writer, stderr io.Writer
 		"ok":           true,
 		"profile":      context.Profile,
 		"region":       context.Region,
-		"clientId":     context.ClientID,
 		"houseId":      context.HouseID,
 		"tokenPresent": context.TokenPresent,
 		"tokenSource":  context.TokenSource,
@@ -93,7 +91,7 @@ func (app *app) runProfileShow(args []string, stdout io.Writer, stderr io.Writer
 	if flags.bool("json") {
 		return writeJSON(stdout, stderr, result)
 	}
-	_, _ = fmt.Fprintf(stdout, "profile=%s region=%s clientId=%s houseId=%s token=%v\n", context.Profile, context.Region, context.ClientID, context.HouseID, context.TokenPresent)
+	_, _ = fmt.Fprintf(stdout, "profile=%s region=%s houseId=%s token=%v\n", context.Profile, context.Region, context.HouseID, context.TokenPresent)
 	return exitOK
 }
 
@@ -105,7 +103,7 @@ func (app *app) runProfileUse(args []string, stdout io.Writer, stderr io.Writer)
 	}
 	profile := flags.string("profile", "")
 	if profile == "" {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home profile use --profile <name> [--region <region>] [--client-id <id>] [--house-id <id>] [--json]")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home profile use --profile <name> [--region <region>] [--house-id <id>] [--json]")
 		return exitInvalidInput
 	}
 	metadata, _, err := app.metadataStore.Load(profile)
@@ -114,12 +112,11 @@ func (app *app) runProfileUse(args []string, stdout io.Writer, stderr io.Writer)
 		return exitInternalError
 	}
 	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
-		"region":   flags.string("region", ""),
-		"clientId": flags.string("client-id", ""),
-		"houseId":  flags.string("house-id", ""),
+		"region":  flags.string("region", ""),
+		"houseId": flags.string("house-id", ""),
 	})
 	if metadata.Region == "" {
-		metadata.Region = "dev"
+		metadata.Region = defaultRuntimeRegion
 	}
 	if err := app.metadataStore.Save(metadata); err != nil {
 		_, _ = fmt.Fprintf(stderr, "profile use: %v\n", err)
@@ -129,7 +126,7 @@ func (app *app) runProfileUse(args []string, stdout io.Writer, stderr io.Writer)
 		_, _ = fmt.Fprintf(stderr, "profile use: %v\n", err)
 		return exitInternalError
 	}
-	result := map[string]any{"ok": true, "profile": metadata.Profile, "region": metadata.Region, "clientId": metadata.ClientID, "houseId": metadata.HouseID}
+	result := map[string]any{"ok": true, "profile": metadata.Profile, "region": metadata.Region, "houseId": metadata.HouseID}
 	if flags.bool("json") {
 		return writeJSON(stdout, stderr, result)
 	}
@@ -167,7 +164,6 @@ func profileMetadataMap(metadata credential.ProfileMetadata) map[string]any {
 	return map[string]any{
 		"profile":  metadata.Profile,
 		"region":   metadata.Region,
-		"clientId": metadata.ClientID,
 		"houseId":  metadata.HouseID,
 		"qrDevice": metadata.QRDevice,
 	}

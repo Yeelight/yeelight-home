@@ -22,6 +22,8 @@ type runtimeContext struct {
 	TokenPresent bool
 }
 
+const defaultRuntimeRegion = "cn"
+
 func (app *app) resolveRuntimeContext(flags cliFlags) (runtimeContext, error) {
 	profile, err := app.resolveProfile(flags)
 	if err != nil {
@@ -35,13 +37,13 @@ func (app *app) resolveRuntimeContext(flags cliFlags) (runtimeContext, error) {
 		flags.string("region", ""),
 		strings.TrimSpace(os.Getenv("YEELIGHT_CLOUD_REGION")),
 		metadata.Region,
-		"dev",
+		defaultRuntimeRegion,
 	)
 	endpoint, err := resolveEndpoint(region)
 	if err != nil {
 		return runtimeContext{}, err
 	}
-	clientID := firstNonEmpty(flags.string("client-id", ""), strings.TrimSpace(os.Getenv("YEELIGHT_HOME_CLIENT_ID")), metadata.ClientID)
+	clientID := firstNonEmpty(metadata.ClientID)
 	houseID := firstNonEmpty(flags.string("house-id", ""), strings.TrimSpace(os.Getenv("YEELIGHT_HOME_HOUSE_ID")), metadata.HouseID)
 	accessToken := strings.TrimSpace(os.Getenv("YEELIGHT_HOME_ACCESS_TOKEN"))
 	tokenSource := ""
@@ -83,7 +85,7 @@ func resolveEndpoint(region string) (api.Endpoint, error) {
 }
 
 func resolveEndpointForFlags(flags cliFlags) (api.Endpoint, error) {
-	region := firstNonEmpty(flags.string("region", ""), strings.TrimSpace(os.Getenv("YEELIGHT_CLOUD_REGION")), "dev")
+	region := firstNonEmpty(flags.string("region", ""), strings.TrimSpace(os.Getenv("YEELIGHT_CLOUD_REGION")), defaultRuntimeRegion)
 	return resolveEndpoint(region)
 }
 

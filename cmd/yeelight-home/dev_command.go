@@ -265,10 +265,7 @@ func (app *app) loadDevSeedProfile(profile string) (credential.ProfileMetadata, 
 	}
 	credentials := api.DevSeedCredentials{
 		Authorization: strings.TrimSpace(os.Getenv("YEELIGHT_HOME_ACCESS_TOKEN")),
-		ClientID:      strings.TrimSpace(os.Getenv("YEELIGHT_HOME_CLIENT_ID")),
-	}
-	if credentials.ClientID == "" {
-		credentials.ClientID = metadata.ClientID
+		ClientID:      metadata.ClientID,
 	}
 	if credentials.Authorization == "" {
 		record, ok, err := app.tokenStore.Load(profile)

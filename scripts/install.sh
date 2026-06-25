@@ -18,6 +18,7 @@ detect_arch() {
   case "$(uname -m)" in
     x86_64|amd64) printf '%s' amd64 ;;
     arm64|aarch64) printf '%s' arm64 ;;
+    armv7l|armv7*) printf '%s' armv7 ;;
     *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
   esac
 }

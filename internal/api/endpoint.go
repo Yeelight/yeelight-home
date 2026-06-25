@@ -40,7 +40,7 @@ func ResolveEndpointFromLookup(lookup func(string) (string, bool)) (Endpoint, er
 	if region, ok := lookup("YEELIGHT_CLOUD_REGION"); ok && strings.TrimSpace(region) != "" {
 		return ResolveEndpoint(region)
 	}
-	return ResolveEndpoint("dev")
+	return ResolveEndpoint("cn")
 }
 
 func (endpoint Endpoint) AccountBaseURL() string {

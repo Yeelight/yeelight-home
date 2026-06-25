@@ -3,16 +3,17 @@ name: Release yeelight-home
 on:
   push:
     tags:
-      - "yeelight-home-v*"
+      - "v*"
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Release tag, for example yeelight-home-v0.1.0"
+        description: "Release tag, for example v0.1.0"
         required: true
         type: string
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   release:
@@ -22,6 +23,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
 
       - name: Resolve release tag
         shell: bash
@@ -35,66 +40,170 @@ jobs:
       - name: Test
         run: go test ./...
 
-	      - name: Build packages
-	        shell: bash
-	        run: |
-	          set -euo pipefail
-	          mkdir -p dist
-          targets=(
-            "darwin amd64"
-            "darwin arm64"
-            "linux amd64"
-            "linux arm64"
-            "windows amd64"
-	            "windows arm64"
-	          )
-	          for target in "${targets[@]}"; do
-            read -r goos goarch <<<"$target"
-            ext=""
-            if [ "$goos" = "windows" ]; then
-              ext=".exe"
-            fi
-            package_dir="dist/package-${goos}-${goarch}"
-            mkdir -p "$package_dir"
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$package_dir/yeelight-home${ext}" ./cmd/yeelight-home
-            if [ "$goos" = "windows" ]; then
-              (cd "$package_dir" && zip -q "../yeelight-home-${goos}-${goarch}.zip" "yeelight-home${ext}")
+      - name: Verify npm package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="${RELEASE_TAG#v}"
+          actual="$(node -p 'require("./package.json").version')"
+          if [ "$actual" != "$expected" ]; then
+            echo "package.json version $actual does not match release tag $RELEASE_TAG" >&2
+            exit 2
+          fi
+
+      - name: Resolve optional distribution channels
+        shell: bash
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          SCOOP_BUCKET_GITHUB_TOKEN: ${{ secrets.SCOOP_BUCKET_GITHUB_TOKEN }}
+          WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+          WINGET_REPOSITORY_OWNER: ${{ vars.WINGET_REPOSITORY_OWNER }}
+          WINGET_REPOSITORY_NAME: ${{ vars.WINGET_REPOSITORY_NAME }}
+          WINGET_REPOSITORY_BRANCH: ${{ vars.WINGET_REPOSITORY_BRANCH }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
+          AUR_GIT_URL: ${{ vars.AUR_GIT_URL }}
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          skips=""
+          add_skip() {
+            if [ -z "$skips" ]; then
+              skips="$1"
             else
-              tar -C "$package_dir" -czf "../yeelight-home-${goos}-${goarch}.tar.gz" yeelight-home
+              skips="$skips,$1"
             fi
-	          done
-	          sh scripts/package-deb.sh "${RELEASE_TAG#yeelight-home-v}" "dist/package-linux-amd64/yeelight-home" "dist/package-linux-arm64/yeelight-home"
-	          cp scripts/install.sh dist/install.sh
-	          cp scripts/install.ps1 dist/install.ps1
-	          npm pack --pack-destination dist
-	          (cd dist && sha256sum yeelight-home-* install.sh install.ps1 > checksums.txt)
-	          cat > dist/manifest.json <<EOF
-          {
-            "version": "${RELEASE_TAG}",
-            "repository": "Yeelight/yeelight-home",
-            "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "checksums": "checksums.txt"
           }
-          EOF
+          set_env_value() {
+            name="$1"
+            value="$2"
+            delimiter="EOF_${name}_$(date +%s%N)"
+            printf '%s<<%s\n%s\n%s\n' "$name" "$delimiter" "$value" "$delimiter" >> "$GITHUB_ENV"
+          }
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
+          if [ -n "${HOMEBREW_TAP_GITHUB_TOKEN:-}" ]; then
+            echo "HOMEBREW_TAP_ENABLED=1" >> "$GITHUB_ENV"
+            set_env_value HOMEBREW_TAP_GITHUB_TOKEN "$HOMEBREW_TAP_GITHUB_TOKEN"
+          else
+            echo "HOMEBREW_TAP_ENABLED=0" >> "$GITHUB_ENV"
+            add_skip homebrew
+          fi
+
+          if [ -n "${SCOOP_BUCKET_GITHUB_TOKEN:-}" ]; then
+            echo "SCOOP_BUCKET_ENABLED=1" >> "$GITHUB_ENV"
+            set_env_value SCOOP_BUCKET_GITHUB_TOKEN "$SCOOP_BUCKET_GITHUB_TOKEN"
+          else
+            echo "SCOOP_BUCKET_ENABLED=0" >> "$GITHUB_ENV"
+            add_skip scoop
+          fi
+
+          if [ -n "${WINGET_GITHUB_TOKEN:-}" ] && [ -n "${WINGET_REPOSITORY_OWNER:-}" ] && [ -n "${WINGET_REPOSITORY_NAME:-}" ]; then
+            echo "WINGET_ENABLED=1" >> "$GITHUB_ENV"
+            set_env_value WINGET_GITHUB_TOKEN "$WINGET_GITHUB_TOKEN"
+            set_env_value WINGET_REPOSITORY_OWNER "$WINGET_REPOSITORY_OWNER"
+            set_env_value WINGET_REPOSITORY_NAME "$WINGET_REPOSITORY_NAME"
+            set_env_value WINGET_REPOSITORY_BRANCH "${WINGET_REPOSITORY_BRANCH:-yeelight-home-${RELEASE_TAG#v}}"
+          else
+            echo "WINGET_ENABLED=0" >> "$GITHUB_ENV"
+            add_skip winget
+          fi
+
+          if [ -n "${AUR_KEY:-}" ]; then
+            echo "AUR_ENABLED=1" >> "$GITHUB_ENV"
+            echo "AUR_PUBLISH_ENABLED=1" >> "$GITHUB_ENV"
+            set_env_value AUR_KEY "$AUR_KEY"
+          else
+            echo "AUR_ENABLED=0" >> "$GITHUB_ENV"
+            echo "AUR_PUBLISH_ENABLED=0" >> "$GITHUB_ENV"
+            add_skip aur
+          fi
+          if [ -n "${AUR_GIT_URL:-}" ]; then
+            set_env_value AUR_GIT_URL "$AUR_GIT_URL"
+          fi
+
+          if [ -n "${SNAPCRAFT_STORE_CREDENTIALS:-}" ]; then
+            echo "SNAPCRAFT_ENABLED=1" >> "$GITHUB_ENV"
+            set_env_value SNAPCRAFT_STORE_CREDENTIALS "$SNAPCRAFT_STORE_CREDENTIALS"
+          else
+            echo "SNAPCRAFT_ENABLED=0" >> "$GITHUB_ENV"
+            add_skip snapcraft
+          fi
+
+          docker_enabled=1
+          echo "GHCR_ENABLED=1" >> "$GITHUB_ENV"
+          if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${DOCKERHUB_TOKEN:-}" ]; then
+            echo "DOCKERHUB_ENABLED=1" >> "$GITHUB_ENV"
+            set_env_value DOCKERHUB_USERNAME "$DOCKERHUB_USERNAME"
+            set_env_value DOCKERHUB_TOKEN "$DOCKERHUB_TOKEN"
+          else
+            echo "DOCKERHUB_ENABLED=0" >> "$GITHUB_ENV"
+          fi
+          if [ "$docker_enabled" != "1" ]; then
+            add_skip docker
+          fi
+
+          if [ -n "${NPM_TOKEN:-}" ]; then
+            echo "NPM_ENABLED=1" >> "$GITHUB_ENV"
+            set_env_value NPM_TOKEN "$NPM_TOKEN"
+          else
+            echo "NPM_ENABLED=0" >> "$GITHUB_ENV"
+          fi
+
+          if [ -n "$skips" ]; then
+            echo "GORELEASER_SKIP_ARGS=--skip=$skips" >> "$GITHUB_ENV"
+          else
+            echo "GORELEASER_SKIP_ARGS=" >> "$GITHUB_ENV"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: anchore/sbom-action/download-syft@v0.24.0
+
+      - name: Install Snapcraft
+        if: ${{ env.SNAPCRAFT_ENABLED == '1' }}
+        run: sudo snap install snapcraft --classic
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          files: |
-	            dist/yeelight-home-*.tar.gz
-	            dist/yeelight-home-*.zip
-	            dist/yeelight-home_*.deb
-	            dist/yeelight-home-*.tgz
-	            dist/install.sh
-	            dist/install.ps1
-	            dist/checksums.txt
-	            dist/manifest.json
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-	      - name: Publish npm package
-	        if: ${{ secrets.NPM_TOKEN != '' }}
-	        env:
-	          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-	        run: |
-	          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
-	          npm publish --access public
+      - name: Login to Docker Hub
+        if: ${{ env.DOCKERHUB_ENABLED == '1' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> 2"
+          args: release --clean ${{ env.GORELEASER_SKIP_ARGS }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ env.HOMEBREW_TAP_GITHUB_TOKEN }}
+          SCOOP_BUCKET_GITHUB_TOKEN: ${{ env.SCOOP_BUCKET_GITHUB_TOKEN }}
+          DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ env.DOCKERHUB_TOKEN }}
+          AUR_KEY: ${{ env.AUR_KEY }}
+          AUR_GIT_URL: ${{ env.AUR_GIT_URL }}
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ env.SNAPCRAFT_STORE_CREDENTIALS }}
+          WINGET_GITHUB_TOKEN: ${{ env.WINGET_GITHUB_TOKEN }}
+          WINGET_REPOSITORY_OWNER: ${{ env.WINGET_REPOSITORY_OWNER }}
+          WINGET_REPOSITORY_NAME: ${{ env.WINGET_REPOSITORY_NAME }}
+          WINGET_REPOSITORY_BRANCH: ${{ env.WINGET_REPOSITORY_BRANCH }}
+
+      - name: Publish npm package
+        if: ${{ env.NPM_ENABLED == '1' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ env.NPM_TOKEN }}
+        run: |
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          npm publish --access public

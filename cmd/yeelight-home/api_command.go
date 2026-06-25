@@ -30,7 +30,7 @@ func (app *app) runAPISmoke(args []string, stdout io.Writer, stderr io.Writer) i
 		return exitInvalidInput
 	}
 	if !flags.bool("json") {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home api smoke --json [--region dev]")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home api smoke --json [--region cn]")
 		return exitInvalidInput
 	}
 	contextInfo, err := app.resolveRuntimeContext(flags)

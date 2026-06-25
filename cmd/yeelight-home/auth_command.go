@@ -101,7 +101,6 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 		}
 		response["credentials"] = map[string]any{
 			"accessTokenPresent": true,
-			"clientId":           credentials.ClientID,
 			"houseId":            credentials.HouseID,
 		}
 	}
@@ -124,7 +123,6 @@ func (app *app) authStatus(flags cliFlags) map[string]any {
 		"authenticated": context.TokenPresent || status.Authenticated,
 		"profile":       context.Profile,
 		"region":        context.Region,
-		"clientId":      context.ClientID,
 		"houseId":       context.HouseID,
 		"tokenPresent":  context.TokenPresent,
 		"tokenSource":   context.TokenSource,
@@ -140,7 +138,7 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInvalidInput
 	}
 	if !flags.bool("qr") {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth login --qr [--json] [--region dev]")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth login --qr [--json] [--region cn]")
 		return exitInvalidInput
 	}
 	asJSON := flags.bool("json")
@@ -237,7 +235,7 @@ func (app *app) runAuthToken(args []string, stdout io.Writer, stderr io.Writer) 
 			token = strings.TrimSpace(os.Getenv("YEELIGHT_HOME_ACCESS_TOKEN"))
 		}
 		if token == "" {
-			_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth token set --token <access-token> [--profile <name>] [--region <region>] [--client-id <id>] [--house-id <id>] [--json]")
+			_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth token set --token <access-token> [--profile <name>] [--region <region>] [--house-id <id>] [--json]")
 			return exitInvalidInput
 		}
 		if err := app.tokenStore.Save(credential.TokenRecord{Profile: profile, AccessToken: token}); err != nil {
@@ -250,12 +248,11 @@ func (app *app) runAuthToken(args []string, stdout io.Writer, stderr io.Writer) 
 			return exitInternalError
 		}
 		metadata = mergeProfileMetadata(metadata, profile, map[string]string{
-			"region":   flags.string("region", ""),
-			"clientId": flags.string("client-id", ""),
-			"houseId":  flags.string("house-id", ""),
+			"region":  flags.string("region", ""),
+			"houseId": flags.string("house-id", ""),
 		})
 		if metadata.Region == "" {
-			metadata.Region = "dev"
+			metadata.Region = defaultRuntimeRegion
 		}
 		if err := app.metadataStore.Save(metadata); err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth token set: save profile metadata: %v\n", err)
@@ -266,7 +263,6 @@ func (app *app) runAuthToken(args []string, stdout io.Writer, stderr io.Writer) 
 			"profile":      profile,
 			"tokenPresent": true,
 			"region":       metadata.Region,
-			"clientId":     metadata.ClientID,
 			"houseId":      metadata.HouseID,
 		}
 		if flags.bool("json") {
@@ -370,7 +366,6 @@ func sanitizeQRLoginResult(profile string, region string, result auth.QRLoginRes
 	}
 	response["credentials"] = map[string]any{
 		"accessTokenPresent": true,
-		"clientId":           result.Credentials.ClientID,
 		"houseId":            result.Credentials.HouseID,
 	}
 	return response

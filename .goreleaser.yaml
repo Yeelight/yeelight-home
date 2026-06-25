@@ -1,0 +1,233 @@
+version: 2
+
+project_name: yeelight-home
+
+before:
+  hooks:
+    - go mod download
+    - go test ./...
+    - mkdir -p npm-dist
+    - npm pack --pack-destination npm-dist
+
+builds:
+  - id: yeelight-home
+    main: ./cmd/yeelight-home
+    binary: yeelight-home
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: arm
+      - goos: windows
+        goarch: arm
+
+archives:
+  - id: default
+    ids:
+      - yeelight-home
+    name_template: >-
+      {{ .ProjectName }}-{{ .Os }}-{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - none*
+
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: scripts/install.sh
+    - glob: scripts/install.ps1
+    - glob: npm-dist/yeelight-home-*.tgz
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: Yeelight
+    name: yeelight-home
+  prerelease: auto
+  make_latest: true
+  include_meta: true
+  extra_files:
+    - glob: scripts/install.sh
+    - glob: scripts/install.ps1
+    - glob: npm-dist/yeelight-home-*.tgz
+
+nfpms:
+  - id: linux-packages
+    package_name: yeelight-home
+    ids:
+      - yeelight-home
+    vendor: Yeelight
+    homepage: https://github.com/Yeelight/yeelight-home
+    maintainer: Yeelight <support@yeelight.com>
+    description: Local Yeelight Home Runtime CLI.
+    license: Proprietary
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+    bindir: /usr/local/bin
+
+homebrew_casks:
+  - name: yeelight-home
+    ids:
+      - default
+    skip_upload: "{{ if eq (index .Env \"HOMEBREW_TAP_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    binaries:
+      - yeelight-home
+    repository:
+      owner: Yeelight
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/Yeelight/yeelight-home
+    description: Local Yeelight Home Runtime CLI.
+    license: Proprietary
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/yeelight-home"]
+          end
+
+scoops:
+  - name: yeelight-home
+    ids:
+      - default
+    skip_upload: "{{ if eq (index .Env \"SCOOP_BUCKET_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    repository:
+      owner: Yeelight
+      name: scoop-bucket
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    homepage: https://github.com/Yeelight/yeelight-home
+    description: Local Yeelight Home Runtime CLI.
+    license: Proprietary
+
+winget:
+  - name: yeelight-home
+    ids:
+      - default
+    skip_upload: "{{ if eq (index .Env \"WINGET_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    package_identifier: Yeelight.yeelight-home
+    publisher: Yeelight
+    package_name: Yeelight Home
+    license: Proprietary
+    homepage: https://github.com/Yeelight/yeelight-home
+    short_description: Local Yeelight Home Runtime CLI.
+    description: Local Runtime CLI used by Yeelight smart-home Skills.
+    tags:
+      - yeelight
+      - smart-home
+      - cli
+      - runtime
+    repository:
+      owner: "{{ if index .Env \"WINGET_REPOSITORY_OWNER\" }}{{ .Env.WINGET_REPOSITORY_OWNER }}{{ else }}Yeelight{{ end }}"
+      name: "{{ if index .Env \"WINGET_REPOSITORY_NAME\" }}{{ .Env.WINGET_REPOSITORY_NAME }}{{ else }}winget-pkgs-fork{{ end }}"
+      branch: "{{ if index .Env \"WINGET_REPOSITORY_BRANCH\" }}{{ .Env.WINGET_REPOSITORY_BRANCH }}{{ else }}yeelight-home-{{ .Version }}{{ end }}"
+      token: "{{ .Env.WINGET_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
+
+dockers_v2:
+  - id: ghcr
+    disable: "{{ if eq (index .Env \"GHCR_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    ids:
+      - yeelight-home
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/yeelight/yeelight-home
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+    sbom: true
+  - id: dockerhub
+    disable: "{{ if eq (index .Env \"DOCKERHUB_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    ids:
+      - yeelight-home
+    dockerfile: Dockerfile
+    images:
+      - yeelight/yeelight-home
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+      - linux/arm/v7
+    sbom: true
+
+snapcrafts:
+  - id: snap
+    disable: "{{ if eq (index .Env \"SNAPCRAFT_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    ids:
+      - yeelight-home
+    name: yeelight-home
+    title: Yeelight Home
+    summary: Local Yeelight Home Runtime CLI.
+    description: Local Runtime CLI used by Yeelight smart-home Skills.
+    grade: stable
+    confinement: strict
+    base: core22
+    license: Proprietary
+    publish: true
+    apps:
+      yeelight-home:
+        command: yeelight-home
+        plugs:
+          - home
+          - network
+
+aurs:
+  - name: yeelight-home-bin
+    ids:
+      - default
+    disable: "{{ if eq (index .Env \"AUR_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    skip_upload: "{{ if eq (index .Env \"AUR_PUBLISH_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    homepage: https://github.com/Yeelight/yeelight-home
+    description: Local Yeelight Home Runtime CLI.
+    license: Proprietary
+    maintainers:
+      - Yeelight <support@yeelight.com>
+    private_key: "{{ if index .Env \"AUR_KEY\" }}{{ .Env.AUR_KEY }}{{ else }}disabled{{ end }}"
+    git_url: "{{ if index .Env \"AUR_GIT_URL\" }}{{ .Env.AUR_GIT_URL }}{{ else }}ssh://aur@aur.archlinux.org/yeelight-home-bin.git{{ end }}"
+    provides:
+      - yeelight-home
+    conflicts:
+      - yeelight-home
+    package: |-
+      install -Dm755 "./yeelight-home" "${pkgdir}/usr/bin/yeelight-home"
+
+sboms:
+  - artifacts: archive

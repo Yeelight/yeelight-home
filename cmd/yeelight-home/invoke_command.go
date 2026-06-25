@@ -48,9 +48,6 @@ func (app *app) invoke(ctx context.Context, request contract.Request) (contract.
 	if region := requestString(request.Parameters["region"]); region != "" {
 		flags.values["region"] = region
 	}
-	if clientID := requestString(request.Parameters["clientId"]); clientID != "" {
-		flags.values["client-id"] = clientID
-	}
 	if houseID := requestHouseID(request); houseID != "" {
 		flags.values["house-id"] = houseID
 	}

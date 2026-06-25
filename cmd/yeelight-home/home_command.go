@@ -78,7 +78,7 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 		"houseId": houseID,
 	})
 	if metadata.Region == "" {
-		metadata.Region = "dev"
+		metadata.Region = defaultRuntimeRegion
 	}
 	if err := app.metadataStore.Save(metadata); err != nil {
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)

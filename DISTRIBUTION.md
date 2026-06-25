@@ -1,25 +1,145 @@
 # Distribution
 
-`yeelight-home` is distributed as a standalone CLI. The public source and release repository is `Yeelight/yeelight-home`; Skill packages should depend on the installed CLI through `YEELIGHT_HOME_BIN` or `PATH`.
+`yeelight-home` is distributed as a standalone CLI. Skill packages should not carry Runtime binaries. They depend on `YEELIGHT_HOME_BIN` or `yeelight-home` on `PATH`.
 
-## Channels
+## Channel Model
 
-| Channel | Status | User install path |
+| Channel | GoReleaser role | User install path |
 | --- | --- | --- |
-| GitHub Releases | Published | `curl -fsSL https://github.com/yeelight/yeelight-home/releases/latest/download/install.sh \| sh` |
-| Homebrew | Published | `brew install Yeelight/tap/yeelight-home` |
-| Scoop | Published | `scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket && scoop install yeelight-home` |
-| Debian package | Published | Download `yeelight-home_0.1.0_amd64.deb` or `yeelight-home_0.1.0_arm64.deb` from GitHub Releases |
-| Winget | Submitted | `winget install Yeelight.yeelight-home` after microsoft/winget-pkgs PR 392555 is merged |
-| npm | Published | `npm install -g yeelight-home` |
+| GitHub Releases | Primary release target for archives, installers, checksums, SBOMs, packages, and metadata. | `curl -fsSL https://github.com/Yeelight/yeelight-home/releases/latest/download/install.sh \| sh` |
+| Homebrew tap | Updates cask metadata in `Yeelight/homebrew-tap`. | `brew install Yeelight/tap/yeelight-home` |
+| Scoop bucket | Updates manifest metadata in `Yeelight/scoop-bucket`. | `scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket && scoop install yeelight-home` |
+| npm wrapper | Publishes the launcher package after GoReleaser assets exist. | `npm install -g yeelight-home` |
+| Linux packages | Builds `.deb`, `.rpm`, `.apk`, and Arch package artifacts through nFPM. | Download package assets from GitHub Releases. |
+| Winget | Generates or supports the Microsoft registry submission path. | `winget install Yeelight.yeelight-home` after registry acceptance. |
+| AUR | Publishes `yeelight-home-bin` only when AUR SSH is configured. | `yay -S yeelight-home-bin` after publication. |
+| Snap | Builds/publishes only when Snapcraft credentials and store review are ready. | `sudo snap install yeelight-home` after store visibility. |
+| Docker GHCR | Publishes multi-arch images when registry credentials are available. | `docker run --rm ghcr.io/yeelight/yeelight-home:latest version` |
+| Docker Hub | Publishes multi-arch images when Docker Hub credentials are available. | `docker run --rm yeelight/yeelight-home:latest version` |
+| pkg.go.dev | Indexes public `v*` module tags. | `https://pkg.go.dev/github.com/yeelight/yeelight-home` |
 
 ## Repository Layout Policy
 
-- Keep `Yeelight/yeelight-home` as the public Runtime source and release repository.
-- Keep `Yeelight/homebrew-tap` as a shared Homebrew tap for all Yeelight formulas. This is conventional because GitHub taps use the `homebrew-` prefix for the short `brew tap Yeelight/tap` form.
-- Scoop does not require a Yeelight organization repository or a dedicated repository. It only needs a Git bucket repository containing JSON manifests. `Yeelight/scoop-bucket` is valid and already published; if repository count becomes a problem, future Scoop manifests can move into a consolidated distribution repository, but the existing bucket should remain as a compatibility pointer.
-- Winget does not require a Yeelight repository. Official publication happens through `microsoft/winget-pkgs`; any personal fork is only a PR workspace.
-- npm does not require a GitHub repository. It requires an npm account or automation token with permission to publish `yeelight-home` or the chosen scoped package.
+- `Yeelight/yeelight-home` is the public Runtime source and release repository.
+- The monorepo remains the source of truth. Do not put a nested `.git` repository under `yeelight-smart-home/runtime`.
+- Runtime-only source is exported by `scripts/export-runtime-public.sh`.
+- `Yeelight/homebrew-tap` is a conventional shared Homebrew tap. It is not a runtime source repo, should stay small, and should contain only package manager metadata generated or reviewed for release.
+- `Yeelight/scoop-bucket` is a conventional shared Scoop bucket. Scoop can live in one consolidated Yeelight bucket repository; it does not need one repository per app.
+- Winget does not need a Yeelight organization repository. Publication happens through `microsoft/winget-pkgs`; any fork is only a PR workspace.
+- AUR does require an AUR Git repository per package, but that repository is not in the GitHub organization.
+- Snap is managed through Snapcraft, not a GitHub distribution repo.
+- Docker Hub and GHCR are image registries, not source repositories.
+
+## GoReleaser Decision
+
+Use GoReleaser for the public runtime release pipeline.
+
+Reasoning:
+
+- GoReleaser standardizes cross-platform Go builds, archives, checksums, Linux packages, Homebrew, Scoop, Docker images, SBOMs, AUR, Snap, and Winget workflows.
+- It replaces the old monorepo hand-written cross-compile/package/release workflow. The monorepo now mirrors source only; public release builds happen in `Yeelight/yeelight-home`.
+- It aligns with Go CLI user expectations and improves discoverability through package managers.
+- It still does not remove external gates: Winget review, AUR account/SSH, Snapcraft credentials, Docker Hub credentials, and Homebrew/Scoop write tokens are still required.
+- The public workflow automatically skips channels whose secrets are not configured, so optional channels do not block core GitHub Release assets, checksums, install scripts, npm wrapper assets and Linux package assets.
+- GoReleaser v2.16 marks Homebrew formula generation as deprecated. New automation uses Homebrew Casks; the existing Formula entry can remain as a compatibility install path if already published.
+
+Scope:
+
+- Use GoReleaser in the public `Yeelight/yeelight-home` repository.
+- Keep the monorepo export workflow responsible only for validating and pushing runtime-only public repo content.
+- Use standard public runtime tags such as `v0.1.1` for Go ecosystem compatibility.
+- Keep previous `yeelight-home-v*` release tags installable where they already exist, but do not use that prefix for future public runtime tags.
+
+## Tap And Bucket Retention
+
+Keep `Yeelight/homebrew-tap` and `Yeelight/scoop-bucket`.
+
+They remain useful and standard even after GoReleaser adoption:
+
+- Homebrew and Scoop install flows require a tap or bucket repository unless the package is accepted into broader upstream registries.
+- GoReleaser updates those repositories automatically; maintainers should not hand-edit generated version URLs and checksums except for emergency repair.
+- A shared `homebrew-tap` and `scoop-bucket` is cleaner than one repository per CLI. These repositories should contain only package metadata for Yeelight public tools.
+- They must not contain Runtime source, Skill assets, raw docs, credentials, generated release archives, or development governance material.
+
+Do not create extra Yeelight organization repositories for Winget, Snap, Docker, or pkg.go.dev. Those channels use external registries or the existing public Runtime repository.
+
+## Release Automation Targets
+
+GoReleaser configuration lives at:
+
+```text
+runtime/.goreleaser.yaml
+```
+
+The exported public repo includes:
+
+```text
+.goreleaser.yaml
+Dockerfile
+README.md
+INSTALL.md
+CONFIG.md
+DISTRIBUTION.md
+RELEASING.md
+cmd/
+internal/
+npm/
+scripts/
+go.mod
+go.sum
+```
+
+Target artifacts:
+
+- Archives:
+  - `darwin/amd64`
+  - `darwin/arm64`
+  - `linux/amd64`
+  - `linux/arm64`
+  - `linux/arm/v7`
+  - `windows/amd64`
+  - `windows/arm64`
+- Checksums:
+  - `checksums.txt`
+- Linux packages:
+  - `.deb`
+  - `.rpm`
+  - `.apk`
+  - Arch package artifact
+- Package-manager manifests:
+  - Homebrew cask in `Yeelight/homebrew-tap`
+  - Scoop manifest in `Yeelight/scoop-bucket`
+  - Winget manifest or PR flow once enabled
+  - AUR `yeelight-home-bin` once AUR SSH is configured
+  - Snap package once Snapcraft is configured
+- Container images:
+  - `ghcr.io/yeelight/yeelight-home`
+  - `yeelight/yeelight-home`
+
+## Required Release Settings
+
+GitHub Actions provides `GITHUB_TOKEN` automatically for GitHub Releases and GHCR publishing. Do not create a repository secret named `GITHUB_TOKEN`.
+
+| Secret | Purpose |
+| --- | --- |
+| `HOMEBREW_TAP_GITHUB_TOKEN` | Push Homebrew cask to `Yeelight/homebrew-tap`. |
+| `SCOOP_BUCKET_GITHUB_TOKEN` | Push Scoop manifest to `Yeelight/scoop-bucket`. |
+| `NPM_TOKEN` | Publish npm wrapper package. |
+| `DOCKERHUB_USERNAME` | Docker Hub login. |
+| `DOCKERHUB_TOKEN` | Docker Hub publish token. |
+| `AUR_KEY` | AUR SSH private key for `yeelight-home-bin`. |
+| `SNAPCRAFT_STORE_CREDENTIALS` | Snap store publish credentials. |
+| `WINGET_GITHUB_TOKEN` | Winget manifest PR token. |
+
+| Repository Variable | Purpose |
+| --- | --- |
+| `WINGET_REPOSITORY_OWNER` | Winget PR workspace fork owner. |
+| `WINGET_REPOSITORY_NAME` | Winget PR workspace fork name. |
+| `WINGET_REPOSITORY_BRANCH` | Optional Winget PR branch. Defaults to a release-specific branch. |
+| `AUR_GIT_URL` | Optional AUR Git URL override. Defaults to `ssh://aur@aur.archlinux.org/yeelight-home-bin.git`. |
+
+Only configure settings for channels that are ready to publish.
+Without Winget token and PR workspace variables, the public release workflow skips Winget and still publishes core GitHub Release artifacts.
 
 ## npm Package Model
 
@@ -33,6 +153,29 @@ The npm package is a thin installer and launcher:
 Environment overrides:
 
 - `YEELIGHT_HOME_REPO=owner/repo`
-- `YEELIGHT_HOME_VERSION=yeelight-home-v0.1.0` or `latest`
+- `YEELIGHT_HOME_VERSION=v0.1.1` or `latest`
 - `YEELIGHT_HOME_NPM_CACHE_DIR=/custom/cache`
 - `YEELIGHT_HOME_NPM_SKIP_INSTALL=1`
+
+## Skill Distribution Contract
+
+Skill packages include only:
+
+- Skill instructions.
+- Skill references and schemas.
+- Wrapper scripts that call `yeelight-home invoke --stdin`.
+
+Skill packages must not include:
+
+- Runtime source.
+- Runtime binaries.
+- Installer scripts.
+- Development docs.
+- Raw API docs or compatibility-service references.
+
+When Runtime is missing, the Skill should guide users to install `yeelight-home` from a public channel and then run:
+
+```sh
+yeelight-home auth status --json
+yeelight-home auth login --qr
+```

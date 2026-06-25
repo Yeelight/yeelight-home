@@ -44,7 +44,6 @@ func (app *app) runConfigGet(args []string, stdout io.Writer, stderr io.Writer) 
 		},
 		"profile":      context.Profile,
 		"region":       context.Region,
-		"clientId":     context.ClientID,
 		"houseId":      context.HouseID,
 		"tokenPresent": context.TokenPresent,
 		"tokenSource":  context.TokenSource,
@@ -52,7 +51,7 @@ func (app *app) runConfigGet(args []string, stdout io.Writer, stderr io.Writer) 
 	if flags.bool("json") {
 		return writeJSON(stdout, stderr, result)
 	}
-	_, _ = fmt.Fprintf(stdout, "profile=%s\nregion=%s\nclientId=%s\nhouseId=%s\ntokenPresent=%v\n", context.Profile, context.Region, context.ClientID, context.HouseID, context.TokenPresent)
+	_, _ = fmt.Fprintf(stdout, "profile=%s\nregion=%s\nhouseId=%s\ntokenPresent=%v\n", context.Profile, context.Region, context.HouseID, context.TokenPresent)
 	return exitOK
 }
 
@@ -70,12 +69,11 @@ func (app *app) runConfigSet(args []string, stdout io.Writer, stderr io.Writer) 
 	}
 	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
 		"region":   flags.string("region", ""),
-		"clientId": flags.string("client-id", ""),
 		"houseId":  flags.string("house-id", ""),
 		"qrDevice": flags.string("qr-device", ""),
 	})
 	if metadata.Region == "" {
-		metadata.Region = "dev"
+		metadata.Region = defaultRuntimeRegion
 	}
 	if err := app.metadataStore.Save(metadata); err != nil {
 		_, _ = fmt.Fprintf(stderr, "config set: %v\n", err)
@@ -102,9 +100,6 @@ func (app *app) runConfigUnset(args []string, stdout io.Writer, stderr io.Writer
 	}
 	if flags.bool("region") {
 		metadata.Region = ""
-	}
-	if flags.bool("client-id") {
-		metadata.ClientID = ""
 	}
 	if flags.bool("house-id") {
 		metadata.HouseID = ""
