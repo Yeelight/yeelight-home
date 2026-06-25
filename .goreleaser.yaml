@@ -123,6 +123,7 @@ scoops:
       name: scoop-bucket
       branch: main
       token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    directory: bucket
     homepage: https://github.com/Yeelight/yeelight-home
     description: Local Yeelight Home Runtime CLI.
     license: Proprietary
