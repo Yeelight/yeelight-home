@@ -17,13 +17,13 @@ func ResolveEndpoint(region string) (Endpoint, error) {
 	case "dev", "local-dev":
 		return Endpoint{Region: "dev", BaseURL: "http://api-dev.yeedev.com/apis/iot"}, nil
 	case "cn", "cloud_region_cn":
-		return Endpoint{Region: "cn", BaseURL: "https://api.yeelight.com"}, nil
+		return Endpoint{Region: "cn", BaseURL: "https://api.yeelight.com/apis/iot"}, nil
 	case "sg", "cloud_region_sg":
-		return Endpoint{Region: "sg", BaseURL: "https://api-sg.yeelight.com"}, nil
+		return Endpoint{Region: "sg", BaseURL: "https://api-sg.yeelight.com/apis/iot"}, nil
 	case "us", "cloud_region_us":
-		return Endpoint{Region: "us", BaseURL: "https://api-us.yeelight.com"}, nil
+		return Endpoint{Region: "us", BaseURL: "https://api-us.yeelight.com/apis/iot"}, nil
 	case "eu", "de", "cloud_region_eu":
-		return Endpoint{Region: "eu", BaseURL: "https://api-de.yeelight.com"}, nil
+		return Endpoint{Region: "eu", BaseURL: "https://api-de.yeelight.com/apis/iot"}, nil
 	default:
 		return Endpoint{}, errors.New("unknown Yeelight API region")
 	}

@@ -7,7 +7,7 @@
 | Channel | GoReleaser role | User install path |
 | --- | --- | --- |
 | GitHub Releases | Primary release target for archives, installers, checksums, SBOMs, packages, and metadata. | `curl -fsSL https://github.com/Yeelight/yeelight-home/releases/latest/download/install.sh \| sh` |
-| Homebrew tap | Updates cask metadata in `Yeelight/homebrew-tap`. | `brew install Yeelight/tap/yeelight-home` |
+| Homebrew tap | Updates Formula compatibility metadata and Cask metadata in `Yeelight/homebrew-tap`. | `brew install Yeelight/tap/yeelight-home` |
 | Scoop bucket | Updates manifest metadata in `Yeelight/scoop-bucket`. | `scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket && scoop install yeelight-home` |
 | npm wrapper | Publishes the launcher package after GoReleaser assets exist. | `npm install -g yeelight-home` |
 | Linux packages | Builds `.deb`, `.rpm`, `.apk`, and Arch package artifacts through nFPM. | Download package assets from GitHub Releases. |
@@ -41,7 +41,7 @@ Reasoning:
 - It aligns with Go CLI user expectations and improves discoverability through package managers.
 - It still does not remove external gates: Winget review, AUR account/SSH, Snapcraft credentials, Docker Hub credentials, and Homebrew/Scoop write tokens are still required.
 - The public workflow automatically skips channels whose secrets are not configured, so optional channels do not block core GitHub Release assets, checksums, install scripts, npm wrapper assets and Linux package assets.
-- GoReleaser v2.16 marks Homebrew formula generation as deprecated. New automation uses Homebrew Casks; the existing Formula entry can remain as a compatibility install path if already published.
+- GoReleaser v2.16 marks Homebrew formula generation as deprecated. New automation still updates the Formula compatibility path because many users install with `brew install Yeelight/tap/yeelight-home`; it also publishes the Cask path for the recommended newer Homebrew metadata model.
 
 Scope:
 
@@ -107,7 +107,7 @@ Target artifacts:
   - `.apk`
   - Arch package artifact
 - Package-manager manifests:
-  - Homebrew cask in `Yeelight/homebrew-tap`
+  - Homebrew Formula and Cask in `Yeelight/homebrew-tap`
   - Scoop manifest in `Yeelight/scoop-bucket`
   - Winget manifest or PR flow once enabled
   - AUR `yeelight-home-bin` once AUR SSH is configured

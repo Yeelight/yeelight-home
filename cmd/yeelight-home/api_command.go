@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
@@ -49,6 +51,11 @@ func (app *app) runAPISmoke(args []string, stdout io.Writer, stderr io.Writer) i
 	}
 	result, err := api.NewSmokeClient(contextInfo.Endpoint, nil).Run(context.Background(), credentials)
 	if err != nil {
+		var statusErr api.HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			_, _ = fmt.Fprintln(stderr, "api smoke: authorization failed; token is missing, invalid, expired, or not accepted by this region. Run yeelight-home auth login --qr --region "+contextInfo.Region+" or set a valid YEELIGHT_HOME_ACCESS_TOKEN.")
+			return exitInvalidInput
+		}
 		_, _ = fmt.Fprintf(stderr, "api smoke: %v\n", err)
 		return exitInternalError
 	}

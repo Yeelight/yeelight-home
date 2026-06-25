@@ -1,0 +1,23 @@
+[
+  {
+    "name": "rejects-invalid-status",
+    "value": {
+      "contractVersion": "1.0",
+      "requestId": "fixture-bad-response-1",
+      "status": "done",
+      "userMessage": "完成"
+    }
+  },
+  {
+    "name": "rejects-token-like-response",
+    "value": {
+      "contractVersion": "1.0",
+      "requestId": "fixture-bad-response-2",
+      "status": "success",
+      "userMessage": "完成",
+      "result": {
+        "accessToken": "not-allowed"
+      }
+    }
+  }
+]

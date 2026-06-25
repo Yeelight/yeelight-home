@@ -54,35 +54,65 @@ func newAppFromEnv() *app {
 
 func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "missing command")
-		return exitInvalidInput
+		return printRootHelp(stdout)
+	}
+	if code, ok := printHelpForArgs(stdout, stderr, args); ok {
+		return code
+	}
+	if isVersionArg(args[0]) {
+		return printVersion(stdout)
 	}
 	switch args[0] {
 	case "api":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "api")
+		}
 		return app.runAPI(args[1:], stdout, stderr)
 	case "approve":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "approve")
+		}
 		return app.runApprove(args[1:], stdout, stderr)
 	case "auth":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "auth")
+		}
 		return app.runAuth(args[1:], stdout, stderr)
 	case "config":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "config")
+		}
 		return app.runConfig(args[1:], stdout, stderr)
 	case "doctor":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "doctor")
+		}
 		return app.runDoctor(args[1:], stdout, stderr)
 	case "dev":
 		return app.runDev(args[1:], stdout, stderr)
 	case "home":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "home")
+		}
 		return app.runHome(args[1:], stdout, stderr)
 	case "invoke":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "invoke")
+		}
 		return app.runInvoke(args[1:], stdin, stdout, stderr)
 	case "profile":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "profile")
+		}
 		return app.runProfile(args[1:], stdout, stderr)
-	case "version":
-		_, _ = fmt.Fprintf(stdout, "yeelight-home %s\n", version)
-		return exitOK
 	default:
 		_, _ = fmt.Fprintf(stderr, "unsupported command %q\n", args[0])
 		return exitInvalidInput
 	}
+}
+
+func hasSubcommandHelp(args []string) bool {
+	return len(args) > 0 && isHelpArg(args[0])
 }
 
 func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int {

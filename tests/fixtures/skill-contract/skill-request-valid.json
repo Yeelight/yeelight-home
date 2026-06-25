@@ -1,0 +1,1325 @@
+[
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-room-update-1",
+    "locale": "zh-CN",
+    "utterance": "把客厅改成会客厅并设置默认网关",
+    "intent": "room.update",
+    "targets": [
+      {
+        "entityType": "room",
+        "id": "room-1",
+        "name": "客厅"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "roomId": "room-1",
+      "name": "会客厅",
+      "gatewayDeviceId": "gw-1",
+      "seq": 2
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-device-move-room-batch-1",
+    "locale": "zh-CN",
+    "utterance": "把主灯和筒灯批量移动到卧室",
+    "intent": "device.move_room.batch",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "deviceId": "device-1",
+          "roomId": "room-2"
+        },
+        {
+          "deviceId": "device-2",
+          "roomId": "room-2"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-device-remove-r3-1",
+    "locale": "zh-CN",
+    "utterance": "删除废弃的测试灯",
+    "intent": "device.remove",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "device-1",
+        "name": "测试灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "deviceId": "device-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-device-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出这个家的设备",
+    "intent": "device.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-create-1",
+    "locale": "zh-CN",
+    "utterance": "创建一个叫新家的家庭",
+    "intent": "home.create",
+    "parameters": {
+      "name": "新家",
+      "description": "常住房",
+      "areaCode": "CN-310000",
+      "areaName": "上海"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-geo-area-search-1",
+    "locale": "zh-CN",
+    "utterance": "搜索上海的家庭地区编码",
+    "intent": "geo_area.search",
+    "parameters": {
+      "name": "上海"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-geo-area-children-1",
+    "locale": "zh-CN",
+    "utterance": "列出可选城市地区",
+    "intent": "geo_area.children.list",
+    "parameters": {
+      "parentId": 0
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-scene-update-1",
+    "locale": "zh-CN",
+    "utterance": "把回家灯光情景改成打开主灯",
+    "intent": "scene.update",
+    "targets": [
+      {
+        "entityType": "scene",
+        "id": "scene-1",
+        "name": "回家灯光"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "sceneId": "scene-1",
+      "name": "回家灯光更新",
+      "details": [
+        {
+          "typeId": 2,
+          "resId": "device-1",
+          "rank": 0,
+          "action": 0,
+          "params": {
+            "set": {
+              "p": true
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-summary-1",
+    "locale": "zh-CN",
+    "utterance": "看看我的家庭",
+    "intent": "home.summary"
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出我账号下所有家庭",
+    "intent": "home.list"
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-search-1",
+    "locale": "zh-CN",
+    "utterance": "搜索父母家",
+    "intent": "home.search",
+    "parameters": {
+      "name": "父母"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-stat-1",
+    "locale": "zh-CN",
+    "utterance": "查看家庭统计",
+    "intent": "home.stat.get",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-member-current-1",
+    "locale": "zh-CN",
+    "utterance": "查看当前家庭成员信息",
+    "intent": "home.member.current.get",
+    "parameters": {
+      "houseId": "house-1",
+      "uid": "1234567890"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-entity-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出客厅的设备",
+    "intent": "entity.list",
+    "homeRef": {
+      "name": "默认家庭"
+    },
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-room-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出这个家的房间",
+    "intent": "room.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-room-search-1",
+    "locale": "zh-CN",
+    "utterance": "搜索卧室",
+    "intent": "room.search",
+    "parameters": {
+      "houseId": "house-1",
+      "name": "卧"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-group-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出这个家的分组",
+    "intent": "group.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-group-search-1",
+    "locale": "zh-CN",
+    "utterance": "搜索二楼分组",
+    "intent": "group.search",
+    "parameters": {
+      "houseId": "house-1",
+      "name": "二楼"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-entity-get-1",
+    "locale": "zh-CN",
+    "utterance": "看看主灯",
+    "intent": "entity.get",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "device-1",
+        "name": "主灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-entity-capabilities-1",
+    "locale": "zh-CN",
+    "utterance": "主灯能做什么",
+    "intent": "entity.capabilities",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "device-1",
+        "name": "主灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-gateway-thread-1",
+    "locale": "zh-CN",
+    "utterance": "查看网关 Thread 信息",
+    "intent": "gateway.thread.get",
+    "targets": [
+      {
+        "entityType": "gateway",
+        "id": "gateway-1",
+        "name": "客厅网关"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-member-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看家庭成员",
+    "intent": "home.member.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-sort-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看客厅主灯在房间首页里的排序",
+    "intent": "home.sort.list",
+    "parameters": {
+      "houseId": "house-1",
+      "typeId": 2,
+      "resId": "device-1",
+      "roomId": "room-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-favorite-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看首页收藏列表",
+    "intent": "favorite.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-favorite-plan-1",
+    "locale": "zh-CN",
+    "utterance": "帮我规划首页收藏怎么排更合理",
+    "intent": "favorite.plan",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-capabilities-1",
+    "locale": "zh-CN",
+    "utterance": "当前自动化能力支持哪些操作",
+    "intent": "automation.capabilities",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-lighting-design-apply-1",
+    "locale": "zh-CN",
+    "utterance": "把客厅应用观影灯光设计",
+    "intent": "lighting.design.apply",
+    "targets": [
+      {
+        "entityType": "room",
+        "id": "room-1",
+        "name": "客厅"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "mood": "观影"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-room-delete-1",
+    "locale": "zh-CN",
+    "utterance": "删除临时测试房间",
+    "intent": "room.delete",
+    "targets": [
+      {
+        "entityType": "room",
+        "id": "room-temp-1",
+        "name": "临时测试房间"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "roomId": "room-temp-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-delete-1",
+    "locale": "zh-CN",
+    "utterance": "删除离家关灯自动化",
+    "intent": "automation.delete",
+    "targets": [
+      {
+        "entityType": "automation",
+        "id": "automation-2",
+        "name": "离家关灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "automationId": "automation-2"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-panel-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出家里的面板",
+    "intent": "panel.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-area-update-1",
+    "locale": "zh-CN",
+    "utterance": "把南区改名为公共区并关联客厅",
+    "intent": "area.update",
+    "parameters": {
+      "houseId": "house-1",
+      "areaId": "area-1",
+      "name": "公共区",
+      "roomIds": [
+        "room-1"
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-area-detail-get-1",
+    "locale": "zh-CN",
+    "utterance": "查看一楼区域详情",
+    "intent": "area.detail.get",
+    "parameters": {
+      "houseId": "house-1",
+      "areaId": "area-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-group-update-1",
+    "locale": "zh-CN",
+    "utterance": "把客厅灯组改名为主灯组并移动到卧室",
+    "intent": "group.update",
+    "targets": [
+      {
+        "entityType": "group",
+        "id": "group-1",
+        "name": "客厅灯组"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "groupId": "group-1",
+      "name": "主灯组",
+      "roomId": "room-2"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-knob-get-1",
+    "locale": "zh-CN",
+    "utterance": "查看客厅旋钮详情",
+    "intent": "knob.get",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "knob-1",
+        "name": "客厅旋钮"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-panel-get-1",
+    "locale": "zh-CN",
+    "utterance": "查看客厅面板详情",
+    "intent": "panel.get",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "panel-1",
+        "name": "客厅面板"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-panel-button-type-1",
+    "locale": "zh-CN",
+    "utterance": "查看客厅面板单击按键配置",
+    "intent": "panel.button.type.get",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "panel-1",
+        "name": "客厅面板"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "buttonType": "click"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-sensor-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出家里的传感器",
+    "intent": "sensor.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-device-energy-1",
+    "locale": "zh-CN",
+    "utterance": "查看主灯耗电",
+    "intent": "device.energy.summary",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "device-1",
+        "name": "主灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-upgrade-progress-1",
+    "locale": "zh-CN",
+    "utterance": "查看主灯升级进度",
+    "intent": "upgrade.progress.get",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "device-1",
+        "name": "主灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-progress-get-1",
+    "locale": "zh-CN",
+    "utterance": "查看同步任务进度",
+    "intent": "progress.get",
+    "parameters": {
+      "houseId": "house-1",
+      "key": "job-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-app-upgrade-latest-1",
+    "locale": "zh-CN",
+    "utterance": "查看用户版安卓 App 最新升级版本",
+    "intent": "app_upgrade.latest.get",
+    "parameters": {
+      "type": "1",
+      "osType": "1",
+      "languageCode": "zh-CN"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-ota-version-file-batch-1",
+    "locale": "zh-CN",
+    "utterance": "按版本查看固件文件",
+    "intent": "ota.version_file.batch_list",
+    "parameters": {
+      "firmwareType": "main",
+      "version": 44,
+      "language": "zh",
+      "script": "Hans",
+      "region": "CN"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-node-property-config-1",
+    "locale": "zh-CN",
+    "utterance": "查看主灯节点属性配置",
+    "intent": "node.property_config.get",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "device-1",
+        "name": "主灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "nodeType": "device"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-ai-voice-product-list-1",
+    "locale": "zh-CN",
+    "utterance": "哪些产品支持 AI 语音识别",
+    "intent": "ai_voice.product.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-schema-get-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品 1001 的物模型",
+    "intent": "thing.schema.get",
+    "parameters": {
+      "houseId": "house-1",
+      "productId": "1001"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-schema-event-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品 1001 的事件定义",
+    "intent": "thing.schema.event.list",
+    "parameters": {
+      "houseId": "house-1",
+      "productId": "1001"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-product-info-batch-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品 1001 的 v2 产品定义",
+    "intent": "thing.product.info.batch_get",
+    "parameters": {
+      "houseId": "house-1",
+      "productId": "1001"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-product-info-v3-batch-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品 1001 的第 2 版产品定义",
+    "intent": "thing.product.info.v3.batch_get",
+    "parameters": {
+      "houseId": "house-1",
+      "productId": "1001",
+      "version": 2
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-product-list-v3-1",
+    "locale": "zh-CN",
+    "utterance": "查看版本化产品列表",
+    "intent": "thing.product.list.v3",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-favorite-add-1",
+    "locale": "zh-CN",
+    "utterance": "把主灯加入首页收藏",
+    "intent": "favorite.add",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "device-1",
+        "name": "主灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "typeId": 2,
+      "resId": "device-1",
+      "rank": 1
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-sort-configure-1",
+    "locale": "zh-CN",
+    "utterance": "把客厅主灯排到房间设备第一位",
+    "intent": "home.sort.configure",
+    "parameters": {
+      "houseId": "house-1",
+      "type": "room",
+      "target": "room-1",
+      "roomId": "room-1",
+      "items": [
+        {
+          "typeId": 2,
+          "resId": "device-1",
+          "rank": 1
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-favorite-batch-add-1",
+    "locale": "zh-CN",
+    "utterance": "把主灯和晚安情景加入首页收藏",
+    "intent": "favorite.batch_add",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "typeId": 2,
+          "resId": "device-1",
+          "rank": 1
+        },
+        {
+          "typeId": 6,
+          "resId": "scene-1",
+          "rank": 2
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-panel-button-configure-1",
+    "locale": "zh-CN",
+    "utterance": "把客厅面板第一个按键绑定回家情景",
+    "intent": "panel.button.configure",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "panel-1",
+        "name": "客厅面板"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "buttons": [
+        {
+          "id": "btn-1",
+          "keyValue": 1,
+          "resId": "scene-1",
+          "resType": 6,
+          "visible": 1
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-panel-button-event-update-1",
+    "locale": "zh-CN",
+    "utterance": "把客厅面板单击动作改成回家情景",
+    "intent": "panel.button_event.update",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "panel-1",
+        "name": "客厅面板"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "buttonEventId": "event-1",
+      "alias": "单击",
+      "details": [
+        {
+          "resId": "scene-1",
+          "typeId": 6
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-panel-button-event-batch-update-1",
+    "locale": "zh-CN",
+    "utterance": "批量更新客厅面板单击和双击动作",
+    "intent": "panel.button_event.batch_update",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "panel-1",
+        "name": "客厅面板"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "buttonEvents": [
+        {
+          "buttonEventId": "event-1",
+          "alias": "单击",
+          "details": [
+            {
+              "resId": "scene-1",
+              "typeId": 6
+            }
+          ]
+        },
+        {
+          "buttonEventId": "event-2",
+          "alias": "双击",
+          "details": [
+            {
+              "resId": "scene-2",
+              "typeId": 6
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-panel-button-event-reset-1",
+    "locale": "zh-CN",
+    "utterance": "清空客厅面板单击动作绑定",
+    "intent": "panel.button_event.reset",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "panel-1",
+        "name": "客厅面板"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "buttonEventId": "event-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-list-page-1",
+    "locale": "zh-CN",
+    "utterance": "分页查看自动化列表",
+    "intent": "automation.list.page",
+    "parameters": {
+      "houseId": "house-1",
+      "pageNo": 1,
+      "pageSize": 20
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-detail-get-1",
+    "locale": "zh-CN",
+    "utterance": "查看回家开灯自动化详情",
+    "intent": "automation.detail.get",
+    "parameters": {
+      "houseId": "house-1",
+      "automationId": "auto-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-knob-configure-1",
+    "locale": "zh-CN",
+    "utterance": "把客厅旋钮调整为控制回家情景",
+    "intent": "knob.configure",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "knob-1",
+        "name": "客厅旋钮"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "details": [
+        {
+          "id": "detail-1",
+          "index": 1,
+          "mode": "scene",
+          "resId": "scene-1"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-knob-reset-1",
+    "locale": "zh-CN",
+    "utterance": "清空客厅旋钮第一个键位绑定",
+    "intent": "knob.reset",
+    "targets": [
+      {
+        "entityType": "device",
+        "id": "knob-1",
+        "name": "客厅旋钮"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "index": 1
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-update-1",
+    "locale": "zh-CN",
+    "utterance": "把回家开灯自动化改成18点触发",
+    "intent": "automation.update",
+    "targets": [
+      {
+        "entityType": "automation",
+        "id": "automation-1",
+        "name": "回家开灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "automationId": "automation-1",
+      "name": "回家开灯更新",
+      "startTime": "00:00:00",
+      "endTime": "23:59:59",
+      "repeatType": 2,
+      "repeatValue": "0x7f",
+      "params": {
+        "type": "and",
+        "conditions": [
+          {
+            "type": "alarm",
+            "clock": "18:00:00"
+          }
+        ]
+      },
+      "actions": [
+        {
+          "typeId": 2,
+          "resId": "device-1",
+          "rank": 0,
+          "params": {
+            "set": {
+              "power": true
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-enable-1",
+    "locale": "zh-CN",
+    "utterance": "启用回家开灯自动化",
+    "intent": "automation.enable",
+    "targets": [
+      {
+        "entityType": "automation",
+        "id": "automation-1",
+        "name": "回家开灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "automationId": "automation-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-disable-1",
+    "locale": "zh-CN",
+    "utterance": "停用离家关灯自动化",
+    "intent": "automation.disable",
+    "targets": [
+      {
+        "entityType": "automation",
+        "id": "automation-2",
+        "name": "离家关灯"
+      }
+    ],
+    "parameters": {
+      "houseId": "house-1",
+      "automationId": "automation-2"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-execution-undo-1",
+    "locale": "zh-CN",
+    "utterance": "撤销刚才那个待确认计划",
+    "intent": "execution.undo",
+    "parameters": {
+      "houseId": "house-1",
+      "planId": "plan-example-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-favorite-delete-1",
+    "locale": "zh-CN",
+    "utterance": "删除主灯首页收藏",
+    "intent": "favorite.delete",
+    "parameters": {
+      "houseId": "house-1",
+      "favoriteId": "favorite-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-favorite-batch-delete-1",
+    "locale": "zh-CN",
+    "utterance": "批量删除主灯和晚安情景的首页收藏",
+    "intent": "favorite.batch_delete",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "favoriteId": "favorite-1"
+        },
+        {
+          "favoriteId": "favorite-2"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-room-batch-delete-1",
+    "locale": "zh-CN",
+    "utterance": "删除客厅和卧室两个房间",
+    "intent": "room.batch_delete",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "roomId": "room-1"
+        },
+        {
+          "roomId": "room-2"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-area-batch-delete-1",
+    "locale": "zh-CN",
+    "utterance": "删除一楼和二楼两个区域",
+    "intent": "area.batch_delete",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "areaId": "area-1"
+        },
+        {
+          "areaId": "area-2"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-group-batch-delete-1",
+    "locale": "zh-CN",
+    "utterance": "批量删除客厅灯组和餐厅灯组",
+    "intent": "group.batch_delete",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "groupId": "group-1"
+        },
+        {
+          "groupId": "group-2"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-scene-batch-delete-1",
+    "locale": "zh-CN",
+    "utterance": "批量删除回家和晚安两个情景",
+    "intent": "scene.batch_delete",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "sceneId": "scene-1"
+        },
+        {
+          "sceneId": "scene-2"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-batch-delete-1",
+    "locale": "zh-CN",
+    "utterance": "批量删除回家开灯和离家关灯两个自动化",
+    "intent": "automation.batch_delete",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "automationId": "automation-1"
+        },
+        {
+          "automationId": "automation-2"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-lock-all-1",
+    "locale": "zh-CN",
+    "utterance": "锁定这个家里所有设备的重置能力",
+    "intent": "home.lock_all",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-entity-rename-batch-1",
+    "locale": "zh-CN",
+    "utterance": "批量重命名主灯和晚安情景",
+    "intent": "entity.rename.batch",
+    "parameters": {
+      "houseId": "house-1",
+      "items": [
+        {
+          "entityType": "device",
+          "id": "device-1",
+          "newName": "阅读主灯"
+        },
+        {
+          "entityType": "scene",
+          "id": "scene-1",
+          "newName": "睡前晚安"
+        }
+      ]
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-device-virtual-count-1",
+    "locale": "zh-CN",
+    "utterance": "查看这个家庭的虚拟设备数量",
+    "intent": "device.virtual_count.get",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-node-sorted-device-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看客厅设备排序",
+    "intent": "node.sorted_device.list",
+    "parameters": {
+      "houseId": "house-1",
+      "resType": "1",
+      "resId": "room-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-scene-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出这个家的所有情景",
+    "intent": "scene.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-automation-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出这个家的所有自动化",
+    "intent": "automation.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-scene-scoped-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出客厅的情景",
+    "intent": "scene.scoped.list",
+    "parameters": {
+      "houseId": "house-1",
+      "roomId": "room-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-schedule-job-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出这个家的定时任务",
+    "intent": "schedule_job.list",
+    "parameters": {
+      "houseId": "house-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-message-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看我的消息中心",
+    "intent": "message.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-domain-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品域目录",
+    "intent": "thing.product_domain.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-faq-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看这个产品的帮助问题",
+    "intent": "thing.product_faq.list",
+    "parameters": {
+      "productId": "1001"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-faq-detail-1",
+    "locale": "zh-CN",
+    "utterance": "查看这条产品帮助详情",
+    "intent": "thing.product_faq.detail.get",
+    "parameters": {
+      "faqId": "faq-1"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-category-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出物模型品类",
+    "intent": "thing.category.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-component-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出物模型组件",
+    "intent": "thing.component.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-component-get-1",
+    "locale": "zh-CN",
+    "utterance": "查看亮度组件定义",
+    "intent": "thing.component.get",
+    "parameters": {
+      "componentId": "81"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-thing-property-list-1",
+    "locale": "zh-CN",
+    "utterance": "列出物模型属性",
+    "intent": "thing.property.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-faq-type-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品 FAQ 类型",
+    "intent": "thing.product_faq.type.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-faq-item-type-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品 FAQ 项类型",
+    "intent": "thing.product_faq.item_type.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-faq-locale-list-1",
+    "locale": "zh-CN",
+    "utterance": "查看产品 FAQ 支持哪些语言",
+    "intent": "thing.product_faq.locale.list",
+    "parameters": {}
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-faq-page-list-1",
+    "locale": "zh-CN",
+    "utterance": "分页查看这个产品的帮助 FAQ",
+    "intent": "thing.product_faq.page.list",
+    "parameters": {
+      "productId": "pid-1",
+      "pageNo": 1,
+      "pageSize": 20
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-faq-page-detail-list-1",
+    "locale": "zh-CN",
+    "utterance": "分页查看这个产品的帮助 FAQ 详情",
+    "intent": "thing.product_faq.page_detail.list",
+    "parameters": {
+      "pid": "pid-1",
+      "pageNo": 1,
+      "pageSize": 20
+    }
+  }
+]

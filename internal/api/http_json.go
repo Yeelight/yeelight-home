@@ -10,6 +10,17 @@ import (
 	"strings"
 )
 
+type HTTPStatusError struct {
+	StatusCode int
+}
+
+func (err HTTPStatusError) Error() string {
+	if err.StatusCode == http.StatusUnauthorized || err.StatusCode == http.StatusForbidden {
+		return fmt.Sprintf("authorization failed with HTTP %d", err.StatusCode)
+	}
+	return fmt.Sprintf("endpoint returned HTTP %d", err.StatusCode)
+}
+
 type requestCredentials struct {
 	Authorization string
 	ClientID      string
@@ -55,7 +66,7 @@ func callJSONBody(ctx context.Context, client *http.Client, method string, url s
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("endpoint returned HTTP %d", response.StatusCode)
+		return nil, HTTPStatusError{StatusCode: response.StatusCode}
 	}
 	parsed := map[string]any{}
 	if len(data) > 0 {

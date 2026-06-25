@@ -84,7 +84,7 @@ Do not add a second `softprops/action-gh-release` publish step for Runtime asset
 
 The generated public repository workflow computes a `--skip` list before running GoReleaser:
 
-- Missing Homebrew token skips Homebrew cask updates.
+- Missing Homebrew token skips Homebrew Formula and Cask updates.
 - Missing Scoop token skips Scoop manifest updates.
 - Missing Winget token skips Winget manifest publication.
 - Missing AUR SSH key skips AUR publication.
@@ -95,11 +95,11 @@ This keeps the core GitHub Release, checksums, install scripts, npm tarball asse
 
 ## Required Release Settings
 
-Minimum:
+No manual secret is required for the core GitHub Release and GHCR path. GitHub Actions provides `GITHUB_TOKEN` automatically for the public `Yeelight/yeelight-home` workflow. Do not add it as a repository secret.
 
-- `NPM_TOKEN`
+Optional:
 
-`GITHUB_TOKEN` is provided by GitHub Actions automatically for GitHub Releases and GHCR. Do not add it as a repository secret.
+- `NPM_TOKEN` for publishing the npm launcher package.
 
 Monorepo mirror to the public runtime repository:
 
@@ -111,6 +111,13 @@ Configure this secret in the CI environment that runs the mirror step:
 - GitLab-hosted monorepo mirror: protected and masked CI/CD variable `YEELIGHT_HOME_RELEASE_TOKEN`.
 
 Do not put this token in the public `Yeelight/yeelight-home` source tree or in any checked-in configuration file.
+
+## Docker Registry Visibility
+
+The release workflow publishes `ghcr.io/yeelight/yeelight-home` and `yeelightdev/yeelight-home` images.
+
+- Docker Hub image visibility can be verified with a registry pull using package credentials.
+- GHCR is published from the public release workflow and should be treated as part of the normal release surface.
 
 Package manager automation:
 
@@ -165,8 +172,8 @@ Use:
 brew install Yeelight/tap/yeelight-home
 ```
 
-An existing Formula may remain available as a compatibility path. New GoReleaser automation uses Homebrew Casks because GoReleaser v2.16 marks formula generation as deprecated.
-Keep this repository. It is a package-manager tap, not a Runtime source repository, and GoReleaser needs a writable target for cask metadata.
+GoReleaser v2.16 marks formula generation as deprecated, but this release pipeline still updates the Formula compatibility path because `brew install Yeelight/tap/yeelight-home` resolves through Formula in existing user installs. It also updates the Cask path for the recommended newer Homebrew metadata model.
+Keep this repository. It is a package-manager tap, not a Runtime source repository, and GoReleaser needs a writable target for Formula and Cask metadata.
 
 ### Scoop
 
@@ -192,11 +199,50 @@ Do not create a permanent Yeelight organization repository for Winget. A fork is
 
 ### AUR
 
-The planned package name is `yeelight-home-bin`. AUR requires a package Git repository and an SSH deploy key.
+The planned package name is `yeelight-home-bin`. AUR requires an AUR account, an uploaded SSH public key, and an unencrypted SSH private key available to the release workflow.
+
+Setup:
+
+1. Create or log in to an AUR account.
+2. Generate a dedicated unencrypted deploy key for this package.
+3. Upload the public key to the AUR account.
+4. Keep `AUR_GIT_URL` as `ssh://aur@aur.archlinux.org/yeelight-home-bin.git` unless the package base changes.
+5. Store the private key contents in the public runtime repository secret `AUR_KEY`.
+
+Example key generation on a maintainer machine:
+
+```sh
+ssh-keygen -t ed25519 -C "yeelight-home-bin aur release" -f ./yeelight-home-bin-aur -N ""
+```
+
+Upload `yeelight-home-bin-aur.pub` to the AUR account, then configure the release repository:
+
+```sh
+gh secret set AUR_KEY -R Yeelight/yeelight-home < ./yeelight-home-bin-aur
+gh variable set AUR_GIT_URL -R Yeelight/yeelight-home --body "ssh://aur@aur.archlinux.org/yeelight-home-bin.git"
+```
+
+Delete the local private key after it is stored securely, unless the maintainer has a deliberate offline backup policy.
+
+Do not put the private key in `.goreleaser.yaml`, shell scripts, documentation, or local config files. GoReleaser reads it from `AUR_KEY` at release time and skips AUR publication when the secret is absent.
 
 ### Snap
 
-Snap publication requires Snapcraft credentials and store review. Snapcraft cannot always build inside containerized CI runners, so treat it as optional until the release runner is prepared.
+Snap publication requires a registered Snap name and exported Snapcraft store credentials.
+
+Setup from an Ubuntu/Linux environment with Snapcraft available:
+
+```sh
+snapcraft login
+snapcraft register yeelight-home
+snapcraft export-login --snaps=yeelight-home \
+  --acls package_access,package_push,package_update,package_release \
+  snapcraft-login.txt
+```
+
+Store the full contents of `snapcraft-login.txt` in the public runtime repository secret `SNAPCRAFT_STORE_CREDENTIALS`, then delete the local file after the secret is configured.
+
+Snapcraft cannot always build or authenticate cleanly on macOS or inside unavailable Docker daemons. If local Snapcraft is unavailable, generate this credential on Ubuntu/Linux or a prepared CI runner. GoReleaser skips Snap publication when `SNAPCRAFT_STORE_CREDENTIALS` is absent.
 
 ### Docker
 

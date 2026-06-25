@@ -216,7 +216,7 @@ One tagged public `v*` release can produce:
 
 - macOS, Linux, Windows archives for `amd64`, `arm64`, and Linux `armv7`.
 - Checksums and release metadata.
-- Homebrew tap cask automation, with existing Formula compatibility where already published.
+- Homebrew tap Formula compatibility and Cask automation.
 - Scoop bucket manifest.
 - Linux packages through nFPM: `.deb`, `.rpm`, `.apk`, and Arch package artifacts.
 - Docker/GHCR and Docker Hub multi-arch images.

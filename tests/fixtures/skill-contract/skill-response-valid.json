@@ -1,0 +1,151 @@
+[
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-home-summary-1",
+    "status": "success",
+    "userMessage": "已找到 1 个家庭。",
+    "result": {
+      "region": "dev",
+      "houseCount": 1,
+      "houses": [
+        {
+          "id": "house-1",
+          "name": "默认家庭"
+        }
+      ]
+    },
+    "warnings": [],
+    "traceId": "home-summary-readonly",
+    "metrics": {
+      "apiCalls": 1,
+      "cacheHits": 0
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-entity-list-1",
+    "status": "success",
+    "userMessage": "已找到 1 个实体。",
+    "result": {
+      "region": "dev",
+      "houseId": "house-1",
+      "total": 1,
+      "counts": {
+        "room": 1
+      },
+      "entities": [
+        {
+          "type": "room",
+          "id": "room-1",
+          "name": "客厅",
+          "houseId": "house-1"
+        }
+      ]
+    },
+    "warnings": [],
+    "traceId": "entity-list-readonly",
+    "metrics": {
+      "apiCalls": 5,
+      "cacheHits": 0
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-entity-get-1",
+    "status": "success",
+    "userMessage": "已找到实体：主灯。",
+    "result": {
+      "region": "dev",
+      "houseId": "house-1",
+      "entity": {
+        "type": "device",
+        "id": "device-1",
+        "name": "主灯",
+        "houseId": "house-1",
+        "roomId": "room-1",
+        "online": true
+      },
+      "matchedBy": "id"
+    },
+    "warnings": [],
+    "traceId": "entity-get-readonly",
+    "metrics": {
+      "apiCalls": 5,
+      "cacheHits": 0
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-entity-capabilities-1",
+    "status": "success",
+    "userMessage": "已返回 主灯 的当前可确认能力边界。",
+    "result": {
+      "region": "dev",
+      "houseId": "house-1",
+      "entity": {
+        "type": "device",
+        "id": "device-1",
+        "name": "主灯",
+        "houseId": "house-1",
+        "roomId": "room-1",
+        "online": true
+      },
+      "capabilitySource": "entity.list_projection",
+      "schemaStatus": "not_connected",
+      "operations": {
+        "read": ["entity.get", "entity.list", "entity.capabilities"],
+        "write": []
+      },
+      "limitations": [
+        "当前 Runtime 尚未接入设备实例级 product schema adapter。",
+        "不会根据静态物模型推断设备控制能力。",
+        "写操作保持禁用，直到 pending-plan、确认和写后验证链路完成。"
+      ]
+    },
+    "warnings": [
+      "设备实例级能力需要后续接入 getProductSchema(pid, houseId, deviceId) 等价只读接口后才能返回。"
+    ],
+    "traceId": "entity-capabilities-readonly",
+    "metrics": {
+      "apiCalls": 5,
+      "cacheHits": 0
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-favorite-add-1",
+    "status": "confirmation_required",
+    "userMessage": "需要确认后再新增首页收藏。",
+    "result": {
+      "region": "dev",
+      "houseId": "house-1",
+      "capability": "favorite.add",
+      "persistentWrites": true,
+      "cloudWrites": true
+    },
+    "confirmation": {
+      "planId": "plan-fixture-favorite-add",
+      "intent": "favorite.add",
+      "risk": "R2",
+      "summary": "新增首页收藏",
+      "expiresAt": 1782223212,
+      "preconditions": [
+        "提交前重新读取当前收藏",
+        "收藏资源必须属于当前家庭",
+        "提交后通过 favorite.list 验证收藏存在"
+      ],
+      "payloadPreview": {
+        "houseId": "house-1",
+        "typeId": 2,
+        "resId": "device-1",
+        "rank": 1
+      }
+    },
+    "warnings": [],
+    "traceId": "pending-plan-created",
+    "metrics": {
+      "apiCalls": 6,
+      "cacheHits": 0
+    }
+  }
+]

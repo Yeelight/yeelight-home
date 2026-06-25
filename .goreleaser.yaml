@@ -91,6 +91,23 @@ nfpms:
       - archlinux
     bindir: /usr/local/bin
 
+brews:
+  - name: yeelight-home
+    ids:
+      - default
+    skip_upload: "{{ if eq (index .Env \"HOMEBREW_TAP_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
+    repository:
+      owner: Yeelight
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/Yeelight/yeelight-home
+    description: Local Yeelight Home Runtime CLI.
+    license: Proprietary
+    test: |
+      assert_match "yeelight-home #{version}", shell_output("#{bin}/yeelight-home version")
+
 homebrew_casks:
   - name: yeelight-home
     ids:

@@ -1,0 +1,23 @@
+[
+  {
+    "name": "rejects-raw-url-field",
+    "value": {
+      "contractVersion": "1.0",
+      "requestId": "fixture-bad-1",
+      "locale": "zh-CN",
+      "utterance": "测试",
+      "intent": "home.summary",
+      "url": "not-allowed"
+    }
+  },
+  {
+    "name": "rejects-unknown-intent",
+    "value": {
+      "contractVersion": "1.0",
+      "requestId": "fixture-bad-2",
+      "locale": "zh-CN",
+      "utterance": "测试",
+      "intent": "raw.api.call"
+    }
+  }
+]

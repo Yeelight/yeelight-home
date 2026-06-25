@@ -126,7 +126,7 @@ func extractHouseSummaries(response map[string]any) []HouseSummary {
 	rows, ok := response["data"].([]any)
 	if !ok {
 		if data, ok := response["data"].(map[string]any); ok {
-			for _, key := range []string{"rows", "list", "data"} {
+			for _, key := range []string{"rows", "list", "data", "records"} {
 				if candidates, ok := data[key].([]any); ok {
 					rows = candidates
 					break

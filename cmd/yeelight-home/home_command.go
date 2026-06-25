@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 
 	"github.com/yeelight/yeelight-home/internal/api"
 )
@@ -44,11 +46,34 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 		ClientID:      contextInfo.ClientID,
 	})
 	if err != nil {
+		var statusErr api.HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			_, _ = fmt.Fprintln(stderr, "home list: authorization failed; token is missing, invalid, expired, or not accepted by this region. Run yeelight-home auth login --qr --region "+contextInfo.Region+" or set a valid YEELIGHT_HOME_ACCESS_TOKEN.")
+			return exitInvalidInput
+		}
 		_, _ = fmt.Fprintf(stderr, "home list: %v\n", err)
 		return exitInternalError
 	}
 	if flags.bool("json") {
-		return writeJSON(stdout, stderr, map[string]any{"ok": true, "profile": contextInfo.Profile, "region": contextInfo.Region, "houses": summary.Houses, "houseCount": summary.HouseCount})
+		response := map[string]any{
+			"ok":         true,
+			"profile":    contextInfo.Profile,
+			"region":     contextInfo.Region,
+			"houses":     summary.Houses,
+			"houseCount": summary.HouseCount,
+			"rawShape":   summary.RawShape,
+			"apiCalls":   summary.APICalls,
+			"houseId":    contextInfo.HouseID,
+		}
+		if summary.HouseCount == 0 {
+			response["warnings"] = []string{"empty_account_home_list"}
+			response["next"] = []string{
+				"home list is account-scoped and does not require houseId",
+				"verify the active profile and region with yeelight-home auth status --json",
+				"if you already know a house id, run yeelight-home home select --house-id <id> --region " + contextInfo.Region,
+			}
+		}
+		return writeJSON(stdout, stderr, response)
 	}
 	for _, house := range summary.Houses {
 		_, _ = fmt.Fprintf(stdout, "%s\t%s\n", house.ID, house.Name)
