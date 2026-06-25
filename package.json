@@ -1,6 +1,6 @@
 {
   "name": "yeelight-home",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local Yeelight Home Runtime CLI installer and launcher.",
   "license": "UNLICENSED",
   "homepage": "https://github.com/Yeelight/yeelight-home#readme",
@@ -15,7 +15,9 @@
     "yeelight-home": "npm/bin/yeelight-home.js"
   },
   "files": [
-    "npm/",
+    "npm/bin/",
+    "npm/lib/",
+    "npm/install.js",
     "README.md",
     "INSTALL.md",
     "CONFIG.md",
