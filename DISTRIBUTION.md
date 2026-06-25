@@ -130,6 +130,7 @@ GitHub Actions provides `GITHUB_TOKEN` automatically for GitHub Releases and GHC
 | `AUR_KEY` | AUR SSH private key for `yeelight-home-bin`. |
 | `SNAPCRAFT_STORE_CREDENTIALS` | Snap store publish credentials. |
 | `WINGET_GITHUB_TOKEN` | Winget manifest PR token. |
+| `YEELIGHT_HOME_RELEASE_TOKEN` | Push runtime mirror snapshots to `Yeelight/yeelight-home`. |
 
 | Repository Variable | Purpose |
 | --- | --- |
@@ -140,6 +141,16 @@ GitHub Actions provides `GITHUB_TOKEN` automatically for GitHub Releases and GHC
 
 Only configure settings for channels that are ready to publish.
 Without Winget token and PR workspace variables, the public release workflow skips Winget and still publishes core GitHub Release artifacts.
+You can self-solve Winget by forking `microsoft/winget-pkgs` as the PR workspace and pointing the repository variables at that fork; no permanent Yeelight organization repository is required for Winget publication.
+Without `YEELIGHT_HOME_RELEASE_TOKEN`, the monorepo mirror workflow cannot push runtime-only source snapshots into the public repository.
+AUR is optional until the package repository and SSH key are available.
+Snapcraft is optional until a Linux or Ubuntu runner can execute the login/export flow and store publication.
+
+Reusable GitHub credential pattern:
+
+- One GitHub PAT can be reused for `YEELIGHT_HOME_RELEASE_TOKEN`, `HOMEBREW_TAP_GITHUB_TOKEN`, `SCOOP_BUCKET_GITHUB_TOKEN`, and `WINGET_GITHUB_TOKEN` if it has write access to the target repos or PR workspace.
+- `YEELIGHT_HOME_RELEASE_TOKEN` only needs write access to `Yeelight/yeelight-home`.
+- The package-manager tokens only need write access to their own target repositories or PR workspace.
 
 ## npm Package Model
 

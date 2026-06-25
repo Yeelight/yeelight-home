@@ -15,6 +15,8 @@ import (
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
+var version = "dev"
+
 const (
 	exitOK            = 0
 	exitInvalidInput  = 2
@@ -75,7 +77,7 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 	case "profile":
 		return app.runProfile(args[1:], stdout, stderr)
 	case "version":
-		_, _ = fmt.Fprintln(stdout, "yeelight-home contract 1.0")
+		_, _ = fmt.Fprintf(stdout, "yeelight-home %s\n", version)
 		return exitOK
 	default:
 		_, _ = fmt.Fprintf(stderr, "unsupported command %q\n", args[0])

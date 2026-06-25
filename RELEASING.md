@@ -17,6 +17,7 @@ https://github.com/Yeelight/yeelight-home
 ```
 
 Do not maintain two independent source trees. Export the runtime-only source from the monorepo, then release from the public repository. The monorepo workflow validates and mirrors source only; it does not build or publish release binaries.
+The mirror step is implemented by `scripts/mirror-runtime-public.sh` and can be run from GitHub Actions or from GitLab CI using the same `YEELIGHT_HOME_RELEASE_TOKEN`.
 
 ## Versioning
 
@@ -100,6 +101,17 @@ Minimum:
 
 `GITHUB_TOKEN` is provided by GitHub Actions automatically for GitHub Releases and GHCR. Do not add it as a repository secret.
 
+Monorepo mirror to the public runtime repository:
+
+- `YEELIGHT_HOME_RELEASE_TOKEN`
+
+Configure this secret in the CI environment that runs the mirror step:
+
+- GitHub-hosted monorepo mirror: repository secret `YEELIGHT_HOME_RELEASE_TOKEN`.
+- GitLab-hosted monorepo mirror: protected and masked CI/CD variable `YEELIGHT_HOME_RELEASE_TOKEN`.
+
+Do not put this token in the public `Yeelight/yeelight-home` source tree or in any checked-in configuration file.
+
 Package manager automation:
 
 - `HOMEBREW_TAP_GITHUB_TOKEN`
@@ -118,6 +130,12 @@ Linux ecosystem automation:
 - optional repository variable `AUR_GIT_URL` when the default `ssh://aur@aur.archlinux.org/yeelight-home-bin.git` is not correct
 
 Configure only the secrets for channels that are ready.
+
+Reusable GitHub credential pattern:
+
+- One GitHub PAT can be reused for `YEELIGHT_HOME_RELEASE_TOKEN`, `HOMEBREW_TAP_GITHUB_TOKEN`, `SCOOP_BUCKET_GITHUB_TOKEN`, and `WINGET_GITHUB_TOKEN` if it has write access to the target repos.
+- `YEELIGHT_HOME_RELEASE_TOKEN` must at least be able to push to `Yeelight/yeelight-home`.
+- The package-manager tokens only need write access to their own target repositories or PR workspace.
 
 Winget needs both a token and a PR workspace fork:
 
