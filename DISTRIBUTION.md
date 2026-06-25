@@ -11,7 +11,7 @@
 | Scoop | Published | `scoop bucket add yeelight https://github.com/Yeelight/scoop-bucket && scoop install yeelight-home` |
 | Debian package | Published | Download `yeelight-home_0.1.0_amd64.deb` or `yeelight-home_0.1.0_arm64.deb` from GitHub Releases |
 | Winget | Submitted | `winget install Yeelight.yeelight-home` after microsoft/winget-pkgs PR 392555 is merged |
-| npm | Prepared | `npm install -g yeelight-home` after npm registry publication |
+| npm | Published | `npm install -g yeelight-home` |
 
 ## Repository Layout Policy
 
