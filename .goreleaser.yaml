@@ -180,7 +180,7 @@ dockers_v2:
       - yeelight-home
     dockerfile: Dockerfile
     images:
-      - yeelight/yeelight-home
+      - "{{ if index .Env \"DOCKERHUB_IMAGE\" }}{{ .Env.DOCKERHUB_IMAGE }}{{ else }}yeelightdev/yeelight-home{{ end }}"
     tags:
       - "{{ .Version }}"
       - latest

@@ -203,7 +203,9 @@ Snap publication requires Snapcraft credentials and store review. Snapcraft cann
 Publish multi-arch images:
 
 - `ghcr.io/yeelight/yeelight-home`
-- `yeelight/yeelight-home`
+- `yeelightdev/yeelight-home`
+
+The Docker Hub image can be overridden with repository variable `DOCKERHUB_IMAGE`.
 
 Required platforms:
 

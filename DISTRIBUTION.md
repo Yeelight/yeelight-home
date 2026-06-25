@@ -15,7 +15,7 @@
 | AUR | Publishes `yeelight-home-bin` only when AUR SSH is configured. | `yay -S yeelight-home-bin` after publication. |
 | Snap | Builds/publishes only when Snapcraft credentials and store review are ready. | `sudo snap install yeelight-home` after store visibility. |
 | Docker GHCR | Publishes multi-arch images when registry credentials are available. | `docker run --rm ghcr.io/yeelight/yeelight-home:latest version` |
-| Docker Hub | Publishes multi-arch images when Docker Hub credentials are available. | `docker run --rm yeelight/yeelight-home:latest version` |
+| Docker Hub | Publishes multi-arch images when Docker Hub credentials are available. | `docker run --rm yeelightdev/yeelight-home:latest version` |
 | pkg.go.dev | Indexes public `v*` module tags. | `https://pkg.go.dev/github.com/yeelight/yeelight-home` |
 
 ## Repository Layout Policy
@@ -114,7 +114,7 @@ Target artifacts:
   - Snap package once Snapcraft is configured
 - Container images:
   - `ghcr.io/yeelight/yeelight-home`
-  - `yeelight/yeelight-home`
+  - `yeelightdev/yeelight-home`
 
 ## Required Release Settings
 
@@ -138,6 +138,7 @@ GitHub Actions provides `GITHUB_TOKEN` automatically for GitHub Releases and GHC
 | `WINGET_REPOSITORY_NAME` | Winget PR workspace fork name. |
 | `WINGET_REPOSITORY_BRANCH` | Optional Winget PR branch. Defaults to a release-specific branch. |
 | `AUR_GIT_URL` | Optional AUR Git URL override. Defaults to `ssh://aur@aur.archlinux.org/yeelight-home-bin.git`. |
+| `DOCKERHUB_IMAGE` | Optional Docker Hub image override. Defaults to `<DOCKERHUB_USERNAME>/yeelight-home`. |
 
 Only configure settings for channels that are ready to publish.
 Without Winget token and PR workspace variables, the public release workflow skips Winget and still publishes core GitHub Release artifacts.

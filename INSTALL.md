@@ -182,7 +182,7 @@ docker run --rm ghcr.io/yeelight/yeelight-home:latest version
 Docker Hub:
 
 ```sh
-docker run --rm yeelight/yeelight-home:latest version
+docker run --rm yeelightdev/yeelight-home:latest version
 ```
 
 Persist local config and credentials:

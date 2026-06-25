@@ -65,6 +65,7 @@ jobs:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
@@ -137,6 +138,7 @@ jobs:
             echo "DOCKERHUB_ENABLED=1" >> "$GITHUB_ENV"
             set_env_value DOCKERHUB_USERNAME "$DOCKERHUB_USERNAME"
             set_env_value DOCKERHUB_TOKEN "$DOCKERHUB_TOKEN"
+            set_env_value DOCKERHUB_IMAGE "${DOCKERHUB_IMAGE:-${DOCKERHUB_USERNAME}/yeelight-home}"
           else
             echo "DOCKERHUB_ENABLED=0" >> "$GITHUB_ENV"
           fi
@@ -192,6 +194,7 @@ jobs:
           SCOOP_BUCKET_GITHUB_TOKEN: ${{ env.SCOOP_BUCKET_GITHUB_TOKEN }}
           DOCKERHUB_USERNAME: ${{ env.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ env.DOCKERHUB_TOKEN }}
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
           AUR_KEY: ${{ env.AUR_KEY }}
           AUR_GIT_URL: ${{ env.AUR_GIT_URL }}
           SNAPCRAFT_STORE_CREDENTIALS: ${{ env.SNAPCRAFT_STORE_CREDENTIALS }}
