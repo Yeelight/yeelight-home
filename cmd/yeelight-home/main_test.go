@@ -27,7 +27,12 @@ func TestRootHelpAndVersionFlags(t *testing.T) {
 		{name: "empty args show root help", args: []string{}, wantOutput: "Usage:\n  yeelight-home <command> [flags]"},
 		{name: "long help", args: []string{"--help"}, wantOutput: "Commands:\n  auth"},
 		{name: "short help", args: []string{"-h"}, wantOutput: "Global flags:"},
+		{name: "root help explains command model", args: []string{"--help"}, wantOutput: "Human-friendly operations use: yeelight-home <resource> <action> [flags]"},
 		{name: "help command", args: []string{"help", "home"}, wantOutput: "yeelight-home home list"},
+		{name: "module help command", args: []string{"help", "device"}, wantOutput: "yeelight-home device detail --device-id <id> --json"},
+		{name: "module action help command", args: []string{"help", "scene", "execute"}, wantOutput: "Intent:\n  scene.execute"},
+		{name: "module action trailing help", args: []string{"light", "brightness", "--help"}, wantOutput: "--brightness <1-100>"},
+		{name: "module trailing help", args: []string{"scene", "--help"}, wantOutput: "batch-delete"},
 		{name: "subcommand help", args: []string{"home", "--help"}, wantOutput: "home list is account-scoped"},
 		{name: "nested help command", args: []string{"help", "auth", "token", "set"}, wantOutput: "Omit houseId for token-only account-scoped use"},
 		{name: "nested trailing help", args: []string{"auth", "token", "set", "--help"}, wantOutput: "yeelight-home auth token set (--token"},
@@ -77,9 +82,9 @@ func TestCompletionCommandPrintsShellScripts(t *testing.T) {
 		forbidOutput []string
 		wantCode     int
 	}{
-		{name: "bash", args: []string{"completion", "bash"}, wantOutput: "complete -F _yeelight_home_completion yeelight-home", forbidOutput: []string{" dev ", " release "}},
-		{name: "zsh", args: []string{"completion", "zsh"}, wantOutput: "#compdef yeelight-home", forbidOutput: []string{"'dev'", "'release'"}},
-		{name: "fish", args: []string{"completion", "fish"}, wantOutput: "complete -c yeelight-home", forbidOutput: []string{" -a dev", " -a release"}},
+		{name: "bash", args: []string{"completion", "bash"}, wantOutput: "device) COMPREPLY=( $(compgen -W \"attrs capabilities detail", forbidOutput: []string{" dev ", " release "}},
+		{name: "zsh", args: []string{"completion", "zsh"}, wantOutput: "device) local -a actions; actions=('attrs' 'capabilities' 'detail'", forbidOutput: []string{"'dev'", "'release'"}},
+		{name: "fish", args: []string{"completion", "fish"}, wantOutput: "complete -c yeelight-home", forbidOutput: []string{" -a dev\n", " -a release\n"}},
 		{name: "powershell", args: []string{"completion", "powershell"}, wantOutput: "Register-ArgumentCompleter", forbidOutput: []string{"'dev'", "'release'"}},
 		{name: "unsupported shell", args: []string{"completion", "tcsh"}, wantCode: exitInvalidInput},
 	}

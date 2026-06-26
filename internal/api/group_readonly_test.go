@@ -23,6 +23,8 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 				t.Fatalf("decode search body: %v", err)
 			}
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":22,"houseId":1001,"nane":"二楼","roomIds":[12],"secret":"not-allowed"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/1001/group/22/r/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":22,"houseId":1001,"name":"二楼","details":[{"deviceId":"device-1"}],"localToken":"not-allowed"}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -46,13 +48,21 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunGroupSearch error: %v", err)
 	}
-	if strings.Join(gotCalls, "\n") != "POST /apis/iot/v1/group/r/all\nPOST /apis/iot/v1/group/r/1001/fuzzy" {
+	detail, err := client.RunGroupDetailGet(context.Background(), MetadataReadonlyRequest{
+		HouseID:     "1001",
+		Parameters:  map[string]any{"groupId": "22"},
+		Credentials: request.Credentials,
+	})
+	if err != nil {
+		t.Fatalf("RunGroupDetailGet error: %v", err)
+	}
+	if strings.Join(gotCalls, "\n") != "POST /apis/iot/v1/group/r/all\nPOST /apis/iot/v1/group/r/1001/fuzzy\nGET /apis/iot/v2/thing/manage/house/1001/group/22/r/info" {
 		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
 	if gotSearchBody["fuzzyName"] != "二" || gotSearchBody["pageNo"] != float64(2) || gotSearchBody["pageSize"] != float64(5) {
 		t.Fatalf("gotSearchBody = %#v", gotSearchBody)
 	}
-	for _, result := range []MetadataReadonlyResult{list, search} {
+	for _, result := range []MetadataReadonlyResult{list, search, detail} {
 		if result.Partial || result.APICalls != 1 {
 			t.Fatalf("result = %#v", result)
 		}
@@ -89,5 +99,19 @@ func TestGroupReadonlyMissingContextDoesNotCallCloud(t *testing.T) {
 	}
 	if !search.Partial || search.APICalls != 0 || len(search.Warnings) != 1 || search.Warnings[0] != "group_search_keyword_missing" {
 		t.Fatalf("search = %#v", search)
+	}
+	detailMissingHouse, err := client.RunGroupDetailGet(context.Background(), MetadataReadonlyRequest{Parameters: map[string]any{"groupId": "22"}})
+	if err != nil {
+		t.Fatalf("RunGroupDetailGet missing house error: %v", err)
+	}
+	if !detailMissingHouse.Partial || detailMissingHouse.APICalls != 0 || len(detailMissingHouse.Warnings) != 1 || detailMissingHouse.Warnings[0] != "house_context_missing" {
+		t.Fatalf("detailMissingHouse = %#v", detailMissingHouse)
+	}
+	detailMissingGroup, err := client.RunGroupDetailGet(context.Background(), MetadataReadonlyRequest{HouseID: "1001", Parameters: map[string]any{}})
+	if err != nil {
+		t.Fatalf("RunGroupDetailGet missing group error: %v", err)
+	}
+	if !detailMissingGroup.Partial || detailMissingGroup.APICalls != 0 || len(detailMissingGroup.Warnings) != 1 || detailMissingGroup.Warnings[0] != "group_context_missing" {
+		t.Fatalf("detailMissingGroup = %#v", detailMissingGroup)
 	}
 }

@@ -61,6 +61,10 @@ yeelight-home auth login --qr
 yeelight-home home list --json
 # Optional: choose a default home before house-scoped device, room, scene, or automation operations.
 yeelight-home home select --house-id <house-id>
+yeelight-home device list --json
+yeelight-home scene execute --scene-id <scene-id> --json
+yeelight-home light on --device-id <device-id> --json
+yeelight-home automation enable --automation-id <automation-id> --json
 ```
 
 The default region is `cn`. Pass `--region sg`, `--region us`, or `--region eu` when your Yeelight account belongs to another cloud region.
@@ -106,6 +110,50 @@ Common environment variables:
 See [CONFIG.md](CONFIG.md) for full command and precedence details.
 
 ## Command Reference
+
+### Human Commands Versus `invoke`
+
+`invoke --stdin` is the stable machine contract for Skills, generated apps, and automation hosts. It accepts one SkillRequest JSON object and returns one SkillResponse JSON object.
+
+Human operators should usually use resource commands:
+
+```sh
+yeelight-home device list --json
+yeelight-home room list --json
+yeelight-home scene execute --scene-id <scene-id> --json
+yeelight-home light brightness --device-id <device-id> --brightness 60 --json
+yeelight-home automation enable --automation-id <automation-id> --json
+yeelight-home plan commit --plan-id <plan-id> --json
+```
+
+The resource commands are thin wrappers around Runtime intents. They keep the same profile, region, credential, redaction, preflight, pending-plan, and verification rules as `invoke`.
+
+The command shape is intentionally conventional:
+
+```text
+yeelight-home <resource> <action> [--json] [--profile <name>] [--region <region>] [--house-id <id>] [resource flags]
+```
+
+Common resources include `home`, `room`, `area`, `device`, `entity`, `gateway`, `group`, `scene`, `automation`, `light`, `lighting`, `favorite`, `panel`, `knob`, `sensor`, `thing`, `upgrade`, `memory`, `recommendation`, `account`, and `plan`. Run `yeelight-home --help` for the full resource list.
+
+Use `yeelight-home help <resource>` to list actions, and `yeelight-home help <resource> <action>` for action-specific flags. Examples:
+
+```sh
+yeelight-home help device
+yeelight-home help scene execute
+yeelight-home help light brightness
+```
+
+For uncommon fields, pass advanced parameters without dropping to raw stdin:
+
+```sh
+yeelight-home room search --name 客厅 --json
+yeelight-home scene create --params-json '{"name":"回家灯光","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}' --json
+yeelight-home favorite add --set typeId=2,resId=50018330,rank=1 --json
+yeelight-home thing schema-get --schema-id <schema-id> --json
+yeelight-home upgrade files --json
+yeelight-home panel button-configure --device-id <panel-id> --params-json '<json>' --json
+```
 
 ### `doctor`
 
@@ -207,6 +255,8 @@ yeelight-home invoke --stdin
 ```
 
 Reads a SkillRequest JSON object from stdin and writes a SkillResponse JSON object to stdout. This is the only command Skills should call for smart-home operations.
+
+Interactive users do not need to hand-write SkillRequest JSON for common operations. Prefer resource commands such as `device list`, `scene execute`, `light on`, `room create`, `automation enable`, and `plan commit`.
 
 ### `api smoke`
 

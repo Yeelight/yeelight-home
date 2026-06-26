@@ -111,6 +111,47 @@ yeelight-home home select --profile family --house-id <house-id> --region cn
 `home select` writes the selected home id into profile metadata. A process can temporarily override it with `--house-id` or `YEELIGHT_HOME_HOUSE_ID`.
 The selected home is a default context, not an authentication requirement. Account-level commands such as `auth status`, `doctor`, `api smoke`, `home list`, home summary/search, and account info work with token-only profiles. Device, room, area, group, scene, automation, gateway, favorite, lighting, and other house-scoped operations require `houseId` at the request, environment, or profile layer.
 
+## Resource Commands
+
+Resource commands are the human-friendly command surface. They follow the common CLI shape `yeelight-home <resource> <action> [flags]` and use the same Runtime intent engine as `invoke --stdin`.
+
+```sh
+yeelight-home help device
+yeelight-home help device list
+yeelight-home device list --json
+yeelight-home room search --name 客厅 --json
+yeelight-home scene execute --scene-id <scene-id> --json
+yeelight-home light on --device-id <device-id> --json
+yeelight-home light brightness --device-id <device-id> --brightness 60 --json
+yeelight-home automation enable --automation-id <automation-id> --json
+yeelight-home plan commit --plan-id <plan-id> --json
+```
+
+Resource groups exposed by the CLI:
+
+| Group | Examples |
+| --- | --- |
+| Account and setup | `account info`, `home list`, `home select`, `profile use`, `config set` |
+| Home organization | `home summary`, `home detail`, `home sort`, `home sort-configure`, `favorite add`, `favorite batch-delete` |
+| Space and entities | `room list`, `room batch-create`, `area update`, `group structure`, `entity list`, `entity rename-batch` |
+| Devices and gateways | `device detail`, `device attrs`, `device move-room-batch`, `gateway thread`, `gateway stats`, `meshgroup detail` |
+| Scenes and automations | `scene execute`, `scene batch-delete`, `automation supported-v2`, `automation enable`, `schedule jobs` |
+| Lighting and controls | `light on`, `light brightness-adjust`, `lighting plan`, `lighting apply`, `behavior execute` |
+| Panels and sensors | `panel screen-controls`, `panel button-event-update`, `knob configure`, `sensor events`, `screen controls` |
+| Knowledge and maintenance | `thing products`, `thing schema-get`, `thing faqs`, `upgrade files`, `progress get`, `message list` |
+| Local intelligence | `memory remember`, `memory list`, `recommendation feedback`, `ai-voice products` |
+
+For less common intent fields, use `--params-json` or `--set key=value`:
+
+```sh
+yeelight-home scene create --params-json '{"name":"回家灯光","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}' --json
+yeelight-home favorite add --set typeId=2,resId=50018330,rank=1 --json
+yeelight-home thing product-info --product-ids 133121,198660 --json
+yeelight-home panel button-event-update --button-event-id <id> --params-json '<json>' --json
+```
+
+`invoke --stdin` remains the stable machine interface for Skills and generated apps. Resource commands are for humans and support scripts that prefer ordinary flags.
+
 ## Config Commands
 
 ```sh

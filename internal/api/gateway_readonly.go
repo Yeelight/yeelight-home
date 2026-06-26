@@ -19,9 +19,25 @@ func (client MetadataReadonlyClient) RunGatewayDetailGet(ctx context.Context, re
 		result.HouseID = houseID
 		return result, nil
 	}
-	result, err := client.readPath(ctx, request, "gateway.detail.get", "/v2/thing/manage/house/"+pathSegment(houseID)+"/gateway/"+pathSegment(gatewayID)+"/r/info", http.MethodGet, nil, map[string]any{"detail": nil})
-	result.DeviceID = gatewayID
-	return result, err
+	response, err := client.call(ctx, http.MethodGet, "/v2/thing/manage/house/"+pathSegment(houseID)+"/gateway/"+pathSegment(gatewayID)+"/r/info", nil, request.Credentials)
+	if err != nil {
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return MetadataReadonlyResult{}, metadataReadonlyBusinessError("gateway.detail.get", response)
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		DeviceID:   gatewayID,
+		Capability: "gateway.detail.get",
+		Data: map[string]any{
+			"detail": projectGatewaySummary(response["data"]),
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
 }
 
 func (client MetadataReadonlyClient) RunGatewayList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
@@ -30,7 +46,24 @@ func (client MetadataReadonlyClient) RunGatewayList(ctx context.Context, request
 		return metadataReadonlyMissingContext(client.endpoint.Region, "gateway.list", "house_context_missing"), nil
 	}
 	pageNo, pageSize := readonlyPage(request.Parameters, 1, 100)
-	return client.readPath(ctx, request, "gateway.list", "/v2/thing/manage/house/"+pathSegment(houseID)+"/gateway/r/info/"+pageNo+"/"+pageSize, http.MethodGet, nil, map[string]any{"gateways": nil})
+	response, err := client.call(ctx, http.MethodGet, "/v2/thing/manage/house/"+pathSegment(houseID)+"/gateway/r/info/"+pageNo+"/"+pageSize, nil, request.Credentials)
+	if err != nil {
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return MetadataReadonlyResult{}, metadataReadonlyBusinessError("gateway.list", response)
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		Capability: "gateway.list",
+		Data: map[string]any{
+			"gateways": projectGatewayRows(response["data"]),
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
 }
 
 func (client MetadataReadonlyClient) RunGatewayThreadGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
@@ -117,4 +150,107 @@ func positiveIntString(value any, fallback int) string {
 
 func pathSegment(value string) string {
 	return url.PathEscape(strings.TrimSpace(value))
+}
+
+func projectGatewayRows(data any) []any {
+	rows := nestedRowsFromData(data, "gateways", "rows", "list")
+	gateways := make([]any, 0, len(rows))
+	for _, row := range rows {
+		summary := projectGatewaySummary(row)
+		if len(summary) > 0 {
+			gateways = append(gateways, summary)
+		}
+	}
+	return gateways
+}
+
+func projectGatewaySummary(value any) map[string]any {
+	item, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	gateway := map[string]any{}
+	for outputKey, inputKeys := range map[string][]string{
+		"id":              {"id", "gatewayId", "deviceId"},
+		"did":             {"did"},
+		"gatewayDeviceId": {"gatewayDeviceId"},
+		"pid":             {"pid"},
+		"pcId":            {"pcId", "pcid"},
+		"type":            {"type"},
+		"name":            {"name", "gatewayName", "deviceName", "alias", "remark"},
+		"img":             {"img"},
+		"houseId":         {"houseId"},
+		"roomId":          {"roomId"},
+		"capability":      {"capability"},
+		"connectType":     {"connectType"},
+		"typeName":        {"typeName"},
+		"model":           {"model"},
+		"firmwareVersion": {"firmwareVersion", "fwVersion", "version"},
+	} {
+		for _, inputKey := range inputKeys {
+			if raw, ok := item[inputKey]; ok {
+				if value := stringFromAny(raw); value != "" {
+					gateway[outputKey] = value
+					break
+				}
+			}
+		}
+	}
+	for outputKey, inputKeys := range map[string][]string{
+		"online":  {"online", "isOnline"},
+		"bind":    {"bind", "isBind"},
+		"enabled": {"enabled", "enable"},
+	} {
+		for _, inputKey := range inputKeys {
+			if value, ok := boolFromAny(item[inputKey]); ok {
+				gateway[outputKey] = value
+				break
+			}
+		}
+	}
+	if text := stringFromAny(item["mac"]); text != "" {
+		gateway["macMasked"] = maskTail(text, 4)
+	}
+	if values := stringListFromAny(item["supportedBridgeType"]); len(values) > 0 {
+		gateway["supportedBridgeType"] = values
+	}
+	if values := stringListFromAny(item["roomIds"]); len(values) > 0 {
+		gateway["roomIds"] = values
+	}
+	if values := stringListFromAny(item["deviceIds"]); len(values) > 0 {
+		gateway["childDeviceCount"] = len(values)
+	}
+	if rows := nestedRowsFromData(item["configs"], "rows", "list"); len(rows) > 0 {
+		gateway["configCount"] = len(rows)
+	}
+	return gateway
+}
+
+func boolFromAny(value any) (bool, bool) {
+	switch typed := value.(type) {
+	case bool:
+		return typed, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "1", "yes", "y":
+			return true, true
+		case "false", "0", "no", "n":
+			return false, true
+		}
+	case float64:
+		if typed == 1 {
+			return true, true
+		}
+		if typed == 0 {
+			return false, true
+		}
+	case int:
+		if typed == 1 {
+			return true, true
+		}
+		if typed == 0 {
+			return false, true
+		}
+	}
+	return false, false
 }

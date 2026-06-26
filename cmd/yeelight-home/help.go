@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const rootHelpText = `Yeelight Home CLI
+const rootHelpTemplate = `Yeelight Home CLI
 
 Usage:
   yeelight-home <command> [flags]
@@ -16,7 +16,6 @@ Commands:
   auth       Login, inspect auth status, and manage local tokens
   profile    List, show, activate, and delete profiles
   config     Read and update non-secret profile configuration
-  home       List and select homes
   completion Generate shell completion scripts
   invoke     Execute one Skill Runtime request from stdin
   approve    Commit a guarded pending plan
@@ -24,9 +23,18 @@ Commands:
   doctor     Print local installation and auth diagnostics
   version    Print CLI version
 
+Resource commands:
+%s
+
 Global flags:
   -h, --help       Show help
   -v, --version    Show CLI version
+
+Command model:
+  Human-friendly operations use: yeelight-home <resource> <action> [flags]
+  Skill and automation integrations use: yeelight-home invoke --stdin
+  Resource commands and invoke share the same Runtime adapters, validation, redaction, and pending-plan gates.
+  Read commands execute immediately. Risky write/delete commands create pending plans and require plan commit or approve.
 
 Configuration precedence:
   command flags > environment variables > active profile metadata/credential store > defaults
@@ -36,10 +44,83 @@ Common examples:
   yeelight-home auth status
   yeelight-home home list --json --region dev
   yeelight-home home select --house-id <id> --region dev
+  yeelight-home help device
+  yeelight-home help device detail
+  yeelight-home device list --json
+  yeelight-home device detail --device-id <id> --json
+  yeelight-home scene execute --scene-id <id> --json
+  yeelight-home light on --device-id <id> --json
+  yeelight-home automation enable --automation-id <id> --json
   yeelight-home invoke --stdin
   yeelight-home doctor
   yeelight-home completion zsh
 `
+
+var moduleCommandDescriptions = map[string]string{
+	"account":        "Inspect account-scoped profile and user information",
+	"ai-voice":       "Inspect AI voice account and product support",
+	"area":           "List, search, create, update, or delete areas",
+	"automation":     "List, explain, create, update, enable, disable, or delete automations",
+	"behavior":       "Execute source-backed device behaviors",
+	"device":         "List, inspect, diagnose, move, rename, remove, or unbind devices",
+	"entity":         "List and inspect unified home entities",
+	"execution":      "Undo supported pending-plan executions",
+	"favorite":       "List, plan, add, update, or delete home favorites",
+	"gateway":        "List, inspect, diagnose, configure, or delete gateways",
+	"group":          "List, search, create, update, or delete device groups",
+	"home":           "List, select, inspect, sort, invite, update, or delete homes",
+	"knob":           "Inspect, configure, or reset knobs",
+	"light":          "Human-friendly light controls such as on, off, brightness, ct, color",
+	"lighting":       "Plan and apply lighting designs and experiences",
+	"memory":         "Manage local preference memory",
+	"meshgroup":      "Inspect mesh group details",
+	"message":        "List home messages",
+	"node":           "Inspect node sorting and property configuration",
+	"panel":          "List, inspect, and configure panels, screens, and buttons",
+	"plan":           "Commit or cancel pending Runtime plans",
+	"progress":       "Inspect async operation progress",
+	"recommendation": "List and provide feedback on recommendations",
+	"room":           "List, search, create, update, rename, move, or delete rooms",
+	"scene":          "List, search, execute, create, update, test, or delete scenes",
+	"schedule":       "List schedule jobs",
+	"screen":         "Inspect screen control capabilities",
+	"sensor":         "List sensors and sensor events",
+	"thing":          "Inspect thing-model categories, domains, products, FAQ, and schema",
+	"upgrade":        "Inspect upgrade files, OTA files, and progress",
+}
+
+var moduleCommandExamples = map[string][]string{
+	"account":        {"yeelight-home account info --json"},
+	"ai-voice":       {"yeelight-home ai-voice products --json", "yeelight-home ai-voice list --json"},
+	"area":           {"yeelight-home area detail --area-id <id> --json", "yeelight-home area search --name <keyword> --json"},
+	"automation":     {"yeelight-home automation list --json", "yeelight-home automation detail --automation-id <id> --json", "yeelight-home automation enable --automation-id <id> --json"},
+	"behavior":       {"yeelight-home behavior execute --device-id <id> --params-json '<json>' --json"},
+	"device":         {"yeelight-home device list --json", "yeelight-home device detail --device-id <id> --json", "yeelight-home device rename --device-id <id> --name <new-name> --json"},
+	"entity":         {"yeelight-home entity list --json", "yeelight-home entity get --entity-id <id> --json"},
+	"execution":      {"yeelight-home execution undo --execution-id <id> --json"},
+	"favorite":       {"yeelight-home favorite list --json", "yeelight-home favorite add --set typeId=2,resId=<id>,rank=1 --json"},
+	"gateway":        {"yeelight-home gateway list --json", "yeelight-home gateway detail --gateway-id <id> --json", "yeelight-home gateway diagnose --gateway-id <id> --json"},
+	"group":          {"yeelight-home group list --json", "yeelight-home group detail --group-id <id> --json"},
+	"home":           {"yeelight-home home list --json", "yeelight-home home summary --house-id <id> --json", "yeelight-home home sort --house-id <id> --json"},
+	"knob":           {"yeelight-home knob detail --knob-id <id> --json", "yeelight-home knob configure --knob-id <id> --params-json '<json>' --json"},
+	"light":          {"yeelight-home light on --device-id <id> --json", "yeelight-home light brightness --device-id <id> --brightness 60 --json", "yeelight-home light ct --device-id <id> --ct 4000 --json"},
+	"lighting":       {"yeelight-home lighting plan --house-id <id> --params-json '<json>' --json", "yeelight-home lighting apply --plan-id <id> --json"},
+	"memory":         {"yeelight-home memory list --json", "yeelight-home memory remember --set key=value --json"},
+	"meshgroup":      {"yeelight-home meshgroup detail --meshgroup-id <id> --json"},
+	"message":        {"yeelight-home message list --json"},
+	"node":           {"yeelight-home node sorted-devices --node-id <id> --json", "yeelight-home node property-config --node-id <id> --json"},
+	"panel":          {"yeelight-home panel list --json", "yeelight-home panel detail --panel-id <id> --json", "yeelight-home panel button-configure --panel-id <id> --params-json '<json>' --json"},
+	"plan":           {"yeelight-home plan commit --plan-id <id> --json", "yeelight-home plan cancel --plan-id <id> --json"},
+	"progress":       {"yeelight-home progress get --progress-id <id> --json"},
+	"recommendation": {"yeelight-home recommendation list --json", "yeelight-home recommendation feedback --params-json '<json>' --json"},
+	"room":           {"yeelight-home room list --json", "yeelight-home room detail --room-id <id> --json", "yeelight-home room rename --room-id <id> --name <new-name> --json"},
+	"scene":          {"yeelight-home scene list --json", "yeelight-home scene detail --scene-id <id> --json", "yeelight-home scene execute --scene-id <id> --json"},
+	"schedule":       {"yeelight-home schedule jobs --json"},
+	"screen":         {"yeelight-home screen controls --device-id <id> --json"},
+	"sensor":         {"yeelight-home sensor list --json", "yeelight-home sensor events --sensor-id <id> --json"},
+	"thing":          {"yeelight-home thing domains --json", "yeelight-home thing schema-get --schema-id <id> --json"},
+	"upgrade":        {"yeelight-home upgrade files --params-json '<json>' --json", "yeelight-home upgrade progress --progress-id <id> --json"},
+}
 
 var commandHelpText = map[string]string{
 	"api": `Usage:
@@ -152,12 +233,6 @@ Development-only fixture commands. Writes require explicit dev region and --allo
 Prints local paths, active profile, token presence, region, houseId, and install diagnostics.
 Pass --online to also check public GitHub, npm, and Homebrew latest versions.
 `,
-	"home": `Usage:
-  yeelight-home home list [--json] [--profile <name>] [--region <region>]
-  yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--json]
-
-home list is account-scoped and requires only a token. houseId is optional until a house-scoped command is used.
-`,
 	"home list": `Usage:
   yeelight-home home list [--json] [--profile <name>] [--region <region>]
 
@@ -168,6 +243,28 @@ Lists homes visible to the selected account. It is account-scoped and does not r
 
 Stores a default home id for later house-scoped commands. It does not change the token.
 `,
+	"area":       moduleHelpText("area"),
+	"automation": moduleHelpText("automation"),
+	"device":     moduleHelpText("device"),
+	"favorite":   moduleHelpText("favorite"),
+	"gateway":    moduleHelpText("gateway"),
+	"group":      moduleHelpText("group"),
+	"home": `Usage:
+  yeelight-home home list [--json] [--profile <name>] [--region <region>]
+  yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--json]
+  yeelight-home home <summary|search|detail|stat|members|current-member|sort|sort-configure|create|update|delete|invite|accept-share|member-configure|member-remove|member-transfer|quit|lock-all|unlock-all> [flags]
+
+home list is account-scoped and requires only a token. houseId is optional until a house-scoped command is used.
+Use yeelight-home help home <action> for resource action flags.
+`,
+	"light":          moduleHelpText("light"),
+	"memory":         moduleHelpText("memory"),
+	"panel":          moduleHelpText("panel"),
+	"plan":           moduleHelpText("plan"),
+	"recommendation": moduleHelpText("recommendation"),
+	"room":           moduleHelpText("room"),
+	"scene":          moduleHelpText("scene"),
+	"thing":          moduleHelpText("thing"),
 	"invoke": `Usage:
   yeelight-home invoke --stdin
 
@@ -205,13 +302,70 @@ Persists the active profile and optional non-secret profile metadata.
 `,
 }
 
+func moduleHelpText(resource string) string {
+	actions := moduleCommandNames(resource)
+	return fmt.Sprintf(`Usage:
+  yeelight-home %s <%s> [--json] [--profile <name>] [--region <region>] [--house-id <id>] [resource flags]
+
+Human-friendly shortcut commands for Runtime intents. They use the same guarded execution model as invoke:
+read commands call Yeelight cloud APIs directly, risky writes create pending plans, and plan commit still revalidates locally.
+
+Actions:
+  %s
+
+Common flags:
+  --json                 Print the full Skill Runtime JSON response.
+  --profile <name>       Override active profile for this command.
+  --region <region>      Override profile region.
+  --house-id <id>        Override selected home for house-scoped commands.
+  --params-json <json>   Pass advanced intent parameters as a JSON object.
+  --set key=value        Add one or more advanced parameters, comma-separated.
+
+Examples:
+%s
+  yeelight-home help %s %s
+  yeelight-home invoke --stdin
+`, resource, strings.Join(actions, "|"), strings.Join(actions, ", "), moduleExamples(resource), resource, actions[0])
+}
+
+func moduleExamples(resource string) string {
+	examples := moduleCommandExamples[resource]
+	if len(examples) == 0 {
+		actions := moduleCommandNames(resource)
+		if len(actions) > 0 {
+			examples = []string{fmt.Sprintf("yeelight-home %s %s --json", resource, actions[0])}
+		}
+	}
+	lines := make([]string, 0, len(examples))
+	for _, example := range examples {
+		lines = append(lines, "  "+example)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func printRootHelp(stdout io.Writer) int {
-	_, _ = fmt.Fprint(stdout, rootHelpText)
+	_, _ = fmt.Fprintf(stdout, rootHelpTemplate, rootModuleHelpLines())
 	return exitOK
+}
+
+func rootModuleHelpLines() string {
+	lines := []string{}
+	for _, resource := range moduleResourceNames() {
+		description := moduleCommandDescriptions[resource]
+		if description == "" {
+			description = "Runtime resource commands"
+		}
+		lines = append(lines, fmt.Sprintf("  %-14s %s", resource, description))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func printCommandHelp(stdout io.Writer, stderr io.Writer, command string) int {
 	if text, ok := commandHelpText[command]; ok {
+		_, _ = fmt.Fprint(stdout, text)
+		return exitOK
+	}
+	if text, ok := moduleActionHelpText(command); ok {
 		_, _ = fmt.Fprint(stdout, text)
 		return exitOK
 	}

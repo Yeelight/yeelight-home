@@ -26,6 +26,18 @@ func (app *app) runHome(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 }
 
+func isNativeHomeCommand(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	switch args[0] {
+	case "list", "select":
+		return true
+	default:
+		return false
+	}
+}
+
 func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags, err := parseFlags(args)
 	if err != nil {

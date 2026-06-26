@@ -16,7 +16,7 @@ func TestGatewayReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/apis/iot/v2/thing/manage/house/house-1/gateway/gateway-1/r/info":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"gateway-1","name":"E1 网关","mac":"AA:BB:CC:DD","localToken":"not-allowed","supportedBridgeType":["thread"]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"gateway-1","name":"E1 网关","mac":"AA:BB:CC:DD","localToken":"not-allowed","psk":"not-allowed","configs":[{"propId":"ltk","value":"not-allowed"},{"propId":"mibk","value":"not-allowed"}],"supportedBridgeType":["thread"]}}`))
 		case "/apis/iot/v2/thing/manage/house/house-1/gateway/gateway-1/r/thread-info":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"networkName":"yeelight-thread","extendedPanId":"abcd","accessToken":"not-allowed"}}`))
 		case "/apis/iot/v1/scene/r/gateway-1/related/sceneId":
@@ -73,7 +73,7 @@ func TestGatewayListDefaultsToFirstPage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCall = request.Method + " " + request.URL.Path
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"gateway-1","name":"网关","online":true}],"total":1}}`))
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"gateway-1","name":"网关","online":true,"mac":"AA:BB:CC:DD","localToken":"not-allowed","bindKey":"not-allowed","psk":"not-allowed","ltk":"not-allowed","mibk":"not-allowed","midk":"not-allowed","hrbk":"not-allowed","meibk":"not-allowed","configs":[{"propId":"ltk","value":"not-allowed"},{"propId":"mibk","value":"not-allowed"},{"propId":"wifiPassword","value":"not-allowed"}]}],"total":1}}`))
 	}))
 	defer server.Close()
 	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
@@ -91,6 +91,19 @@ func TestGatewayListDefaultsToFirstPage(t *testing.T) {
 	}
 	if result.Capability != "gateway.list" || result.APICalls != 1 {
 		t.Fatalf("result = %#v", result)
+	}
+	data, err := json.Marshal(result.Data)
+	if err != nil {
+		t.Fatalf("marshal result data: %v", err)
+	}
+	text := string(data)
+	for _, forbidden := range []string{"not-allowed", "AA:BB:CC:DD", "localToken", "bindKey", "psk", "ltk", "mibk", "midk", "hrbk", "meibk", "wifiPassword", "configs"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("gateway list leaked %q: %s", forbidden, text)
+		}
+	}
+	if !strings.Contains(text, "configCount") {
+		t.Fatalf("gateway list should keep only configCount summary: %s", text)
 	}
 }
 

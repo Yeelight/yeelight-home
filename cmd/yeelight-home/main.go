@@ -95,11 +95,6 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 		return app.runDoctor(args[1:], stdout, stderr)
 	case "dev":
 		return app.runDev(args[1:], stdout, stderr)
-	case "home":
-		if hasSubcommandHelp(args[1:]) {
-			return printCommandHelp(stdout, stderr, "home")
-		}
-		return app.runHome(args[1:], stdout, stderr)
 	case "invoke":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "invoke")
@@ -111,6 +106,15 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 		}
 		return app.runProfile(args[1:], stdout, stderr)
 	default:
+		if _, ok := moduleCommands[args[0]]; ok {
+			if hasSubcommandHelp(args[1:]) {
+				return printCommandHelp(stdout, stderr, args[0])
+			}
+			if args[0] == "home" && isNativeHomeCommand(args[1:]) {
+				return app.runHome(args[1:], stdout, stderr)
+			}
+			return app.runModuleCommand(args[0], args[1:], stdout, stderr)
+		}
 		_, _ = fmt.Fprintf(stderr, "unsupported command %q\n", args[0])
 		return exitInvalidInput
 	}

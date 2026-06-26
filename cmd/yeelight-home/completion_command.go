@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-var completionCommands = map[string][]string{
+var nativeCompletionCommands = map[string][]string{
 	"api":        {"smoke"},
 	"approve":    {},
 	"auth":       {"login", "qr-check", "status", "token"},
@@ -43,9 +43,14 @@ func (app *app) runCompletion(args []string, stdout io.Writer, stderr io.Writer)
 }
 
 func rootCommandNames() []string {
-	commands := make([]string, 0, len(completionCommands))
-	for command := range completionCommands {
+	commands := make([]string, 0, len(nativeCompletionCommands)+len(moduleCommands))
+	for command := range nativeCompletionCommands {
 		if !strings.Contains(command, " ") {
+			commands = append(commands, command)
+		}
+	}
+	for _, command := range moduleResourceNames() {
+		if _, exists := nativeCompletionCommands[command]; !exists {
 			commands = append(commands, command)
 		}
 	}
@@ -54,7 +59,13 @@ func rootCommandNames() []string {
 }
 
 func completionSubcommands(command string) []string {
-	values := append([]string{}, completionCommands[command]...)
+	values := append([]string{}, nativeCompletionCommands[command]...)
+	if subcommands, ok := moduleCommands[command]; ok {
+		for subcommand := range subcommands {
+			values = append(values, subcommand)
+		}
+	}
+	values = uniqueStrings(values)
 	sort.Strings(values)
 	return values
 }
@@ -68,16 +79,12 @@ _yeelight_home_completion() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   case "$prev" in
     yeelight-home) COMPREPLY=( $(compgen -W "%s" -- "$cur") ); return 0 ;;
-    auth) COMPREPLY=( $(compgen -W "%s" -- "$cur") ); return 0 ;;
     token) COMPREPLY=( $(compgen -W "%s" -- "$cur") ); return 0 ;;
-    config) COMPREPLY=( $(compgen -W "%s" -- "$cur") ); return 0 ;;
-    home) COMPREPLY=( $(compgen -W "%s" -- "$cur") ); return 0 ;;
-    profile) COMPREPLY=( $(compgen -W "%s" -- "$cur") ); return 0 ;;
-    completion) COMPREPLY=( $(compgen -W "%s" -- "$cur") ); return 0 ;;
+%s
   esac
 }
 complete -F _yeelight_home_completion yeelight-home
-`, strings.Join(rootCommandNames(), " "), strings.Join(completionSubcommands("auth"), " "), strings.Join(completionSubcommands("auth token"), " "), strings.Join(completionSubcommands("config"), " "), strings.Join(completionSubcommands("home"), " "), strings.Join(completionSubcommands("profile"), " "), strings.Join(completionSubcommands("completion"), " "))
+`, strings.Join(rootCommandNames(), " "), strings.Join(completionSubcommands("auth token"), " "), bashResourceCompletionCases())
 }
 
 func zshCompletionScript() string {
@@ -85,8 +92,16 @@ func zshCompletionScript() string {
 # zsh completion for yeelight-home
 local -a commands
 commands=(%s)
-_describe 'command' commands
-`, strings.Join(shellWords(rootCommandNames()), " "))
+
+if (( CURRENT == 2 )); then
+  _describe 'command' commands
+  return
+fi
+
+case "$words[2]" in
+%s
+esac
+`, strings.Join(shellWords(rootCommandNames()), " "), zshResourceCompletionCases())
 }
 
 func fishCompletionScript() string {
@@ -94,7 +109,7 @@ func fishCompletionScript() string {
 	for _, command := range rootCommandNames() {
 		lines = append(lines, fmt.Sprintf("complete -c yeelight-home -f -n '__fish_use_subcommand' -a %s", command))
 	}
-	for _, command := range []string{"auth", "config", "home", "profile", "completion"} {
+	for _, command := range rootCommandNames() {
 		for _, subcommand := range completionSubcommands(command) {
 			lines = append(lines, fmt.Sprintf("complete -c yeelight-home -f -n '__fish_seen_subcommand_from %s' -a %s", command, subcommand))
 		}
@@ -120,4 +135,28 @@ func shellWords(values []string) []string {
 		quoted = append(quoted, "'"+strings.ReplaceAll(value, "'", "''")+"'")
 	}
 	return quoted
+}
+
+func bashResourceCompletionCases() string {
+	lines := []string{}
+	for _, command := range rootCommandNames() {
+		subcommands := completionSubcommands(command)
+		if len(subcommands) == 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("    %s) COMPREPLY=( $(compgen -W \"%s\" -- \"$cur\") ); return 0 ;;", command, strings.Join(subcommands, " ")))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func zshResourceCompletionCases() string {
+	lines := []string{}
+	for _, command := range rootCommandNames() {
+		subcommands := completionSubcommands(command)
+		if len(subcommands) == 0 {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  %s) local -a actions; actions=(%s); _describe 'action' actions ;;", command, strings.Join(shellWords(subcommands), " ")))
+	}
+	return strings.Join(lines, "\n")
 }

@@ -227,11 +227,17 @@ func (client MetadataReadonlyClient) RunGroupSearch(ctx context.Context, request
 }
 
 func (client MetadataReadonlyClient) RunGroupDetailGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
+	houseID := strings.TrimSpace(request.HouseID)
+	if houseID == "" {
+		return metadataReadonlyMissingContext(client.endpoint.Region, "group.detail.get", "house_context_missing"), nil
+	}
 	groupID := strings.TrimSpace(firstNonEmpty(stringFromAny(request.Parameters["groupId"]), stringFromAny(request.Parameters["id"])))
 	if groupID == "" {
-		return metadataReadonlyMissingContext(client.endpoint.Region, "group.detail.get", "group_context_missing"), nil
+		result := metadataReadonlyMissingContext(client.endpoint.Region, "group.detail.get", "group_context_missing")
+		result.HouseID = houseID
+		return result, nil
 	}
-	return client.readPath(ctx, request, "group.detail.get", "/v1/group/"+groupID+"/r/detail", http.MethodPost, nil, map[string]any{"detail": nil})
+	return client.readPath(ctx, request, "group.detail.get", "/v2/thing/manage/house/"+pathSegment(houseID)+"/group/"+pathSegment(groupID)+"/r/info", http.MethodGet, nil, map[string]any{"detail": nil})
 }
 
 func (client MetadataReadonlyClient) RunSceneDetailGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {

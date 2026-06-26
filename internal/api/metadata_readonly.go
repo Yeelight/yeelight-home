@@ -367,10 +367,8 @@ func sanitizeCloudData(value any) any {
 	case map[string]any:
 		item := map[string]any{}
 		for key, value := range typed {
-			normalized := strings.ToLower(key)
-			if strings.Contains(normalized, "token") || strings.Contains(normalized, "secret") ||
-				strings.Contains(normalized, "password") || strings.Contains(normalized, "authorization") ||
-				strings.Contains(normalized, "cookie") {
+			normalized := strings.ToLower(strings.TrimSpace(key))
+			if isSensitiveCloudField(normalized) {
 				continue
 			}
 			switch {
@@ -394,6 +392,25 @@ func sanitizeCloudData(value any) any {
 	default:
 		return value
 	}
+}
+
+func isSensitiveCloudField(normalized string) bool {
+	compact := strings.NewReplacer("_", "", "-", "", ".", "").Replace(normalized)
+	if strings.Contains(compact, "token") || strings.Contains(compact, "secret") ||
+		strings.Contains(compact, "password") || strings.Contains(compact, "authorization") ||
+		strings.Contains(compact, "cookie") || strings.Contains(compact, "credential") {
+		return true
+	}
+	switch compact {
+	case "key", "psk", "pskc", "ltk", "mibk", "midk", "hrbk", "meibk":
+		return true
+	}
+	for _, prefix := range []string{"local", "bind", "device", "access", "private", "shared", "network", "wifi", "api", "app", "miot"} {
+		if compact == prefix+"key" {
+			return true
+		}
+	}
+	return false
 }
 
 func stringFromAny(value any) string {

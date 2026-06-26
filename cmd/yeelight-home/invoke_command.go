@@ -45,11 +45,22 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 
 func (app *app) invoke(ctx context.Context, request contract.Request) (contract.Response, error) {
 	flags := cliFlags{values: map[string]string{}}
+	return app.invokeWithFlags(ctx, request, flags)
+}
+
+func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, flags cliFlags) (contract.Response, error) {
+	if flags.values == nil {
+		flags.values = map[string]string{}
+	}
 	if region := requestString(request.Parameters["region"]); region != "" {
-		flags.values["region"] = region
+		if flags.string("region", "") == "" {
+			flags.values["region"] = region
+		}
 	}
 	if houseID := requestHouseID(request); houseID != "" {
-		flags.values["house-id"] = houseID
+		if flags.string("house-id", "") == "" {
+			flags.values["house-id"] = houseID
+		}
 	}
 	context, err := app.resolveRuntimeContext(flags)
 	if err != nil {
