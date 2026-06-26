@@ -153,19 +153,19 @@ func (app *app) invoke(ctx context.Context, request contract.Request) (contract.
 	case "gateway.scene_relation.list":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.scene_relation.list", "已读取网关关联情景的安全摘要。"))
 	case "home.summary":
-		summary, err := api.NewHomeSummaryClient(endpoint, nil).Run(ctx, api.HomeSummaryCredentials{
+		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunListWithSelectedFallback(ctx, api.HomeSummaryCredentials{
 			Authorization: accessToken,
 			ClientID:      clientID,
-		})
+		}, houseID)
 		if err != nil {
 			return contract.Response{}, err
 		}
 		return homeSummaryResponse(request, summary), nil
 	case "home.list":
-		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunList(ctx, api.HomeSummaryCredentials{
+		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunListWithSelectedFallback(ctx, api.HomeSummaryCredentials{
 			Authorization: accessToken,
 			ClientID:      clientID,
-		})
+		}, houseID)
 		if err != nil {
 			return contract.Response{}, err
 		}
@@ -562,7 +562,7 @@ func homeSummaryResponse(request contract.Request, summary api.HomeSummaryResult
 		Warnings: []string{},
 		TraceID:  "home-summary-readonly",
 		Metrics: map[string]any{
-			"apiCalls":  1,
+			"apiCalls":  firstPositive(summary.APICalls, 1),
 			"cacheHits": 0,
 		},
 	}

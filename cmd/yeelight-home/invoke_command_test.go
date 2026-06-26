@@ -45,6 +45,8 @@ func TestInvokeHomeSummaryUsesStoredCredentialAndReadOnlyAPI(t *testing.T) {
 		gotClientID = request.Header.Get("Client-Id")
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
+		case "/apis/iot/v1/house/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"id":"house-1","name":"默认家庭"},{"id":"house-2","name":"父母家"}]}}`))
 		case "/apis/iot/v1/house/r/list":
 			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"house-1","name":"默认家庭"},{"id":"house-2","name":"父母家"}]}`))
 		default:
@@ -71,7 +73,7 @@ func TestInvokeHomeSummaryUsesStoredCredentialAndReadOnlyAPI(t *testing.T) {
 	if strings.Contains(stdout.String(), "token-home-secret") || strings.Contains(stderr.String(), "token-home-secret") {
 		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	if len(gotCalls) != 1 || gotCalls[0] != "POST /apis/iot/v1/house/r/list" {
+	if len(gotCalls) != 1 || gotCalls[0] != "POST /apis/iot/v1/house/r/all" {
 		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
 	if gotAuthorization != "Bearer token-home-secret" {
@@ -101,6 +103,53 @@ func TestInvokeHomeSummaryUsesStoredCredentialAndReadOnlyAPI(t *testing.T) {
 	first, ok := houses[0].(map[string]any)
 	if !ok || first["name"] != "默认家庭" {
 		t.Fatalf("first house = %#v", houses[0])
+	}
+}
+
+func TestInvokeHomeSummaryFallsBackToSelectedHouseDetailWhenAccountListsAreEmpty(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/house/r/all", "/apis/iot/v1/house/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[]}}`))
+		case "/apis/iot/v1/house/house-selected/r/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"houseId":"house-selected","name":"已选家庭","description":"来自详情回退"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newTestApp(t)
+	if err := app.tokenStore.Save(credential.TokenRecord{Profile: "default", AccessToken: "Bearer token-home-secret"}); err != nil {
+		t.Fatalf("Save token error: %v", err)
+	}
+	if err := app.metadataStore.Save(credential.ProfileMetadata{Profile: "default", Region: "dev", HouseID: "house-selected"}); err != nil {
+		t.Fatalf("Save metadata error: %v", err)
+	}
+
+	input := `{"contractVersion":"1.0","requestId":"req-home-selected","locale":"zh-CN","utterance":"看看我的家庭","intent":"home.summary"}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Join(gotCalls, "\n") != "POST /apis/iot/v1/house/r/all\nPOST /apis/iot/v1/house/r/list\nGET /apis/iot/v1/house/house-selected/r/info" {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	result := response["result"].(map[string]any)
+	houses := result["houses"].([]any)
+	first := houses[0].(map[string]any)
+	metrics := response["metrics"].(map[string]any)
+	if result["houseCount"] != float64(1) || result["source"] != "selected_house_detail_fallback" || first["id"] != "house-selected" || first["name"] != "已选家庭" || metrics["apiCalls"] != float64(3) {
+		t.Fatalf("response = %#v", response)
 	}
 }
 
