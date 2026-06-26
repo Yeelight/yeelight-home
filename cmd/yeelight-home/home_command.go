@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
 )
@@ -55,6 +56,11 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 		return exitInternalError
 	}
 	if flags.bool("json") {
+		if summary.HouseCount == 0 && contextInfo.HouseID != "" {
+			if fallback, ok, fallbackErr := app.homeListSelectedHouseFallback(contextInfo, summary, stdout, stderr); fallbackErr == nil && ok {
+				return fallback
+			}
+		}
 		response := map[string]any{
 			"ok":         true,
 			"profile":    contextInfo.Profile,
@@ -63,6 +69,7 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 			"houseCount": summary.HouseCount,
 			"rawShape":   summary.RawShape,
 			"apiCalls":   summary.APICalls,
+			"source":     summary.Source,
 			"houseId":    contextInfo.HouseID,
 		}
 		if summary.HouseCount == 0 {
@@ -78,7 +85,67 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 	for _, house := range summary.Houses {
 		_, _ = fmt.Fprintf(stdout, "%s\t%s\n", house.ID, house.Name)
 	}
+	if summary.HouseCount == 0 && contextInfo.HouseID != "" {
+		_, _ = fmt.Fprintf(stdout, "(selected) %s\n", contextInfo.HouseID)
+	}
 	return exitOK
+}
+
+func (app *app) homeListSelectedHouseFallback(contextInfo runtimeContext, summary api.HomeSummaryResult, stdout io.Writer, stderr io.Writer) (int, bool, error) {
+	detail, err := api.NewMetadataReadonlyClient(contextInfo.Endpoint, nil).RunHomeDetailGet(context.Background(), api.MetadataReadonlyRequest{
+		HouseID: contextInfo.HouseID,
+		Credentials: api.MetadataReadonlyCredentials{
+			Authorization: contextInfo.AccessToken,
+			ClientID:      contextInfo.ClientID,
+		},
+	})
+	if err != nil {
+		return exitInternalError, false, err
+	}
+	detailMap, ok := detail.Data.(map[string]any)
+	if !ok || len(detailMap) == 0 {
+		return exitOK, false, nil
+	}
+	nestedMap, _ := detailMap["detail"].(map[string]any)
+	if len(nestedMap) == 0 {
+		nestedMap = detailMap
+	}
+	result := map[string]any{
+		"ok":         true,
+		"profile":    contextInfo.Profile,
+		"region":     contextInfo.Region,
+		"houseCount": 1,
+		"houses": []any{
+			map[string]any{
+				"id":       contextInfo.HouseID,
+				"name":     detailString(nestedMap, "name"),
+				"desc":     detailString(nestedMap, "description", "desc"),
+				"icon":     detailString(nestedMap, "img", "icon"),
+				"areaCode": detailString(nestedMap, "areaCode"),
+				"areaName": detailString(nestedMap, "areaName"),
+				"source":   "home.detail.get",
+			},
+		},
+		"rawShape": strings.Join([]string{summary.RawShape, "home.detail.get:" + detail.RawShape}, ","),
+		"apiCalls": summary.APICalls + detail.APICalls,
+		"source":   "selected_house_detail_fallback",
+		"houseId":  contextInfo.HouseID,
+		"warnings": []string{"empty_account_home_list"},
+		"next": []string{
+			"account home list is empty; showing the selected house detail fallback",
+			"run yeelight-home home select --house-id <id> if you want to persist a different default home",
+		},
+	}
+	return writeJSON(stdout, stderr, result), true, nil
+}
+
+func detailString(value map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if text := fmt.Sprint(value[key]); text != "<nil>" && text != "" {
+			return strings.TrimSpace(text)
+		}
+	}
+	return ""
 }
 
 func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -92,7 +159,11 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--json]")
 		return exitInvalidInput
 	}
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
+		return exitInternalError
+	}
 	metadata, _, err := app.metadataStore.Load(profile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)

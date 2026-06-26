@@ -55,7 +55,11 @@ func (app *app) runDevSeedAutomation(args []string, stdout io.Writer, stderr io.
 		_, _ = fmt.Fprintln(stderr, "dev seed-automation is only allowed for dev region")
 		return exitInvalidInput
 	}
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-automation: %v\n", err)
+		return exitInternalError
+	}
 	metadata, credentials, err := app.loadDevSeedProfile(profile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "dev seed-automation: %v\n", err)
@@ -113,7 +117,11 @@ func (app *app) runDevSeedHouse(args []string, stdout io.Writer, stderr io.Write
 		_, _ = fmt.Fprintln(stderr, "dev seed-house is only allowed for dev region")
 		return exitInvalidInput
 	}
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-house: %v\n", err)
+		return exitInternalError
+	}
 	metadata, credentials, err := app.loadDevSeedProfile(profile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "dev seed-house: %v\n", err)
@@ -167,7 +175,11 @@ func (app *app) runDevSeedRoom(args []string, stdout io.Writer, stderr io.Writer
 		_, _ = fmt.Fprintln(stderr, "dev seed-room is only allowed for dev region")
 		return exitInvalidInput
 	}
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-room: %v\n", err)
+		return exitInternalError
+	}
 	metadata, credentials, err := app.loadDevSeedProfile(profile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "dev seed-room: %v\n", err)
@@ -218,7 +230,11 @@ func (app *app) runDevSeedScene(args []string, stdout io.Writer, stderr io.Write
 		_, _ = fmt.Fprintln(stderr, "dev seed-scene is only allowed for dev region")
 		return exitInvalidInput
 	}
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-scene: %v\n", err)
+		return exitInternalError
+	}
 	metadata, credentials, err := app.loadDevSeedProfile(profile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "dev seed-scene: %v\n", err)

@@ -112,7 +112,9 @@ func TestInvokeHomeListAndSearchUseStoredCredentialAndReadOnlyAPI(t *testing.T) 
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/apis/iot/v1/house/r/all":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"houseId":1001,"name":"常住房","img":"home.png","description":"主住宅","areaCode":"CN-310000","areaName":"上海","roomNum":3,"deviceNum":12,"gatewayNum":2,"sceneNum":5,"automationNum":4,"areaNum":1,"accessToken":"not-allowed"}]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[]}}`))
+		case "/apis/iot/v1/house/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"houseId":1001,"name":"常住房","img":"home.png","description":"主住宅","areaCode":"CN-310000","areaName":"上海","roomNum":3,"deviceNum":12,"gatewayNum":2,"sceneNum":5,"automationNum":4,"areaNum":1,"accessToken":"not-allowed"}]}}`))
 		case "/apis/iot/v1/house/r/fuzzy":
 			if err := json.NewDecoder(request.Body).Decode(&gotSearchBody); err != nil {
 				t.Fatalf("decode search body: %v", err)
@@ -167,7 +169,7 @@ func TestInvokeHomeListAndSearchUseStoredCredentialAndReadOnlyAPI(t *testing.T) 
 			t.Fatalf("missing counts: %#v", first)
 		}
 	}
-	if strings.Join(gotCalls, "\n") != "POST /apis/iot/v1/house/r/all\nPOST /apis/iot/v1/house/r/fuzzy" {
+	if strings.Join(gotCalls, "\n") != "POST /apis/iot/v1/house/r/all\nPOST /apis/iot/v1/house/r/list\nPOST /apis/iot/v1/house/r/fuzzy" {
 		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
 	if gotSearchBody["fuzzyName"] != "父母" || gotSearchBody["pageNo"] != float64(2) || gotSearchBody["pageSize"] != float64(5) {
@@ -176,11 +178,12 @@ func TestInvokeHomeListAndSearchUseStoredCredentialAndReadOnlyAPI(t *testing.T) 
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
+	callsBeforeMissingKeyword := len(gotCalls)
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-home-search-missing","locale":"zh-CN","utterance":"搜索家庭","intent":"home.search"}`), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if len(gotCalls) != 2 {
+	if len(gotCalls) != callsBeforeMissingKeyword {
 		t.Fatalf("missing keyword should not call cloud: %#v", gotCalls)
 	}
 	var response map[string]any

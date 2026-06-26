@@ -93,7 +93,7 @@ func profileFromEnv() string {
 	return envOrDefault("YEELIGHT_HOME_PROFILE", "default")
 }
 
-func (app *app) resolveProfile(flags cliFlags) (string, error) {
+func (app *app) resolveTargetProfile(flags cliFlags) (string, error) {
 	if value := flags.string("profile", ""); value != "" {
 		return value, nil
 	}
@@ -108,6 +108,10 @@ func (app *app) resolveProfile(flags cliFlags) (string, error) {
 		return active, nil
 	}
 	return "default", nil
+}
+
+func (app *app) resolveProfile(flags cliFlags) (string, error) {
+	return app.resolveTargetProfile(flags)
 }
 
 func envOrDefault(name string, fallback string) string {

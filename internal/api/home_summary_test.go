@@ -78,6 +78,9 @@ func TestHomeSummaryClientRunListReturnsHouseStatsProjection(t *testing.T) {
 	if result.APICalls != 1 || result.HouseCount != 1 {
 		t.Fatalf("result = %#v", result)
 	}
+	if result.Source != "/v1/house/r/all" {
+		t.Fatalf("source = %s", result.Source)
+	}
 	house := result.Houses[0]
 	if house.ID != "1001" || house.Name != "常住房" || house.Icon != "home.png" || house.Desc != "主住宅" || house.AreaCode != "CN-310000" || house.AreaName != "上海" {
 		t.Fatalf("house = %#v", house)
@@ -112,6 +115,113 @@ func TestHomeSummaryClientRunListParsesDataListWrapper(t *testing.T) {
 	}
 	if result.Houses[0].Counts["rooms"] != 1 {
 		t.Fatalf("counts = %#v", result.Houses[0].Counts)
+	}
+}
+
+func TestHomeSummaryClientRunListParsesNestedResultItemsAndSkipsInvalidRows(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/house/r/all" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"result":{"items":[{"name":"缺少ID"},{"id":"house-nested","name":"嵌套家庭","deviceNum":"6"}]}}}`))
+	}))
+	defer server.Close()
+
+	client := NewHomeSummaryClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunList(context.Background(), HomeSummaryCredentials{Authorization: "secret-token"})
+	if err != nil {
+		t.Fatalf("RunList error: %v", err)
+	}
+	if result.HouseCount != 1 || result.Houses[0].ID != "house-nested" || result.Houses[0].Name != "嵌套家庭" {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Houses[0].Counts["devices"] != 6 {
+		t.Fatalf("counts = %#v", result.Houses[0].Counts)
+	}
+}
+
+func TestHomeSummaryClientRunListParsesSingleHouseObject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/house/r/all" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"houseId":"single-house","houseName":"单家庭","roomNum":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewHomeSummaryClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunList(context.Background(), HomeSummaryCredentials{Authorization: "secret-token"})
+	if err != nil {
+		t.Fatalf("RunList error: %v", err)
+	}
+	if result.HouseCount != 1 || result.Houses[0].ID != "single-house" || result.Houses[0].Name != "单家庭" {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Houses[0].Counts["rooms"] != 2 {
+		t.Fatalf("counts = %#v", result.Houses[0].Counts)
+	}
+}
+
+func TestHomeSummaryClientRunListParsesHouseListAliases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/house/r/all" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"houseList":[{"houseId":"alias-house","houseName":"别名家庭","deviceNum":4}]}}`))
+	}))
+	defer server.Close()
+
+	client := NewHomeSummaryClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunList(context.Background(), HomeSummaryCredentials{Authorization: "secret-token"})
+	if err != nil {
+		t.Fatalf("RunList error: %v", err)
+	}
+	if result.HouseCount != 1 || result.Houses[0].ID != "alias-house" || result.Houses[0].Name != "别名家庭" {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Houses[0].Counts["devices"] != 4 {
+		t.Fatalf("counts = %#v", result.Houses[0].Counts)
+	}
+}
+
+func TestHomeSummaryClientRunListFallsBackToBasicHomeListWhenAllIsEmpty(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls = append(calls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/house/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[]}}`))
+		case "/apis/iot/v1/house/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"houseId":"house-fallback","houseName":"回退家庭"}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHomeSummaryClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunList(context.Background(), HomeSummaryCredentials{Authorization: "secret-token"})
+	if err != nil {
+		t.Fatalf("RunList error: %v", err)
+	}
+	if strings.Join(calls, "\n") != "POST /apis/iot/v1/house/r/all\nPOST /apis/iot/v1/house/r/list" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if result.APICalls != 2 || result.Source != "/v1/house/r/list" || result.HouseCount != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.Houses[0].ID != "house-fallback" || result.Houses[0].Name != "回退家庭" {
+		t.Fatalf("houses = %#v", result.Houses)
+	}
+	if !strings.Contains(result.RawShape, "/v1/house/r/all:") || !strings.Contains(result.RawShape, "/v1/house/r/list:") {
+		t.Fatalf("rawShape = %s", result.RawShape)
 	}
 }
 

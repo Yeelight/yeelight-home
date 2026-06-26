@@ -13,7 +13,11 @@ if (!result.ok) {
 
 const child = spawnSync(result.binaryPath, process.argv.slice(2), {
   stdio: "inherit",
-  windowsHide: false
+  windowsHide: false,
+  env: {
+    ...process.env,
+    YEELIGHT_HOME_NPM_WRAPPER_PATH: __filename
+  }
 });
 
 if (child.error) {

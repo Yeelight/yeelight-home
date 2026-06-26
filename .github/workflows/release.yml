@@ -31,11 +31,20 @@ jobs:
       - name: Resolve release tag
         shell: bash
         run: |
+          set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "RELEASE_TAG=${{ inputs.tag_name }}" >> "$GITHUB_ENV"
           else
             echo "RELEASE_TAG=${{ github.ref_name }}" >> "$GITHUB_ENV"
           fi
+
+      - name: Checkout release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          git checkout "$RELEASE_TAG"
+          echo "GORELEASER_CURRENT_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
 
       - name: Test
         run: go test ./...

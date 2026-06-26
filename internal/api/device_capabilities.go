@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -336,6 +337,11 @@ func intFromAny(value any) int {
 	case json.Number:
 		result, _ := typed.Int64()
 		return int(result)
+	case string:
+		result, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil {
+			return result
+		}
 	}
 	return 0
 }

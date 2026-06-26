@@ -38,6 +38,8 @@ Supported region values:
 Examples:
 
 ```sh
+yeelight-home version --json
+yeelight-home doctor
 yeelight-home doctor --json
 yeelight-home doctor --json --region sg
 YEELIGHT_CLOUD_REGION=eu yeelight-home home list --json
@@ -50,6 +52,7 @@ Profiles let one machine keep separate local metadata for different accounts, ho
 ```sh
 yeelight-home profile list --json
 yeelight-home profile show --profile default --json
+yeelight-home profile show --profile family --region sg --house-id <house-id> --json
 yeelight-home profile use --profile family --region cn
 yeelight-home profile use --profile family --region cn --house-id <house-id>
 yeelight-home profile delete --profile family
@@ -78,21 +81,23 @@ yeelight-home auth login --qr --profile default --qr-png /tmp/yeelight-login.png
 
 ```sh
 yeelight-home auth token set --profile default --token <access-token> --region cn
+printf '%s' "$YEELIGHT_DEV_TOKEN" | yeelight-home auth token set --profile dev --region dev --stdin --json
 yeelight-home auth token set --profile default --token <access-token> --region cn --house-id <house-id>
 yeelight-home auth token delete --profile default
 ```
 
-Use token import only outside AI chat. Tokens are redacted from normal output and are not written to profile metadata.
+Use token import only outside AI chat. Prefer `--stdin` for real terminals so the token does not appear in shell history.
+Tokens are redacted from normal output and are not written to profile metadata.
 Token-only setup is valid. Omit `--house-id` when you only need account-level commands or will choose a default home later.
 
 ### Status
 
 ```sh
-yeelight-home auth status --json
+yeelight-home auth status
 yeelight-home auth status --json --profile family
 ```
 
-The status output includes token presence and source, not token values.
+The status output includes token presence and source, not token values. Use `--json` when an automation or support script needs structured output.
 
 ## Home Selection
 
@@ -110,6 +115,7 @@ The selected home is a default context, not an authentication requirement. Accou
 
 ```sh
 yeelight-home config get --json
+yeelight-home config list --profile family --json
 yeelight-home config set --profile family --region cn --house-id <house-id> --json
 yeelight-home config unset --profile family --house-id --json
 ```
@@ -149,7 +155,7 @@ Default paths are platform-specific:
 | Linux | `~/.yeelight-home` or XDG-compatible directories depending on environment |
 | Windows | `%LOCALAPPDATA%\YeelightHome` |
 
-Run `yeelight-home doctor --json` to see the exact paths on the current machine.
+Run `yeelight-home doctor` for a readable summary or `yeelight-home doctor --json` for the exact machine-readable paths on the current machine. Add `--online` only when you want to compare local install channels with public GitHub, npm, and Homebrew latest versions.
 
 ## Skill Integration
 
@@ -162,8 +168,11 @@ yeelight-home invoke --stdin
 Skill wrappers find the CLI in this order:
 
 1. `YEELIGHT_HOME_BIN`
-2. Development-only source checkout binary
-3. `yeelight-home` on `PATH`
+2. `yeelight-home` on `PATH`
+
+Published Skill packages do not carry or auto-discover Runtime source-tree
+binaries. Use `YEELIGHT_HOME_BIN` for a deliberate local override, or install
+the public CLI so it is available on `PATH`.
 
 After installation:
 
@@ -188,6 +197,12 @@ Run:
 ```sh
 yeelight-home auth status --json
 yeelight-home auth login --qr
+```
+
+If QR login is unavailable and you already have an approved token, import it locally outside chat:
+
+```sh
+printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn
 ```
 
 ### Wrong region
@@ -219,6 +234,7 @@ yeelight-home home select --house-id <house-id>
 Run:
 
 ```sh
+yeelight-home doctor
 yeelight-home doctor --json
 ```
 

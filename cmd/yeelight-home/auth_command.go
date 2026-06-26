@@ -15,9 +15,9 @@ import (
 	localoutput "github.com/yeelight/yeelight-home/internal/output"
 )
 
-func (app *app) runAuth(args []string, stdout io.Writer, stderr io.Writer) int {
+func (app *app) runAuth(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth <status|login>")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth <status|login|token>")
 		return exitInvalidInput
 	}
 	switch args[0] {
@@ -29,15 +29,15 @@ func (app *app) runAuth(args []string, stdout io.Writer, stderr io.Writer) int {
 			_, _ = fmt.Fprintf(stderr, "auth status: %v\n", err)
 			return exitInvalidInput
 		}
-		if err := requireJSONFlag(flags, "usage: yeelight-home auth status --json [--profile <name>]"); err != nil {
-			_, _ = fmt.Fprintln(stderr, err.Error())
-			return exitInvalidInput
+		status := app.authStatus(flags)
+		if flags.bool("json") {
+			return writeJSON(stdout, stderr, status)
 		}
-		return writeJSON(stdout, stderr, app.authStatus(flags))
+		return writeAuthStatusText(stdout, status)
 	case "login":
 		return app.runAuthLogin(args[1:], stdout, stderr)
 	case "token":
-		return app.runAuthToken(args[1:], stdout, stderr)
+		return app.runAuthToken(args[1:], stdin, stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unsupported auth command %q\n", args[0])
 		return exitInvalidInput
@@ -79,7 +79,11 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 			_, _ = fmt.Fprintln(stderr, "auth qr-check: QR login response did not contain access token")
 			return exitInternalError
 		}
-		profile := flags.string("profile", profileFromEnv())
+		profile, err := app.resolveTargetProfile(flags)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
+			return exitInternalError
+		}
 		device, err := app.resolveQRDevice(profile, flags.string("device", ""))
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
@@ -131,6 +135,28 @@ func (app *app) authStatus(flags cliFlags) map[string]any {
 	return response
 }
 
+func writeAuthStatusText(stdout io.Writer, response map[string]any) int {
+	_, _ = fmt.Fprintln(stdout, "Yeelight Home Auth")
+	_, _ = fmt.Fprintf(stdout, "Authenticated: %t\n", boolFromDiagnostic(response, "authenticated"))
+	_, _ = fmt.Fprintf(stdout, "Profile: %s\n", stringFromDiagnostic(response, "profile"))
+	_, _ = fmt.Fprintf(stdout, "Region: %s\n", stringFromDiagnostic(response, "region"))
+	houseID := stringFromDiagnostic(response, "houseId")
+	if houseID == "" {
+		houseID = "(not selected)"
+	}
+	_, _ = fmt.Fprintf(stdout, "House ID: %s\n", houseID)
+	_, _ = fmt.Fprintf(stdout, "Token present: %t\n", boolFromDiagnostic(response, "tokenPresent"))
+	tokenSource := stringFromDiagnostic(response, "tokenSource")
+	if tokenSource == "" {
+		tokenSource = "(none)"
+	}
+	_, _ = fmt.Fprintf(stdout, "Token source: %s\n", tokenSource)
+	if errText := stringFromDiagnostic(response, "error"); errText != "" {
+		_, _ = fmt.Fprintf(stdout, "Error: %s\n", errText)
+	}
+	return exitOK
+}
+
 func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags, err := parseFlags(args)
 	if err != nil {
@@ -142,7 +168,11 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInvalidInput
 	}
 	asJSON := flags.bool("json")
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "auth login: %v\n", err)
+		return exitInternalError
+	}
 	qrPNGPath := flags.string("qr-png", "")
 	endpoint, err := resolveEndpointForFlags(flags)
 	if err != nil {
@@ -217,7 +247,7 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 	return exitOK
 }
 
-func (app *app) runAuthToken(args []string, stdout io.Writer, stderr io.Writer) int {
+func (app *app) runAuthToken(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth token <set|delete>")
 		return exitInvalidInput
@@ -229,13 +259,29 @@ func (app *app) runAuthToken(args []string, stdout io.Writer, stderr io.Writer) 
 			_, _ = fmt.Fprintf(stderr, "auth token set: %v\n", err)
 			return exitInvalidInput
 		}
-		profile := flags.string("profile", profileFromEnv())
+		profile, err := app.resolveTargetProfile(flags)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "auth token set: %v\n", err)
+			return exitInternalError
+		}
 		token := strings.TrimSpace(flags.string("token", ""))
+		if token != "" && flags.bool("stdin") {
+			_, _ = fmt.Fprintln(stderr, "auth token set: --token and --stdin are mutually exclusive")
+			return exitInvalidInput
+		}
+		if token == "" && flags.bool("stdin") {
+			data, err := io.ReadAll(io.LimitReader(stdin, 256*1024))
+			if err != nil {
+				_, _ = fmt.Fprintf(stderr, "auth token set: read stdin: %v\n", err)
+				return exitInternalError
+			}
+			token = strings.TrimSpace(string(data))
+		}
 		if token == "" {
 			token = strings.TrimSpace(os.Getenv("YEELIGHT_HOME_ACCESS_TOKEN"))
 		}
 		if token == "" {
-			_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth token set --token <access-token> [--profile <name>] [--region <region>] [--house-id <id>] [--json]")
+			_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]")
 			return exitInvalidInput
 		}
 		if err := app.tokenStore.Save(credential.TokenRecord{Profile: profile, AccessToken: token}); err != nil {
@@ -276,7 +322,11 @@ func (app *app) runAuthToken(args []string, stdout io.Writer, stderr io.Writer) 
 			_, _ = fmt.Fprintf(stderr, "auth token delete: %v\n", err)
 			return exitInvalidInput
 		}
-		profile := flags.string("profile", profileFromEnv())
+		profile, err := app.resolveTargetProfile(flags)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "auth token delete: %v\n", err)
+			return exitInternalError
+		}
 		if err := app.tokenStore.Delete(profile); err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth token delete: %v\n", err)
 			return exitInternalError

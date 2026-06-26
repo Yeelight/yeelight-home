@@ -17,6 +17,7 @@ Commands:
   profile    List, show, activate, and delete profiles
   config     Read and update non-secret profile configuration
   home       List and select homes
+  completion Generate shell completion scripts
   invoke     Execute one Skill Runtime request from stdin
   approve    Commit a guarded pending plan
   api        Run account-scoped API smoke checks
@@ -32,21 +33,22 @@ Configuration precedence:
 
 Common examples:
   yeelight-home auth login --qr --region dev
-  yeelight-home auth status --json
+  yeelight-home auth status
   yeelight-home home list --json --region dev
   yeelight-home home select --house-id <id> --region dev
   yeelight-home invoke --stdin
-  yeelight-home doctor --json
+  yeelight-home doctor
+  yeelight-home completion zsh
 `
 
 var commandHelpText = map[string]string{
 	"api": `Usage:
-  yeelight-home api smoke --json [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home api smoke [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 
 Runs account and home-list smoke checks with the active local token.
 `,
 	"api smoke": `Usage:
-  yeelight-home api smoke --json [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home api smoke [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 
 Runs account, home-list, and optional house-context smoke checks with the active local token.
 `,
@@ -56,9 +58,9 @@ Runs account, home-list, and optional house-context smoke checks with the active
 Commits a guarded pending plan created by yeelight-home invoke.
 `,
 	"auth": `Usage:
-  yeelight-home auth status --json [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--house-id <id>]
   yeelight-home auth login --qr [--json] [--profile <name>] [--region <region>] [--house-id <id>]
-  yeelight-home auth token set --token <access-token> [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]
   yeelight-home auth token delete [--profile <name>] [--json]
 
 Tokens are stored in the system credential store when available. Profile files keep only non-secret metadata.
@@ -74,15 +76,16 @@ Starts QR login for the selected region. houseId is optional profile context, no
 Checks a QR login request and saves credentials locally when the QR status reaches LOGIN.
 `,
 	"auth status": `Usage:
-  yeelight-home auth status --json [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 
 Reports local credential presence and resolved profile context without printing token values.
 `,
 	"auth token": `Usage:
-  yeelight-home auth token set --token <access-token> [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]
   yeelight-home auth token delete [--profile <name>] [--json]
 
-Imports or deletes a token in the local credential store. Tokens are never written to profile metadata.
+Imports or deletes a token in the local credential store. Use --stdin to avoid putting secrets in shell history.
+Tokens are never written to profile metadata.
 `,
 	"auth token delete": `Usage:
   yeelight-home auth token delete [--profile <name>] [--json]
@@ -90,9 +93,10 @@ Imports or deletes a token in the local credential store. Tokens are never writt
 Deletes the selected profile token from the local credential store and protected fallback.
 `,
 	"auth token set": `Usage:
-  yeelight-home auth token set --token <access-token> [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]
 
 Imports a token into local credential storage. Omit houseId for token-only account-scoped use.
+For interactive use, prefer: printf '%s' "$TOKEN" | yeelight-home auth token set --stdin --profile dev --region dev
 `,
 	"config": `Usage:
   yeelight-home config get [--json] [--profile <name>] [--region <region>] [--house-id <id>]
@@ -120,6 +124,11 @@ Updates non-secret profile metadata only. It never stores token values.
 
 Clears selected non-secret metadata fields from a profile.
 `,
+	"completion": `Usage:
+  yeelight-home completion <bash|zsh|fish|powershell>
+
+Prints a shell completion script to stdout.
+`,
 	"dev": `Usage:
   yeelight-home dev <seed-house|seed-room|seed-scene|seed-automation> --json --region dev --allow-write-dev ...
 
@@ -138,9 +147,10 @@ Development-only fixture commands. Writes require explicit dev region and --allo
   yeelight-home dev seed-scene --json --region dev --house-id <id> --device-id <id> --name <name> --allow-write-dev
 `,
 	"doctor": `Usage:
-  yeelight-home doctor --json [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home doctor [--json] [--online] [--profile <name>] [--region <region>] [--house-id <id>]
 
 Prints local paths, active profile, token presence, region, houseId, and install diagnostics.
+Pass --online to also check public GitHub, npm, and Homebrew latest versions.
 `,
 	"home": `Usage:
   yeelight-home home list [--json] [--profile <name>] [--region <region>]
@@ -190,8 +200,8 @@ Shows the resolved profile context without exposing token values.
 Persists the active profile and optional non-secret profile metadata.
 `,
 	"version": `Usage:
-  yeelight-home version
-  yeelight-home --version
+  yeelight-home version [--json]
+  yeelight-home --version [--json]
 `,
 }
 
@@ -243,9 +253,4 @@ func isHelpArg(value string) bool {
 
 func isVersionArg(value string) bool {
 	return value == "version" || value == "--version" || value == "-v"
-}
-
-func printVersion(stdout io.Writer) int {
-	_, _ = fmt.Fprintf(stdout, "yeelight-home %s\n", version)
-	return exitOK
 }

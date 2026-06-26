@@ -15,9 +15,10 @@ const (
 )
 
 type QRToken struct {
-	AccessToken string `json:"accessToken"`
-	Token       string `json:"token"`
-	ClientID    string `json:"clientId"`
+	AccessToken   string `json:"accessToken"`
+	Token         string `json:"token"`
+	Authorization string `json:"authorization"`
+	ClientID      string `json:"clientId"`
 }
 
 type QRInfo struct {
@@ -26,6 +27,7 @@ type QRInfo struct {
 	ExpireAt int64   `json:"expireAt"`
 	Token    QRToken `json:"token"`
 	Source   string  `json:"source"`
+	HouseID  string  `json:"houseId"`
 }
 
 type LoginCredentials struct {
@@ -83,10 +85,73 @@ func GenerateQRLoginDevice() string {
 
 func ExtractQRLoginCredentials(info QRInfo) LoginCredentials {
 	return LoginCredentials{
-		Authorization: NormalizeAuthorization(firstNonEmpty(info.Token.AccessToken, info.Token.Token)),
+		Authorization: NormalizeAuthorization(firstNonEmpty(info.Token.Authorization, info.Token.AccessToken, info.Token.Token)),
 		ClientID:      strings.TrimSpace(info.Token.ClientID),
-		HouseID:       ExtractHouseID(info.Source),
+		HouseID:       firstNonEmpty(info.HouseID, ExtractHouseID(info.Source)),
 	}
+}
+
+func (token *QRToken) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	var tokenText string
+	if err := json.Unmarshal(data, &tokenText); err == nil {
+		token.Token = strings.TrimSpace(tokenText)
+		return nil
+	}
+	var parsed struct {
+		AccessToken      string `json:"accessToken"`
+		AccessTokenSnake string `json:"access_token"`
+		Token            string `json:"token"`
+		Authorization    string `json:"authorization"`
+		ClientID         string `json:"clientId"`
+		ClientIDSnake    string `json:"client_id"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	token.AccessToken = firstNonEmpty(parsed.AccessToken, parsed.AccessTokenSnake)
+	token.Token = strings.TrimSpace(parsed.Token)
+	token.Authorization = strings.TrimSpace(parsed.Authorization)
+	token.ClientID = firstNonEmpty(parsed.ClientID, parsed.ClientIDSnake)
+	return nil
+}
+
+func (info *QRInfo) UnmarshalJSON(data []byte) error {
+	var parsed struct {
+		QRCodeID         string  `json:"qrCodeId"`
+		QRCodeIDSnake    string  `json:"qr_code_id"`
+		Status           string  `json:"status"`
+		ExpireAt         int64   `json:"expireAt"`
+		ExpireAtSnake    int64   `json:"expire_at"`
+		Token            QRToken `json:"token"`
+		Source           string  `json:"source"`
+		Authorization    string  `json:"authorization"`
+		AccessToken      string  `json:"accessToken"`
+		AccessTokenSnake string  `json:"access_token"`
+		ClientID         string  `json:"clientId"`
+		ClientIDSnake    string  `json:"client_id"`
+		HouseID          any     `json:"houseId"`
+		HouseIDSnake     any     `json:"house_id"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	info.QRCodeID = firstNonEmpty(parsed.QRCodeID, parsed.QRCodeIDSnake)
+	info.Status = strings.TrimSpace(parsed.Status)
+	info.ExpireAt = parsed.ExpireAt
+	if info.ExpireAt == 0 {
+		info.ExpireAt = parsed.ExpireAtSnake
+	}
+	info.Token = parsed.Token
+	info.Token.Authorization = firstNonEmpty(info.Token.Authorization, parsed.Authorization)
+	info.Token.AccessToken = firstNonEmpty(info.Token.AccessToken, parsed.AccessToken, parsed.AccessTokenSnake)
+	info.Token.ClientID = firstNonEmpty(info.Token.ClientID, parsed.ClientID, parsed.ClientIDSnake)
+	info.Source = strings.TrimSpace(parsed.Source)
+	info.HouseID = firstNonEmpty(houseIDFromAny(parsed.HouseID), houseIDFromAny(parsed.HouseIDSnake))
+	return nil
 }
 
 func ExtractHouseID(source string) string {
@@ -96,20 +161,27 @@ func ExtractHouseID(source string) string {
 	}
 	normalized = strings.TrimPrefix(normalized, "dali:")
 	var parsed struct {
-		HouseID any `json:"houseId"`
+		HouseID      any `json:"houseId"`
+		HouseIDSnake any `json:"house_id"`
 	}
-	if err := json.Unmarshal([]byte(normalized), &parsed); err == nil && parsed.HouseID != nil {
-		switch value := parsed.HouseID.(type) {
-		case string:
-			return value
-		case float64:
-			return strings.TrimRight(strings.TrimRight(jsonNumber(value), "0"), ".")
-		}
+	if err := json.Unmarshal([]byte(normalized), &parsed); err == nil {
+		return firstNonEmpty(houseIDFromAny(parsed.HouseID), houseIDFromAny(parsed.HouseIDSnake))
 	}
 	if regexp.MustCompile(`^\d+$`).MatchString(normalized) {
 		return normalized
 	}
 	return ""
+}
+
+func houseIDFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		return strings.TrimRight(strings.TrimRight(jsonNumber(typed), "0"), ".")
+	default:
+		return ""
+	}
 }
 
 func NormalizeAuthorization(value string) string {

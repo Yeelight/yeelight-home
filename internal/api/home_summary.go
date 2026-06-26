@@ -31,6 +31,7 @@ type HomeSummaryResult struct {
 	Houses     []HouseSummary `json:"houses"`
 	RawShape   string         `json:"rawShape"`
 	APICalls   int            `json:"apiCalls"`
+	Source     string         `json:"source,omitempty"`
 }
 
 type HomeSummaryClient struct {
@@ -46,10 +47,7 @@ func NewHomeSummaryClient(endpoint Endpoint, client *http.Client) HomeSummaryCli
 }
 
 func (client HomeSummaryClient) Run(ctx context.Context, credentials HomeSummaryCredentials) (HomeSummaryResult, error) {
-	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/r/list", map[string]any{}, requestCredentials{
-		Authorization: credentials.Authorization,
-		ClientID:      credentials.ClientID,
-	})
+	response, err := client.callHomeList(ctx, "/v1/house/r/list", credentials)
 	if err != nil {
 		return HomeSummaryResult{}, err
 	}
@@ -63,28 +61,55 @@ func (client HomeSummaryClient) Run(ctx context.Context, credentials HomeSummary
 		Houses:     houses,
 		RawShape:   responseDataType(response),
 		APICalls:   1,
+		Source:     "/v1/house/r/list",
 	}, nil
 }
 
 func (client HomeSummaryClient) RunList(ctx context.Context, credentials HomeSummaryCredentials) (HomeSummaryResult, error) {
-	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/r/all", map[string]any{}, requestCredentials{
-		Authorization: credentials.Authorization,
-		ClientID:      credentials.ClientID,
-	})
+	allResponse, err := client.callHomeList(ctx, "/v1/house/r/all", credentials)
 	if err != nil {
 		return HomeSummaryResult{}, err
 	}
-	if !isBusinessOK(response) {
-		return HomeSummaryResult{}, fmt.Errorf("home list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+	if !isBusinessOK(allResponse) {
+		return HomeSummaryResult{}, fmt.Errorf("home list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(allResponse, "code"), responseScalar(allResponse, "message", "msg"), responseDataType(allResponse))
 	}
-	houses := extractHouseSummaries(response)
+	houses := extractHouseSummaries(allResponse)
+	rawShapes := []string{"/v1/house/r/all:" + responseDataType(allResponse)}
+	source := "/v1/house/r/all"
+	apiCalls := 1
+	if len(houses) == 0 {
+		listResponse, err := client.callHomeList(ctx, "/v1/house/r/list", credentials)
+		if err != nil {
+			return HomeSummaryResult{}, err
+		}
+		apiCalls++
+		if !isBusinessOK(listResponse) {
+			return HomeSummaryResult{}, fmt.Errorf("home list fallback returned non-success business response: code=%s message=%s dataType=%s", responseScalar(listResponse, "code"), responseScalar(listResponse, "message", "msg"), responseDataType(listResponse))
+		}
+		fallbackHouses := extractHouseSummaries(listResponse)
+		rawShapes = append(rawShapes, "/v1/house/r/list:"+responseDataType(listResponse))
+		if len(fallbackHouses) > 0 {
+			houses = fallbackHouses
+			source = "/v1/house/r/list"
+		} else {
+			source = "/v1/house/r/all+/v1/house/r/list"
+		}
+	}
 	return HomeSummaryResult{
 		Region:     client.endpoint.Region,
 		HouseCount: len(houses),
 		Houses:     houses,
-		RawShape:   responseDataType(response),
-		APICalls:   1,
+		RawShape:   strings.Join(rawShapes, ","),
+		APICalls:   apiCalls,
+		Source:     source,
 	}, nil
+}
+
+func (client HomeSummaryClient) callHomeList(ctx context.Context, path string, credentials HomeSummaryCredentials) (map[string]any, error) {
+	return callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+path, map[string]any{}, requestCredentials{
+		Authorization: credentials.Authorization,
+		ClientID:      credentials.ClientID,
+	})
 }
 
 func (client HomeSummaryClient) RunSearch(ctx context.Context, parameters map[string]any, credentials HomeSummaryCredentials) (HomeSummaryResult, error) {
@@ -123,17 +148,7 @@ func (client HomeSummaryClient) RunSearch(ctx context.Context, parameters map[st
 }
 
 func extractHouseSummaries(response map[string]any) []HouseSummary {
-	rows, ok := response["data"].([]any)
-	if !ok {
-		if data, ok := response["data"].(map[string]any); ok {
-			for _, key := range []string{"rows", "list", "data", "records"} {
-				if candidates, ok := data[key].([]any); ok {
-					rows = candidates
-					break
-				}
-			}
-		}
-	}
+	rows := houseRowsFromAny(response["data"])
 	houses := make([]HouseSummary, 0, len(rows))
 	for _, row := range rows {
 		item, ok := row.(map[string]any)
@@ -148,10 +163,48 @@ func extractHouseSummaries(response map[string]any) []HouseSummary {
 			AreaCode: firstString(item, "areaCode"),
 			AreaName: firstString(item, "areaName"),
 		}
+		if house.ID == "" {
+			continue
+		}
 		house.Counts = houseCountProjection(item)
 		houses = append(houses, house)
 	}
 	return houses
+}
+
+func houseRowsFromAny(value any) []any {
+	switch typed := value.(type) {
+	case []any:
+		return typed
+	case map[string]any:
+		if looksLikeHouseRow(typed) {
+			return []any{typed}
+		}
+		for _, key := range []string{"rows", "list", "data", "records", "items", "result", "page", "houses", "houseList", "house_list", "content", "results", "dataList"} {
+			if rows := houseRowsFromAny(typed[key]); len(rows) > 0 {
+				return rows
+			}
+		}
+	}
+	return nil
+}
+
+func looksLikeHouseRow(value map[string]any) bool {
+	if firstString(value, "id", "houseId") == "" {
+		return false
+	}
+	return firstString(value, "name", "houseName") != "" ||
+		firstString(value, "areaCode", "areaName", "icon", "img", "desc", "description") != "" ||
+		hasAnyHouseKey(value, "roomNum", "deviceNum", "gatewayNum", "sceneNum", "automationNum", "areaNum")
+}
+
+func hasAnyHouseKey(value map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := value[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func houseCountProjection(item map[string]any) map[string]int {

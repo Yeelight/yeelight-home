@@ -61,7 +61,11 @@ func (app *app) runConfigSet(args []string, stdout io.Writer, stderr io.Writer) 
 		_, _ = fmt.Fprintf(stderr, "config set: %v\n", err)
 		return exitInvalidInput
 	}
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "config set: %v\n", err)
+		return exitInternalError
+	}
 	metadata, _, err := app.metadataStore.Load(profile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "config set: %v\n", err)
@@ -92,7 +96,11 @@ func (app *app) runConfigUnset(args []string, stdout io.Writer, stderr io.Writer
 		_, _ = fmt.Fprintf(stderr, "config unset: %v\n", err)
 		return exitInvalidInput
 	}
-	profile := flags.string("profile", profileFromEnv())
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "config unset: %v\n", err)
+		return exitInternalError
+	}
 	metadata, _, err := app.metadataStore.Load(profile)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "config unset: %v\n", err)

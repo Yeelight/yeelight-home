@@ -54,6 +54,7 @@ Debian, Ubuntu, Fedora, Arch, AUR, Snap, Docker, GHCR, Docker Hub, and Winget ch
 
 ```sh
 yeelight-home version
+yeelight-home doctor
 yeelight-home doctor --json
 yeelight-home auth status --json
 yeelight-home auth login --qr
@@ -64,13 +65,14 @@ yeelight-home home select --house-id <house-id>
 
 The default region is `cn`. Pass `--region sg`, `--region us`, or `--region eu` when your Yeelight account belongs to another cloud region.
 
-For non-interactive local setup, import a token outside chat:
+For non-interactive local setup, import a token outside chat. Prefer `--stdin` in real shells so the token is not saved in shell history:
 
 ```sh
-yeelight-home auth token set --token <access-token> --region cn
+printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn
+printf '%s' "$YEELIGHT_DEV_TOKEN" | yeelight-home auth token set --stdin --profile dev --region dev --json
 ```
 
-Token-only setup is valid. `houseId` is optional profile metadata for the default home. Account-level commands such as `auth status`, `doctor`, `api smoke`, `home list`, `home.summary`, `home.search`, and `account.info` do not require it. House-scoped operations such as device, room, scene, group, gateway, favorite, and automation actions require a `houseId` from the request, `YEELIGHT_HOME_HOUSE_ID`, or the selected profile.
+Token-only setup is valid. `houseId` is optional profile metadata for the default home. In other words, houseId is optional until you run a house-scoped command. Account-level commands such as `auth status`, `doctor`, `api smoke`, `home list`, `home.summary`, `home.search`, and `account.info` do not require it. House-scoped operations such as device, room, scene, group, gateway, favorite, and automation actions require a `houseId` from the request, `YEELIGHT_HOME_HOUSE_ID`, or the selected profile.
 
 Do not paste tokens into AI chat. The CLI stores tokens locally and never prints token values in normal status or doctor output.
 
@@ -108,19 +110,35 @@ See [CONFIG.md](CONFIG.md) for full command and precedence details.
 ### `doctor`
 
 ```sh
-yeelight-home doctor --json [--profile <name>] [--region <region>] [--house-id <id>]
+yeelight-home doctor [--json] [--online] [--profile <name>] [--region <region>] [--house-id <id>]
 ```
 
-Reports installation, config directories, selected profile, selected region, selected home, token presence, and warnings. Token values are never printed.
+Reports installation, config directories, selected profile, selected region, selected home, token presence, and warnings. Without `--json`, it prints a human-readable diagnostic summary. With `--json`, it prints the machine-readable diagnostic object. Token values are never printed.
 The selected home may be empty; that is healthy for token-only account-level use.
+The `install` object includes the running CLI version, executable path, `PATH` lookup result, OS, architecture, and npm wrapper path when launched through the npm package. If `path_lookup_differs_from_running_executable` appears, a shell, package manager, or Skill host is resolving a different `yeelight-home` binary than the one currently being inspected.
+It also includes `packageManagers.npm` and `packageManagers.homebrew` when those tools are available. Homebrew diagnostics include separate `formula` and `cask` entries so PATH drift can be traced to the exact channel. Use those fields to find stale npm wrappers, Homebrew formula installs, or Homebrew cask installs that differ from the Runtime binary on `PATH`.
+When launched by the npm wrapper, `doctor --json` reports `install.npmWrapper` and `install.npmWrapperResolved`. `npm_wrapper_differs_from_path_lookup` means the running wrapper is not the same file that the current shell would resolve from `PATH`; restart the host shell or remove the stale channel.
+Text output includes `Install source summary` to make the active PATH channel and installed npm/Homebrew versions visible without parsing JSON.
+Pass `--online` when you want `doctor` to query the public GitHub Release, npm registry, and Yeelight Homebrew tap latest versions. This is intentionally opt-in so default diagnostics stay fast and offline-friendly. A single online channel with `ok=false` means that channel could not be checked; other successful channel results and local warnings remain useful.
+The `install.remediations` array and the text-mode `Suggested fixes` section provide safe next commands for the detected local install shape.
+
+### `version`
+
+```sh
+yeelight-home version
+yeelight-home version --json
+```
+
+`version --json` reports build metadata: version, commit, build date, OS, and architecture.
 
 ### `auth status`
 
 ```sh
-yeelight-home auth status --json [--profile <name>]
+yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 ```
 
 Reports whether the selected profile has a usable local credential.
+Without `--json`, it prints a human-readable summary. With `--json`, it prints the machine-readable status object.
 
 ### `auth login`
 
@@ -134,17 +152,18 @@ Starts the local QR login flow. If `--region` is omitted, `cn` is used.
 ### `auth token set`
 
 ```sh
-yeelight-home auth token set --token <access-token> [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]
 ```
 
 Imports a token into the local credential store. It never writes the token into the profile metadata file.
+Prefer `--stdin` in real shells to avoid saving secrets in command history.
 `--house-id` is optional. Omit it when you only need account-level commands or plan to select a home later.
 
 ### `profile`
 
 ```sh
 yeelight-home profile list [--json]
-yeelight-home profile show [--profile <name>] [--json]
+yeelight-home profile show [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 yeelight-home profile use --profile <name> [--region <region>] [--house-id <id>] [--json]
 yeelight-home profile delete --profile <name> [--json]
 ```
@@ -156,11 +175,20 @@ The selected home can be empty in a profile.
 
 ```sh
 yeelight-home config get [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+yeelight-home config list [--profile <name>] [--json]
 yeelight-home config set [--profile <name>] [--region <region>] [--house-id <id>] [--qr-device <mac>] [--json]
 yeelight-home config unset [--profile <name>] [--region] [--house-id] [--qr-device] [--json]
 ```
 
 `config` changes non-secret profile metadata only.
+
+### `completion`
+
+```sh
+yeelight-home completion <bash|zsh|fish|powershell>
+```
+
+Prints a shell completion script to stdout. Install it using the standard mechanism for your shell.
 
 ### `home`
 
@@ -183,18 +211,22 @@ Reads a SkillRequest JSON object from stdin and writes a SkillResponse JSON obje
 ### `api smoke`
 
 ```sh
-yeelight-home api smoke --json [--profile <name>] [--region <region>] [--house-id <id>]
+yeelight-home api smoke [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 ```
 
 Runs a local cloud smoke check using the selected credential. This is intended for installation and support diagnostics.
+Without `--json`, it prints a human-readable summary. With `--json`, it prints account and home-list check details for support automation.
 
 ## Skill Integration
 
 Skill wrapper lookup order:
 
 1. `YEELIGHT_HOME_BIN`
-2. Development-only source checkout binary
-3. `yeelight-home` on `PATH`
+2. `yeelight-home` on `PATH`
+
+Published Skill packages do not carry or auto-discover Runtime source-tree
+binaries. Use `YEELIGHT_HOME_BIN` for a deliberate local override, or install
+the public CLI so it is available on `PATH`.
 
 When the Runtime is missing, install it from a published public channel, then run:
 
@@ -202,6 +234,12 @@ When the Runtime is missing, install it from a published public channel, then ru
 yeelight-home auth status --json
 yeelight-home auth login --qr
 yeelight-home home list --json
+```
+
+If QR login is unavailable and the user already has an approved token, import it locally outside chat:
+
+```sh
+printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn
 ```
 
 Skills must not call raw URLs, raw headers, curl, compatibility services, or token-bearing commands.

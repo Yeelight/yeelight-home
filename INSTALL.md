@@ -6,17 +6,47 @@ This document is for users installing the standalone `yeelight-home` CLI.
 
 ```sh
 yeelight-home version
+yeelight-home version --json
+yeelight-home doctor
 yeelight-home doctor --json
+yeelight-home doctor --json --online
 ```
+
+`version --json` reports build metadata. `doctor` prints a human-readable diagnostic summary. `doctor --json` reports the same data as a machine-readable object: running CLI version, executable path, `PATH` lookup result, npm wrapper path when applicable, and local package-manager diagnostics. Homebrew diagnostics distinguish formula and cask installs.
+`doctor --online` additionally checks public GitHub Release, npm registry, and Yeelight Homebrew tap latest versions. Use it when npm, Homebrew, Scoop, or a host application seems to be launching an older binary than the latest release. If one online channel reports `ok=false`, continue using the other channel results and the local warnings; public registries can rate-limit or temporarily fail independently.
+Text output includes an `Install source summary` section that calls out whether `PATH` resolves an npm wrapper and which npm/Homebrew versions are installed.
+If it includes `path_lookup_differs_from_running_executable`, the shell or host application is resolving a different `yeelight-home` binary than the one being inspected.
+If it includes `npm_wrapper_differs_from_path_lookup`, the active npm wrapper is not the same wrapper that the current shell resolves from `PATH`; restart the host shell, check `command -v yeelight-home`, or remove the stale channel.
+If it includes `npm_global_package_version_differs_from_runtime_version`, the globally installed npm wrapper version differs from the Runtime binary it launches or from the binary currently being inspected. Upgrade or reinstall through one channel and restart the host shell.
+If it includes `npm_global_package_behind_latest`, the npm registry has a newer published package than the globally installed wrapper. Run `npm install -g yeelight-home@latest` and restart the shell or Skill host.
+If it includes `homebrew_package_version_differs_from_runtime_version`, refresh Homebrew metadata and upgrade the formula or remove the older channel from `PATH`.
+If it includes `homebrew_formula_version_differs_from_runtime_version`, refresh Homebrew metadata and upgrade the formula with `brew update && brew upgrade yeelight-home`.
+If it includes `homebrew_cask_version_differs_from_runtime_version`, refresh Homebrew metadata and upgrade the cask with `brew update && brew upgrade --cask yeelight-home`.
+If it includes `homebrew_formula_behind_latest`, refresh Homebrew metadata with `brew update`, then run `brew upgrade yeelight-home` or reinstall from `Yeelight/tap`.
+If it includes `homebrew_cask_behind_latest`, refresh Homebrew metadata with `brew update`, then run `brew upgrade --cask yeelight-home` or reinstall from `Yeelight/tap`.
+Use `install.remediations` in JSON output, or the `Suggested fixes` section in text output, for the safest next command for the current machine.
 
 After installing, authenticate locally:
 
 ```sh
-yeelight-home auth status --json
+yeelight-home auth status
 yeelight-home auth login --qr
 ```
 
 The default region is `cn`. Use `--region sg`, `--region us`, or `--region eu` when needed.
+
+If QR login is not possible but you have an approved token, import it locally without putting it in shell history:
+
+```sh
+printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn
+```
+
+For dev validation:
+
+```sh
+printf '%s' "$YEELIGHT_DEV_TOKEN" | yeelight-home auth token set --stdin --profile dev --region dev --json
+yeelight-home home list --profile dev --region dev --json
+```
 
 ## GitHub Releases
 
@@ -109,6 +139,7 @@ If Winget cannot find the package yet, use GitHub Releases, Scoop, Homebrew on W
 ## npm Wrapper
 
 The npm package is a thin launcher. It downloads the matching GitHub Release binary on install or first run and verifies the checksum.
+When it launches the downloaded binary, it sets `YEELIGHT_HOME_NPM_WRAPPER_PATH` so `yeelight-home doctor --json` can report `install.npmWrapper` and `install.npmWrapperResolved`. This helps diagnose stale npm wrappers, Homebrew shadows, and host applications using a different `PATH`.
 
 ```sh
 npm install -g yeelight-home
@@ -226,6 +257,34 @@ $env:YEELIGHT_HOME_BIN=(Get-Command yeelight-home).Source
 ```
 
 Restart the host application after changing user PATH.
+
+## Multiple Install Sources
+
+Use one primary install channel per machine when possible. Multiple global installers can leave an older `yeelight-home` earlier on `PATH`.
+
+Check the active binary:
+
+```sh
+command -v yeelight-home
+yeelight-home version
+yeelight-home doctor --json
+```
+
+Typical ownership:
+
+- npm global installs create a launcher under the Node prefix, for example `/opt/homebrew/bin/yeelight-home`.
+- Homebrew installs under the Homebrew prefix, but it may not be active if an npm launcher with the same name is earlier on `PATH`.
+- GitHub install scripts copy the binary to `YEELIGHT_HOME_INSTALL_DIR`, `$HOME/.local/bin`, or another selected directory.
+
+Upgrade the channel that owns the active binary:
+
+```sh
+npm install -g yeelight-home@latest
+brew update && brew upgrade yeelight-home
+scoop update yeelight-home
+```
+
+When switching channels, uninstall or unlink the old channel first so `PATH` resolves one expected binary.
 
 ## Uninstall
 

@@ -60,7 +60,7 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 		return code
 	}
 	if isVersionArg(args[0]) {
-		return printVersion(stdout)
+		return printVersion(args[1:], stdout, stderr)
 	}
 	switch args[0] {
 	case "api":
@@ -77,12 +77,17 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "auth")
 		}
-		return app.runAuth(args[1:], stdout, stderr)
+		return app.runAuth(args[1:], stdin, stdout, stderr)
 	case "config":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "config")
 		}
 		return app.runConfig(args[1:], stdout, stderr)
+	case "completion":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "completion")
+		}
+		return app.runCompletion(args[1:], stdout, stderr)
 	case "doctor":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "doctor")
@@ -113,52 +118,4 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 
 func hasSubcommandHelp(args []string) bool {
 	return len(args) > 0 && isHelpArg(args[0])
-}
-
-func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int {
-	flags, err := parseFlags(args)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "doctor: %v\n", err)
-		return exitInvalidInput
-	}
-	if err := requireJSONFlag(flags, "usage: yeelight-home doctor --json [--profile <name>] [--region <region>] [--house-id <id>]"); err != nil {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home doctor --json")
-		return exitInvalidInput
-	}
-	context, err := app.resolveRuntimeContext(flags)
-	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "doctor: %v\n", err)
-		return exitInvalidInput
-	}
-	authStatus := auth.StatusFromEnv()
-	status := "ok"
-	warnings := []string{}
-	if !context.TokenPresent && !authStatus.Authenticated {
-		status = "warning"
-		warnings = append(warnings, "auth_required")
-	}
-	paths := config.ResolveFromEnv()
-	response := map[string]any{
-		"status":        status,
-		"warnings":      warnings,
-		"authenticated": context.TokenPresent || authStatus.Authenticated,
-		"profile":       context.Profile,
-		"region":        context.Region,
-		"houseId":       context.HouseID,
-		"tokenPresent":  context.TokenPresent,
-		"tokenSource":   context.TokenSource,
-		"homeDir":       paths.HomeDir,
-		"configDir":     paths.ConfigDir,
-		"dataDir":       paths.DataDir,
-		"cacheDir":      paths.CacheDir,
-		"install": map[string]any{
-			"cli":        "yeelight-home",
-			"publicRepo": "Yeelight/yeelight-home",
-		},
-		"memoryMigrations": map[string]any{
-			"status": "available",
-			"count":  len(storage.MemoryMigrations()),
-		},
-	}
-	return writeJSON(stdout, stderr, response)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -15,10 +14,12 @@ type SmokeCredentials struct {
 }
 
 type SmokeResult struct {
-	Region      string `json:"region"`
-	AccountOK   bool   `json:"accountOk"`
-	HouseListOK bool   `json:"houseListOk"`
-	HouseCount  int    `json:"houseCount"`
+	Region            string `json:"region"`
+	AccountOK         bool   `json:"accountOk"`
+	HouseListOK       bool   `json:"houseListOk"`
+	HouseCount        int    `json:"houseCount"`
+	HouseListSource   string `json:"houseListSource,omitempty"`
+	HouseListAPICalls int    `json:"houseListApiCalls,omitempty"`
 }
 
 type SmokeClient struct {
@@ -38,15 +39,20 @@ func (client SmokeClient) Run(ctx context.Context, credentials SmokeCredentials)
 	if err != nil {
 		return SmokeResult{}, err
 	}
-	houses, err := client.call(ctx, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/r/list", map[string]any{}, credentials)
+	houses, err := NewHomeSummaryClient(client.endpoint, client.client).RunList(ctx, HomeSummaryCredentials{
+		Authorization: credentials.Authorization,
+		ClientID:      credentials.ClientID,
+	})
 	if err != nil {
 		return SmokeResult{}, err
 	}
 	return SmokeResult{
-		Region:      client.endpoint.Region,
-		AccountOK:   isBusinessOK(account),
-		HouseListOK: isBusinessOK(houses),
-		HouseCount:  countDataRows(houses),
+		Region:            client.endpoint.Region,
+		AccountOK:         isBusinessOK(account),
+		HouseListOK:       true,
+		HouseCount:        houses.HouseCount,
+		HouseListSource:   houses.Source,
+		HouseListAPICalls: houses.APICalls,
 	}, nil
 }
 
@@ -72,20 +78,4 @@ func isBusinessOK(response map[string]any) bool {
 		return value == 200 || value == 0
 	}
 	return true
-}
-
-func countDataRows(response map[string]any) int {
-	data, ok := response["data"]
-	if !ok {
-		return 0
-	}
-	switch rows := data.(type) {
-	case []any:
-		return len(rows)
-	case map[string]any:
-		if nestedRows, ok := rows["rows"].([]any); ok {
-			return len(nestedRows)
-		}
-	}
-	return 0
 }

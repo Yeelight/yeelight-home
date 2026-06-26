@@ -21,6 +21,8 @@ func TestSmokeClientCallsAccountAndHouseListWithRedactedSummary(t *testing.T) {
 		switch request.URL.Path {
 		case "/apis/account/user/info":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"code": "200", "data": map[string]any{"nickname": "测试用户"}})
+		case "/apis/iot/v1/house/r/all":
+			_ = json.NewEncoder(writer).Encode(map[string]any{"success": true, "data": map[string]any{"list": []any{}}})
 		case "/apis/iot/v1/house/r/list":
 			_ = json.NewEncoder(writer).Encode(map[string]any{"success": true, "data": []map[string]any{{"id": "house-1", "name": "默认家庭"}}})
 		default:
@@ -37,14 +39,14 @@ func TestSmokeClientCallsAccountAndHouseListWithRedactedSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	if len(calls) != 2 {
+	if len(calls) != 3 {
 		t.Fatalf("calls = %#v", calls)
 	}
 	if calls[0] != "GET /apis/account/user/info" {
 		t.Fatalf("account call = %q", calls[0])
 	}
-	if calls[1] != "POST /apis/iot/v1/house/r/list" {
-		t.Fatalf("house call = %q", calls[1])
+	if calls[1] != "POST /apis/iot/v1/house/r/all" || calls[2] != "POST /apis/iot/v1/house/r/list" {
+		t.Fatalf("house calls = %#v", calls)
 	}
 	if authorization != "Bearer token-secret-123456" {
 		t.Fatalf("Authorization = %q", authorization)
@@ -52,7 +54,7 @@ func TestSmokeClientCallsAccountAndHouseListWithRedactedSummary(t *testing.T) {
 	if clientID != "client-123" {
 		t.Fatalf("Client-Id = %q", clientID)
 	}
-	if !result.AccountOK || !result.HouseListOK || result.HouseCount != 1 {
+	if !result.AccountOK || !result.HouseListOK || result.HouseCount != 1 || result.HouseListSource != "/v1/house/r/list" || result.HouseListAPICalls != 2 {
 		t.Fatalf("result = %#v", result)
 	}
 	data, err := json.Marshal(result)

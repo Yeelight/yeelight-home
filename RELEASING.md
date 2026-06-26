@@ -39,11 +39,27 @@ From the monorepo:
 
 ```sh
 cd yeelight-smart-home
+node tools/runtime-production-acceptance.js --version X.Y.Z --online
+node tools/runtime-release-readiness.js --version X.Y.Z --online
 go test ./...
+node tools/runtime-release-readiness.js --version X.Y.Z
+node tools/npm-wrapper-smoke.js
 node tools/host-wrapper-smoke.js
 node tools/skill-structure-validate.js
 sh tools/phase0-validate.sh
 ```
+
+`runtime-production-acceptance.js` is the preferred local release-candidate
+acceptance entry point. It aggregates the offline Runtime, Skill, wrapper,
+token-only, public-export and release-readiness gates, then reports the
+confirmation-gated checks that it intentionally skips: dev live smoke, global
+package installation and public release execution.
+
+`runtime-release-readiness.js --online` checks that the target npm package
+version and GitHub Release tag do not already exist. Run it before tagging;
+the offline readiness check is also part of `phase0-validate.sh` and verifies
+that `runtime/package.json`, GoReleaser version ldflags, the exported public
+workflow and npm launcher packaging stay aligned.
 
 Export a public snapshot:
 
@@ -275,10 +291,20 @@ https://pkg.go.dev/github.com/yeelight/yeelight-home
 
 ## Post-Release Smoke
 
+Run the read-only channel verifier:
+
+```sh
+node scripts/verify-runtime-public-release.mjs X.Y.Z
+```
+
+The verifier checks GitHub Releases, npm, Homebrew Formula/Cask, Scoop, Docker Hub, GHCR visibility, Winget PR state, AUR `yeelight-home-bin`, Snapcraft `yeelight-home`, pkg.go.dev indexing and the local `PATH` version without installing or upgrading anything globally. GitHub Release validation requires `metadata.json`, `install.sh`, `install.ps1`, the npm tarball, checksums, desktop `.sbom.json` files, all desktop archives for `darwin/amd64`, `darwin/arm64`, `linux/amd64`, `linux/arm64`, `linux/arm/v7`, `windows/amd64` and `windows/arm64`, plus nFPM Linux packages for `.deb`, `.rpm`, `.apk` and Arch package formats across `amd64`, `arm64` and `armv7`. Docker validation requires `linux/amd64`, `linux/arm64` and `linux/arm/v7` manifests. GHCR private visibility, Winget review gating, AUR/Snap optional publication and pkg.go.dev indexing latency are reported as warnings rather than release blockers when core install channels are healthy.
+
 Install from every published channel available for the version:
 
 ```sh
 yeelight-home version
+yeelight-home version --json
+yeelight-home doctor
 yeelight-home doctor --json
 yeelight-home auth status --json
 ```
@@ -286,8 +312,7 @@ yeelight-home auth status --json
 For Skill wrapper smoke:
 
 ```sh
-cd yeelight-smart-home/skill/yeelight-smart-home
-printf '{"contractVersion":"1.0","requestId":"host-smoke","locale":"zh-CN","utterance":"列出家庭","intent":"entity.list"}' | scripts/invoke.sh
+printf '{"contractVersion":"1.0","requestId":"host-smoke","locale":"zh-CN","utterance":"列出家庭","intent":"entity.list"}' | /path/to/skill/scripts/invoke.sh
 ```
 
 When intentionally testing Runtime missing behavior, temporarily remove `yeelight-home` from `PATH` and unset `YEELIGHT_HOME_BIN`.
