@@ -58,7 +58,7 @@ func (client HomeSpaceConfigurationClient) Run(ctx context.Context, request Home
 	if houseID == "" {
 		return HomeSpaceConfigurationResult{}, fmt.Errorf("house id is required")
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return HomeSpaceConfigurationResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
@@ -126,14 +126,19 @@ func (client HomeSpaceConfigurationClient) write(ctx context.Context, kind HomeS
 		if err != nil {
 			return 0, err
 		}
-		response, err := callJSONBody(ctx, client.client, http.MethodPut, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/room/w/batch_create", map[string]any{"rooms": rooms}, credentials)
-		if err != nil {
-			return 1, err
+		calls := 0
+		for _, room := range rooms {
+			body := mapWithoutKeys(room, "roomId", "id")
+			response, err := callJSONBody(ctx, client.client, http.MethodPut, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/room/w/create", body, credentials)
+			calls++
+			if err != nil {
+				return calls, err
+			}
+			if !isBusinessOK(response) {
+				return calls, fmt.Errorf("room.create returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+			}
 		}
-		if !isBusinessOK(response) {
-			return 1, fmt.Errorf("room.batch_create returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
-		}
-		return 1, nil
+		return calls, nil
 	case HomeSpaceRoomBatchUpdate:
 		rooms, err := homeSpaceRoomItems(payload)
 		if err != nil {

@@ -141,3 +141,26 @@ func TestThingSchemaGetRequiresProductContextWithoutCloudCall(t *testing.T) {
 		t.Fatalf("v3 = %#v", v3)
 	}
 }
+
+func TestThingSchemaReadonlyBusinessErrorReturnsPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"success":false,"code":500,"message":"服务器内部错误"}`))
+	}))
+	defer server.Close()
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+
+	result, err := client.RunThingProductListV3(context.Background(), MetadataReadonlyRequest{
+		HouseID:     "house-1",
+		Credentials: MetadataReadonlyCredentials{Authorization: "Bearer token-schema-secret"},
+	})
+	if err != nil {
+		t.Fatalf("RunThingProductListV3 error = %v", err)
+	}
+	if !result.Partial || result.APICalls != 1 || result.Capability != "thing.product.list.v3" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != "cloud_business_response_not_success" {
+		t.Fatalf("warnings = %#v", result.Warnings)
+	}
+}

@@ -12,8 +12,9 @@ import (
 )
 
 func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
-	if len(args) != 1 || args[0] != "--stdin" {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home invoke --stdin")
+	flags, err := parseFlags(args)
+	if err != nil || !invokeFlagsAllowed(flags) || !flags.bool("stdin") {
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id <id>]")
 		return exitInvalidInput
 	}
 	data, err := io.ReadAll(stdin)
@@ -26,7 +27,7 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 		_, _ = fmt.Fprintf(stderr, "invalid SkillRequest: %v\n", err)
 		return exitInvalidInput
 	}
-	response, err := app.invoke(context.Background(), request)
+	response, err := app.invokeWithFlags(context.Background(), request, flags)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "invoke: %v\n", err)
 		return exitInternalError
@@ -41,6 +42,17 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 		return exitInternalError
 	}
 	return exitOK
+}
+
+func invokeFlagsAllowed(flags cliFlags) bool {
+	for name := range flags.values {
+		switch name {
+		case "stdin", "profile", "region", "house-id":
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func (app *app) invoke(ctx context.Context, request contract.Request) (contract.Response, error) {
@@ -110,9 +122,9 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 	case "group.structure.list":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.structure.list", "已读取设备组结构的安全摘要。"))
 	case "group.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.list", "已读取家庭分组列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.list", "已读取设备组列表。"))
 	case "group.search":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.search", "已搜索家庭分组候选。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.search", "已搜索设备组候选。"))
 	case "group.detail.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.detail.get", "已读取设备组详情的安全摘要。"))
 	case "scene.detail.get":
@@ -163,6 +175,8 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.stats.list", "已读取家庭网关统计的安全摘要。"))
 	case "gateway.scene_relation.list":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.scene_relation.list", "已读取网关关联情景的安全摘要。"))
+	case "product.pedia.search":
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("product.pedia.search", "已搜索产品百科资料和候选说明书/FAQ 资源。"))
 	case "home.summary":
 		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunListWithSelectedFallback(ctx, api.HomeSummaryCredentials{
 			Authorization: accessToken,

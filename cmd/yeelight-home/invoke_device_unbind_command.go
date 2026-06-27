@@ -55,7 +55,7 @@ func (app *app) invokeDeviceUnbindPlan(ctx context.Context, request contract.Req
 		"必须先在本机终端运行 approveCommand 完成一次性审批",
 		"plan.commit 只接受 planId，忽略提交时附带的解绑字段",
 		"提交前 Runtime 会重新读取设备并验证仍属于当前家庭",
-		"提交后 Runtime 会通过 entity.list 验证设备已从家庭实体中消失",
+		"提交后 Runtime 会通过 entity.list 验证设备已消失或已变为未绑定状态",
 	}, time.Now(), pendingPlanTTL)
 	if err != nil {
 		return contract.Response{}, err

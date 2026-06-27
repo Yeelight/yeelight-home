@@ -632,6 +632,62 @@
   },
   {
     "contractVersion": "1.0",
+    "requestId": "fixture-product-pedia-search-1",
+    "locale": "zh-CN",
+    "utterance": "帮我查一下青空灯产品资料和说明书",
+    "intent": "product.pedia.search",
+    "parameters": {
+      "multiField": "青空灯",
+      "pageSize": 10
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-pedia-material-code-1",
+    "locale": "zh-CN",
+    "utterance": "帮我找一下 1-000003268 的说明书",
+    "intent": "product.pedia.search",
+    "parameters": {
+      "multiField": "1-000003268",
+      "materialCode": "1-000003268",
+      "limit": 5
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-pedia-model-1",
+    "locale": "zh-CN",
+    "utterance": "YP-0117 是什么产品，支持 Yeelight Pro 吗？",
+    "intent": "product.pedia.search",
+    "parameters": {
+      "multiField": "YP-0117",
+      "productModel": "YP-0117"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-pedia-full-name-faq-1",
+    "locale": "zh-CN",
+    "utterance": "Yeelight Pro Nightingale青空灯夙夜版 FAQ 在哪里？",
+    "intent": "product.pedia.search",
+    "parameters": {
+      "multiField": "Yeelight Pro Nightingale青空灯夙夜版",
+      "productName": "Yeelight Pro Nightingale青空灯夙夜版"
+    }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-product-pedia-sku-1",
+    "locale": "zh-CN",
+    "utterance": "YLP-Nightingale青空灯-夙夜版有没有产品图和说明书？",
+    "intent": "product.pedia.search",
+    "parameters": {
+      "multiField": "YLP-Nightingale青空灯-夙夜版",
+      "sku": "YLP-Nightingale青空灯-夙夜版"
+    }
+  },
+  {
+    "contractVersion": "1.0",
     "requestId": "fixture-thing-product-info-batch-1",
     "locale": "zh-CN",
     "utterance": "查看产品 1001 的 v2 产品定义",

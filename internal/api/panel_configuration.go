@@ -70,16 +70,24 @@ func (client PanelConfigurationClient) Run(ctx context.Context, request PanelCon
 		return PanelConfigurationResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
 	apiCalls := 0
-	verifyCalls, err := client.readCurrent(ctx, request.Kind, deviceID, credentials)
+	current, verifyCalls, err := client.readCurrent(ctx, request.Kind, deviceID, credentials)
 	apiCalls += verifyCalls
 	if err != nil {
 		return PanelConfigurationResult{}, err
 	}
-	if err := client.write(ctx, request.Kind, deviceID, request.Payload, credentials); err != nil {
+	writePayload := request.Payload
+	if request.Kind == PanelButtonConfigure {
+		merged, err := buildPanelButtonConfigureWritePayload(current, deviceID, request.Payload)
+		if err != nil {
+			return PanelConfigurationResult{}, err
+		}
+		writePayload = merged
+	}
+	if err := client.write(ctx, request.Kind, deviceID, writePayload, credentials); err != nil {
 		return PanelConfigurationResult{}, err
 	}
 	apiCalls++
-	ok, verifyCalls, err := client.verifyAfterWrite(ctx, request.Kind, deviceID, request.Payload, credentials, request.VerifyAttempts, request.VerifyInterval)
+	ok, verifyCalls, err := client.verifyAfterWrite(ctx, request.Kind, deviceID, writePayload, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += verifyCalls
 	if err != nil {
 		return PanelConfigurationResult{}, err
@@ -98,16 +106,16 @@ func (client PanelConfigurationClient) Run(ctx context.Context, request PanelCon
 	}, nil
 }
 
-func (client PanelConfigurationClient) readCurrent(ctx context.Context, kind PanelConfigurationKind, deviceID string, credentials requestCredentials) (int, error) {
+func (client PanelConfigurationClient) readCurrent(ctx context.Context, kind PanelConfigurationKind, deviceID string, credentials requestCredentials) (any, int, error) {
 	switch kind {
 	case PanelButtonConfigure, PanelButtonEventUpdate, PanelButtonEventBatchUpdate, PanelButtonEventReset:
-		_, err := client.readPanel(ctx, deviceID, credentials)
-		return 2, err
+		data, err := client.readPanel(ctx, deviceID, credentials)
+		return data, 2, err
 	case KnobConfigure, KnobReset:
-		_, err := client.readKnob(ctx, deviceID, credentials)
-		return 1, err
+		data, err := client.readKnob(ctx, deviceID, credentials)
+		return data, 1, err
 	default:
-		return 0, fmt.Errorf("unsupported panel configuration kind %q", kind)
+		return nil, 0, fmt.Errorf("unsupported panel configuration kind %q", kind)
 	}
 }
 
@@ -126,14 +134,26 @@ func (client PanelConfigurationClient) write(ctx context.Context, kind PanelConf
 		if !ok || strings.TrimSpace(stringFromAny(event["buttonEventId"])) == "" {
 			return fmt.Errorf("button event is required")
 		}
+		event = mapWithoutKeys(event)
+		event["deviceId"] = deviceID
 		response, err = callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/panel/w/button/event/update", event, credentials)
 	case PanelButtonEventBatchUpdate:
 		events, ok := payload["buttonEvents"].([]any)
 		if !ok || len(events) == 0 {
 			return fmt.Errorf("button events are required")
 		}
+		normalizedEvents := make([]any, 0, len(events))
+		for _, rawEvent := range events {
+			event, ok := rawEvent.(map[string]any)
+			if !ok || strings.TrimSpace(stringFromAny(event["buttonEventId"])) == "" {
+				return fmt.Errorf("button events are required")
+			}
+			event = mapWithoutKeys(event)
+			event["deviceId"] = deviceID
+			normalizedEvents = append(normalizedEvents, event)
+		}
 		body := map[string]any{
-			"buttonEvents": stringFromJSON(events),
+			"buttonEvents": normalizedEvents,
 		}
 		response, err = callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/panel/w/button/event/update/batch", body, credentials)
 	case PanelButtonEventReset:
@@ -164,6 +184,84 @@ func (client PanelConfigurationClient) write(ctx context.Context, kind PanelConf
 		return fmt.Errorf("%s returned non-success business response: code=%s message=%s dataType=%s", kind, responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
 	return nil
+}
+
+func buildPanelButtonConfigureWritePayload(current any, deviceID string, payload map[string]any) (map[string]any, error) {
+	expectedRows, ok := payload["buttons"].([]any)
+	if !ok || len(expectedRows) == 0 {
+		return nil, fmt.Errorf("buttons are required")
+	}
+	currentRows := configRowsFromData(current)
+	if len(currentRows) == 0 {
+		return nil, fmt.Errorf("current panel buttons are required")
+	}
+	merged := make([]any, 0, len(expectedRows))
+	for _, rawExpected := range expectedRows {
+		expected, ok := rawExpected.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("buttons are required")
+		}
+		base, ok := findPanelButtonBase(currentRows, expected)
+		if !ok {
+			return nil, fmt.Errorf("panel button reference not found")
+		}
+		item := mapWithoutKeys(base)
+		for _, key := range []string{"name", "alias", "keyValue", "index", "resId", "resType", "visible", "icon", "sort", "type", "extend"} {
+			if value, exists := expected[key]; exists {
+				item[key] = value
+			}
+		}
+		item["deviceId"] = deviceID
+		if strings.TrimSpace(stringFromAny(item["id"])) == "" {
+			if id := strings.TrimSpace(stringFromAny(expected["id"])); id != "" {
+				item["id"] = id
+			}
+		}
+		if strings.TrimSpace(stringFromAny(item["type"])) == "" {
+			return nil, fmt.Errorf("panel button type is required")
+		}
+		merged = append(merged, item)
+	}
+	return map[string]any{
+		"buttons": merged,
+	}, nil
+}
+
+func findPanelButtonBase(rows []any, expected map[string]any) (map[string]any, bool) {
+	for _, raw := range rows {
+		row, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if panelButtonBaseMatches(row, expected) {
+			return row, true
+		}
+	}
+	return nil, false
+}
+
+func panelButtonBaseMatches(row map[string]any, expected map[string]any) bool {
+	if expectedID := strings.TrimSpace(stringFromAny(expected["id"])); expectedID != "" {
+		if strings.TrimSpace(stringFromAny(row["id"])) == expectedID {
+			return true
+		}
+		if index := strings.TrimSpace(stringFromAny(row["index"])); index != "" && index == expectedID {
+			return true
+		}
+		if keyValue := strings.TrimSpace(stringFromAny(row["keyValue"])); keyValue != "" && keyValue == expectedID {
+			return true
+		}
+	}
+	for _, key := range []string{"id", "index", "keyValue", "name", "alias"} {
+		expectedValue := strings.TrimSpace(stringFromAny(expected[key]))
+		if expectedValue == "" {
+			continue
+		}
+		if strings.TrimSpace(stringFromAny(row[key])) == expectedValue {
+			return true
+		}
+	}
+	return false
 }
 
 func (client PanelConfigurationClient) verifyAfterWrite(ctx context.Context, kind PanelConfigurationKind, deviceID string, payload map[string]any, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
@@ -251,21 +349,23 @@ func panelConfigurationMatches(kind PanelConfigurationKind, data any, payload ma
 		if !ok {
 			return false
 		}
-		return configRowsContainExpected(source["buttons"], []any{payload["buttonEvent"]}, []string{"id", "buttonEventId", "alias", "details"})
+		return configRowsContainExpected(source["detail"], []any{payload["buttonEvent"]}, []string{"id", "buttonEventId", "alias", "details"}) ||
+			configRowsContainExpected(source, []any{payload["buttonEvent"]}, []string{"id", "buttonEventId", "alias", "details"})
 	case PanelButtonEventBatchUpdate:
 		source, ok := data.(map[string]any)
 		if !ok {
 			return false
 		}
-		return configRowsContainExpected(source["buttons"], payload["buttonEvents"], []string{"id", "buttonEventId", "alias", "details"})
+		return configRowsContainExpected(source["detail"], payload["buttonEvents"], []string{"id", "buttonEventId", "alias", "details"}) ||
+			configRowsContainExpected(source, payload["buttonEvents"], []string{"id", "buttonEventId", "alias", "details"})
 	case PanelButtonEventReset:
 		_, ok := data.(map[string]any)
 		return ok
 	case KnobConfigure:
 		if item, ok := data.(map[string]any); ok {
-			return configRowsContainExpected(item["details"], payload["details"], []string{"id", "index", "mode", "model", "resId", "resType", "action", "property", "value"})
+			return configRowsContainExpected(item["details"], payload["details"], []string{"id", "index", "configType", "mode", "model", "resId", "typeId", "resType", "resIndex", "resName", "param", "sens", "action", "property", "value"})
 		}
-		return configRowsContainExpected(data, payload["details"], []string{"id", "index", "mode", "model", "resId", "resType", "action", "property", "value"})
+		return configRowsContainExpected(data, payload["details"], []string{"id", "index", "configType", "mode", "model", "resId", "typeId", "resType", "resIndex", "resName", "param", "sens", "action", "property", "value"})
 	case KnobReset:
 		return data != nil
 	default:
@@ -311,7 +411,11 @@ func configRowMatches(actual map[string]any, expected map[string]any, keys []str
 		if !ok {
 			continue
 		}
-		if !configValueContainsExpected(actual[key], expectedValue) {
+		actualValue := actual[key]
+		if key == "buttonEventId" && strings.TrimSpace(stringFromAny(actualValue)) == "" {
+			actualValue = actual["id"]
+		}
+		if !configValueContainsExpected(actualValue, expectedValue) {
 			return false
 		}
 	}
@@ -339,7 +443,7 @@ func configValueContainsExpected(actual any, expected any) bool {
 			matched := false
 			for _, actualItem := range actualRows {
 				actualMap, ok := actualItem.(map[string]any)
-				if ok && configMapContainsExpected(actualMap, expectedMap) {
+				if ok && panelEventDetailContainsExpected(actualMap, expectedMap) {
 					matched = true
 					break
 				}
@@ -350,6 +454,9 @@ func configValueContainsExpected(actual any, expected any) bool {
 		}
 		return true
 	case map[string]any:
+		if len(expectedTyped) == 0 {
+			return true
+		}
 		actualMap, ok := actual.(map[string]any)
 		return ok && configMapContainsExpected(actualMap, expectedTyped)
 	default:
@@ -359,6 +466,28 @@ func configValueContainsExpected(actual any, expected any) bool {
 
 func configMapContainsExpected(actual map[string]any, expected map[string]any) bool {
 	for key, expectedValue := range expected {
+		if key == "details" {
+			continue
+		}
+		if !configValueContainsExpected(actual[key], expectedValue) {
+			return false
+		}
+	}
+	if expectedDetails, ok := expected["details"]; ok {
+		actualDetails := actual["details"]
+		if !configValueContainsExpected(actualDetails, expectedDetails) {
+			return false
+		}
+	}
+	return true
+}
+
+func panelEventDetailContainsExpected(actual map[string]any, expected map[string]any) bool {
+	for _, key := range []string{"resId", "typeId", "resType", "params", "rank", "resName", "idx", "repeatType", "repeatValue", "startTime", "endTime"} {
+		expectedValue, ok := expected[key]
+		if !ok {
+			continue
+		}
 		if !configValueContainsExpected(actual[key], expectedValue) {
 			return false
 		}
@@ -367,13 +496,16 @@ func configMapContainsExpected(actual map[string]any, expected map[string]any) b
 }
 
 func configRowsFromData(data any) []any {
-	rows := rowsFromData(data)
-	if len(rows) > 0 {
-		return rows
-	}
 	switch typed := data.(type) {
 	case []any:
-		return typed
+		result := make([]any, 0, len(typed))
+		for _, value := range typed {
+			if _, ok := value.(map[string]any); ok {
+				result = append(result, value)
+			}
+			result = append(result, configRowsFromData(value)...)
+		}
+		return result
 	case map[string]any:
 		result := []any{}
 		if firstAnyString(typed, "id", "buttonEventId") != "" {

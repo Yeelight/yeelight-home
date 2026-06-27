@@ -57,7 +57,7 @@ func (client SpaceBatchOrganizationClient) Run(ctx context.Context, request Spac
 	if err != nil {
 		return SpaceBatchOrganizationResult{}, err
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return SpaceBatchOrganizationResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}

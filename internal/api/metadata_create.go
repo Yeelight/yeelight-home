@@ -71,6 +71,7 @@ func (client MetadataCreateClient) Run(ctx context.Context, request MetadataCrea
 	credentials := requestCredentials{
 		Authorization: request.Credentials.Authorization,
 		ClientID:      request.Credentials.ClientID,
+		HouseID:       houseID,
 	}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return MetadataCreateResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")

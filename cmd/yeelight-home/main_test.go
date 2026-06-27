@@ -158,6 +158,62 @@ func TestInvokeRequiresStdinFlag(t *testing.T) {
 	}
 }
 
+func TestInvokeAcceptsRuntimeContextFlags(t *testing.T) {
+	t.Setenv("YEELIGHT_HOME_ACCESS_TOKEN", "Bearer invoke-flag-secret")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer invoke-flag-secret" {
+			t.Fatalf("authorization header not sourced from env token")
+		}
+		switch request.URL.Path {
+		case "/v1/house/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/v1/house/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"houseId":"house-flag","houseName":"Flag Home"}]}}`))
+		case "/v1/house/house-flag/r/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"houseId":"house-flag","name":"Flag Home"}}`))
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL)
+
+	input := `{"contractVersion":"1.0","requestId":"req-invoke-flags","locale":"zh-CN","utterance":"列出家庭","intent":"home.list","parameters":{}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"invoke", "--stdin", "--profile", "flag-profile", "--region", "dev", "--house-id", "house-flag"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid response json: %v", err)
+	}
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	houses := result["houses"].([]any)
+	first := houses[0].(map[string]any)
+	if result["region"] != "dev" || result["source"] != "/v1/house/r/list" || first["id"] != "house-flag" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeRejectsUnknownFlags(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"invoke", "--stdin", "--json"}, strings.NewReader("{}"), &stdout, &stderr)
+	if code != exitInvalidInput {
+		t.Fatalf("exit code = %d", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: yeelight-home invoke --stdin") {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
 func TestAuthStatusJSONDoesNotExposeToken(t *testing.T) {
 	t.Setenv("YEELIGHT_HOME_AUTHENTICATED", "1")
 	t.Setenv("YEELIGHT_HOME_PROFILE", "family-main")

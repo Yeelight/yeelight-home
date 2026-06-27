@@ -54,7 +54,7 @@ func (client HomeLockClient) Run(ctx context.Context, request HomeLockRequest) (
 	if !ok {
 		return HomeLockResult{}, fmt.Errorf("unsupported home lock kind %q", request.Kind)
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return HomeLockResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}

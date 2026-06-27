@@ -69,6 +69,7 @@ func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contrac
 	readonlyRequest := api.MetadataReadonlyRequest{
 		HouseID:    houseID,
 		DeviceID:   deviceID,
+		Utterance:  request.Utterance,
 		Parameters: request.Parameters,
 		Credentials: api.MetadataReadonlyCredentials{
 			Authorization: authorization,
@@ -198,6 +199,8 @@ func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contrac
 		result, err = client.RunThingProductInfoV3BatchGet(ctx, readonlyRequest)
 	case "thing.product.list.v3":
 		result, err = client.RunThingProductListV3(ctx, readonlyRequest)
+	case "product.pedia.search":
+		result, err = client.RunProductPediaSearch(ctx, readonlyRequest)
 	case "thing.product_domain.list":
 		result, err = client.RunProductDomainList(ctx, readonlyRequest)
 	case "thing.product_faq.list":
@@ -385,7 +388,7 @@ func automationCapabilitiesSpec() metadataReadonlySpec {
 		source:          "runtime_policy",
 		unknownEvidence: []string{},
 		guidance: []string{
-			"automation.create 只生成 pending plan，plan.commit 仍返回 automation_commit_disabled。",
+			"automation.create 会先生成 pending plan，plan.commit 重新校验后创建并按名称读回验证。",
 			"automation.explain 和 diagnose.automation 可做只读解释和诊断。",
 			"automation.update/enable/disable/delete 仍需 owner review 或本地批准。",
 		},
@@ -409,7 +412,14 @@ func favoritePlanSpec() metadataReadonlySpec {
 }
 
 func homeSortListSpec() metadataReadonlySpec {
-	return metadataPartialSpec("home.sort.list", "home-sort-list-partial", "已读取指定资源的首页排序只读摘要。", "home_sort_query_context_missing", nil)
+	return metadataReadonlySpec{
+		capability:      "home.sort.list",
+		status:          "success",
+		message:         "已读取家庭排序配置的只读摘要。",
+		traceID:         "home-sort-list-readonly",
+		source:          "cloud_read_adapter",
+		unknownEvidence: []string{},
+	}
 }
 
 func metadataPartialSpec(capability string, traceID string, message string, unknown string, entityTypes []string) metadataReadonlySpec {

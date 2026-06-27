@@ -79,3 +79,31 @@ func TestEndpointAccountBaseURLStripsIOTPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointPediaBaseURLAlwaysUsesPublicPediaForKnownRegions(t *testing.T) {
+	for _, region := range []string{"dev", "cn", "sg", "us", "eu", "de"} {
+		t.Run(region, func(t *testing.T) {
+			endpoint, err := ResolveEndpoint(region)
+			if err != nil {
+				t.Fatalf("ResolveEndpoint error: %v", err)
+			}
+			if got := endpoint.PediaBaseURL(); got != "https://api.yeelight.com/apis/c" {
+				t.Fatalf("PediaBaseURL(%s) = %q", region, got)
+			}
+		})
+	}
+}
+
+func TestEndpointPediaBaseURLUsesCustomIOTBaseForLocalTesting(t *testing.T) {
+	endpoint := Endpoint{Region: "dev", BaseURL: "http://127.0.0.1:8080/apis/iot"}
+	if got := endpoint.PediaBaseURL(); got != "http://127.0.0.1:8080/apis/c" {
+		t.Fatalf("PediaBaseURL = %q", got)
+	}
+}
+
+func TestEndpointPediaBaseURLIgnoresNonLocalCustomIOTBase(t *testing.T) {
+	endpoint := Endpoint{Region: "custom", BaseURL: "https://staging.example.com/apis/iot"}
+	if got := endpoint.PediaBaseURL(); got != "https://api.yeelight.com/apis/c" {
+		t.Fatalf("PediaBaseURL = %q", got)
+	}
+}

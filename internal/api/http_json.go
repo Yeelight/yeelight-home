@@ -24,6 +24,7 @@ func (err HTTPStatusError) Error() string {
 type requestCredentials struct {
 	Authorization string
 	ClientID      string
+	HouseID       string
 }
 
 func callJSON(ctx context.Context, client *http.Client, method string, url string, body map[string]any, credentials requestCredentials) (map[string]any, error) {
@@ -55,6 +56,11 @@ func callJSONBody(ctx context.Context, client *http.Client, method string, url s
 	if strings.TrimSpace(credentials.ClientID) != "" {
 		request.Header.Set("Client-Id", strings.TrimSpace(credentials.ClientID))
 	}
+	if strings.TrimSpace(credentials.HouseID) != "" {
+		houseID := strings.TrimSpace(credentials.HouseID)
+		request.Header.Set("houseId", houseID)
+		request.Header.Set("house-id", houseID)
+	}
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -68,11 +74,19 @@ func callJSONBody(ctx context.Context, client *http.Client, method string, url s
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, HTTPStatusError{StatusCode: response.StatusCode}
 	}
-	parsed := map[string]any{}
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &parsed); err != nil {
-			return nil, fmt.Errorf("decode response: %w", err)
-		}
+	if len(data) == 0 {
+		return map[string]any{}, nil
 	}
-	return parsed, nil
+	var decoded any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	switch parsed := decoded.(type) {
+	case map[string]any:
+		return parsed, nil
+	case []any:
+		return map[string]any{"data": parsed}, nil
+	default:
+		return map[string]any{"data": parsed}, nil
+	}
 }

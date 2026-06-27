@@ -102,6 +102,10 @@ func destructiveDeleteAcceptedFields(intent string) []string {
 
 func resolveDestructiveDeleteTarget(ctx context.Context, intent string, targetType string, targetID string, targetName string, houseID string, endpoint api.Endpoint, authorization string, clientID string) (api.EntitySummary, api.EntityListResult, int, string, error) {
 	credentials := api.EntityListCredentials{Authorization: authorization, ClientID: clientID}
+	if intent == "home.delete" {
+		target, entities, calls, reason, err := resolveHomeDeleteTarget(ctx, targetID, targetName, endpoint, credentials)
+		return target, entities, calls, reason, err
+	}
 	if intent == "gateway.delete" {
 		if strings.TrimSpace(targetID) == "" {
 			return api.EntitySummary{}, api.EntityListResult{Region: endpoint.Region, HouseID: houseID}, 0, "gateway_context_missing", nil
@@ -139,6 +143,32 @@ func resolveDestructiveDeleteTarget(ctx context.Context, intent string, targetTy
 		return api.EntitySummary{}, entities, entityListAPICalls(entities), "ambiguous_target", nil
 	}
 	return match, entities, entityListAPICalls(entities), "", nil
+}
+
+func resolveHomeDeleteTarget(ctx context.Context, targetID string, targetName string, endpoint api.Endpoint, credentials api.EntityListCredentials) (api.EntitySummary, api.EntityListResult, int, string, error) {
+	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{Credentials: credentials})
+	if err != nil {
+		return api.EntitySummary{}, entities, entityListAPICalls(entities), "", err
+	}
+	match, candidates, _ := findEntity(entityGetTarget{id: targetID, name: targetName, entityType: "home"}, entities.Entities)
+	if match.ID != "" {
+		if len(candidates) > 1 && targetID == "" {
+			return api.EntitySummary{}, entities, entityListAPICalls(entities), "ambiguous_target", nil
+		}
+		return match, entities, entityListAPICalls(entities), "", nil
+	}
+	if strings.TrimSpace(targetID) == "" {
+		return api.EntitySummary{}, entities, entityListAPICalls(entities), "entity_not_found", nil
+	}
+	if _, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{HouseID: targetID, Credentials: credentials}); err != nil {
+		return api.EntitySummary{}, entities, entityListAPICalls(entities) + api.HouseScopedEntityListCallCount(), "entity_not_found", nil
+	}
+	return api.EntitySummary{
+		Type:    "home",
+		ID:      targetID,
+		Name:    targetName,
+		HouseID: targetID,
+	}, entities, entityListAPICalls(entities) + api.HouseScopedEntityListCallCount(), "", nil
 }
 
 func ternaryHouseID(condition bool, whenTrue string, whenFalse string) string {

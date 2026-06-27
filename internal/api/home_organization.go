@@ -41,6 +41,7 @@ type HomeOrganizationResult struct {
 	ItemCount  int    `json:"itemCount,omitempty"`
 	Verified   bool   `json:"verified"`
 	VerifiedBy string `json:"verifiedBy,omitempty"`
+	Warning    string `json:"warning,omitempty"`
 	APICalls   int    `json:"apiCalls"`
 }
 
@@ -61,7 +62,7 @@ func (client HomeOrganizationClient) Run(ctx context.Context, request HomeOrgani
 	if houseID == "" {
 		return HomeOrganizationResult{}, fmt.Errorf("house id is required")
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return HomeOrganizationResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
@@ -112,12 +113,16 @@ func (client HomeOrganizationClient) verifyBeforeWrite(ctx context.Context, kind
 func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganizationKind, houseID string, payload map[string]any, credentials requestCredentials) (int, error) {
 	switch kind {
 	case HomeOrganizationSortConfigure:
-		sortType := strings.TrimSpace(stringFromAny(payload["type"]))
-		target := strings.TrimSpace(stringFromAny(payload["target"]))
+		normalized, warning := NormalizeHomeSortPayload(houseID, payload)
+		if warning != "" {
+			return 0, fmt.Errorf("%s", warning)
+		}
+		sortType := strings.TrimSpace(stringFromAny(normalized["type"]))
+		target := strings.TrimSpace(stringFromAny(normalized["target"]))
 		if sortType == "" || target == "" {
 			return 0, fmt.Errorf("sort type and target are required")
 		}
-		body, ok := payload["items"].([]any)
+		body, ok := normalized["items"].([]any)
 		if !ok || len(body) == 0 {
 			return 0, fmt.Errorf("sort items are required")
 		}
@@ -141,53 +146,84 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 		return 1, nil
 	case HomeOrganizationFavoriteUpdate:
 		favoriteID := strings.TrimSpace(stringFromAny(payload["favoriteId"]))
-		if favoriteID == "" {
-			return 0, fmt.Errorf("favorite id is required")
+		if favoriteID != "" {
+			body := mapWithoutKeys(payload, "favoriteId")
+			response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/"+favoriteID+"/w/update", body, credentials)
+			if err != nil {
+				return 1, err
+			}
+			if !isBusinessOK(response) {
+				return 1, fmt.Errorf("favorite update returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+			}
+			return 1, nil
 		}
-		body := mapWithoutKeys(payload, "favoriteId")
-		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/"+favoriteID+"/w/update", body, credentials)
+		body, calls, err := client.favoriteMergedUpdateBody(ctx, houseID, []map[string]any{payload}, credentials)
 		if err != nil {
-			return 1, err
+			return calls, err
+		}
+		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/batchupdate", body, credentials)
+		if err != nil {
+			return calls + 1, err
 		}
 		if !isBusinessOK(response) {
-			return 1, fmt.Errorf("favorite update returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+			return calls + 1, fmt.Errorf("favorite update fallback returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 		}
-		return 1, nil
+		return calls + 1, nil
 	case HomeOrganizationFavoriteDelete:
 		favoriteID := strings.TrimSpace(stringFromAny(payload["favoriteId"]))
-		if favoriteID == "" {
-			return 0, fmt.Errorf("favorite id is required")
+		if favoriteID != "" {
+			response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/"+favoriteID+"/w/delete", nil, credentials)
+			if err != nil {
+				return 1, err
+			}
+			if !isBusinessOK(response) {
+				return 1, fmt.Errorf("favorite delete returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+			}
+			return 1, nil
 		}
-		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/"+favoriteID+"/w/delete", nil, credentials)
+		body := []any{mapWithoutKeys(payload, "deleteTarget", "id")}
+		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/batchdelete", body, credentials)
 		if err != nil {
 			return 1, err
 		}
 		if !isBusinessOK(response) {
-			return 1, fmt.Errorf("favorite delete returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+			return 1, fmt.Errorf("favorite delete fallback returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 		}
 		return 1, nil
-	case HomeOrganizationFavoriteBatchAdd, HomeOrganizationFavoriteBatchUpdate:
+	case HomeOrganizationFavoriteBatchAdd:
 		items, err := favoriteBatchItems(payload)
 		if err != nil {
 			return 0, err
 		}
-		calls := 0
+		body := make([]any, 0, len(items))
 		for _, item := range items {
-			if kind == HomeOrganizationFavoriteBatchAdd {
-				writeCalls, err := client.write(ctx, HomeOrganizationFavoriteAdd, houseID, item, credentials)
-				calls += writeCalls
-				if err != nil {
-					return calls, err
-				}
-				continue
-			}
-			writeCalls, err := client.write(ctx, HomeOrganizationFavoriteUpdate, houseID, item, credentials)
-			calls += writeCalls
-			if err != nil {
-				return calls, err
-			}
+			body = append(body, mapWithoutKeys(item, "favoriteId"))
 		}
-		return calls, nil
+		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/batchinsert", body, credentials)
+		if err != nil {
+			return 1, err
+		}
+		if !isBusinessOK(response) {
+			return 1, fmt.Errorf("favorite batch add returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+		}
+		return 1, nil
+	case HomeOrganizationFavoriteBatchUpdate:
+		items, err := favoriteBatchItems(payload)
+		if err != nil {
+			return 0, err
+		}
+		body, calls, err := client.favoriteMergedUpdateBody(ctx, houseID, items, credentials)
+		if err != nil {
+			return calls, err
+		}
+		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/batchupdate", body, credentials)
+		if err != nil {
+			return calls + 1, err
+		}
+		if !isBusinessOK(response) {
+			return calls + 1, fmt.Errorf("favorite batch update returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+		}
+		return calls + 1, nil
 	case HomeOrganizationFavoriteBatchDelete:
 		items, err := favoriteBatchItems(payload)
 		if err != nil {
@@ -252,20 +288,66 @@ func (client HomeOrganizationClient) verifyAfterWrite(ctx context.Context, kind 
 }
 
 func (client HomeOrganizationClient) readSort(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, int, error) {
-	body := map[string]any{"houseId": houseID}
-	for _, key := range []string{"typeId", "resId", "roomId", "type", "target", "subIndex"} {
-		if value, ok := payload[key]; ok {
-			body[key] = value
+	body, warning := NormalizeHomeSortPayload(houseID, payload)
+	if warning != "" {
+		return false, 0, fmt.Errorf("%s", warning)
+	}
+	apiCalls := 0
+	if ok, calls, verified, err := client.readSortBySpecificEndpoint(ctx, houseID, body, payload, credentials); verified {
+		apiCalls += calls
+		if err == nil {
+			return ok, apiCalls, nil
 		}
 	}
+	delete(body, "items")
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/sort/r/getSort", body, credentials)
 	if err != nil {
-		return false, 1, err
+		return false, apiCalls + 1, err
 	}
 	if !isBusinessOK(response) {
-		return false, 1, fmt.Errorf("home sort list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+		return false, apiCalls + 1, fmt.Errorf("home sort list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
-	return sortItemsPresent(response["data"], payload["items"]), 1, nil
+	return sortItemsPresent(response["data"], payload["items"]), apiCalls + 1, nil
+}
+
+func (client HomeOrganizationClient) readSortBySpecificEndpoint(ctx context.Context, houseID string, normalized map[string]any, payload map[string]any, credentials requestCredentials) (bool, int, bool, error) {
+	sortType := strings.TrimSpace(stringFromAny(normalized["type"]))
+	target := strings.TrimSpace(stringFromAny(normalized["target"]))
+	if sortType == "" || target == "" {
+		return false, 0, false, nil
+	}
+	switch sortType {
+	case "1":
+		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/node/r/1/"+pathSegment(target)+"/device", nil, credentials)
+		if err != nil {
+			return false, 1, true, err
+		}
+		if !isBusinessOK(response) {
+			return false, 1, true, fmt.Errorf("node.sorted_device.list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+		}
+		data := response["data"]
+		rows := projectSortedDeviceRows(data)
+		if enriched, err := metadataReadonlyFromHomeOrganization(client).enrichSortedDeviceRows(ctx, houseID, rows, MetadataReadonlyCredentials{
+			Authorization: credentials.Authorization,
+			ClientID:      credentials.ClientID,
+		}); err == nil {
+			data = enriched
+		}
+		return nodeSortItemsPresent(data, payload["items"]), 1, true, nil
+	case "2":
+		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/sort/r/room/scene", map[string]any{
+			"ids": []any{requestNumberOrStringForAPI(target)},
+		}, credentials)
+		if err != nil {
+			return false, 1, true, err
+		}
+		if !isBusinessOK(response) {
+			return false, 1, true, fmt.Errorf("room scene sort list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+		}
+		return sceneSortItemsPresent(response["data"], target, payload["items"]), 1, true, nil
+	default:
+		return false, 0, false, nil
+	}
 }
 
 func (client HomeOrganizationClient) readFavorites(ctx context.Context, houseID string, credentials requestCredentials) (any, int, error) {
@@ -284,7 +366,7 @@ func (client HomeOrganizationClient) favoriteExists(ctx context.Context, houseID
 	if err != nil {
 		return false, calls, err
 	}
-	rows := rowsFromData(data)
+	rows := favoriteRowsFromData(data)
 	return favoriteRowsContain(rows, payload), calls, nil
 }
 
@@ -334,6 +416,91 @@ func sortItemsPresent(data any, expected any) bool {
 		}
 	}
 	return true
+}
+
+func sceneSortItemsPresent(data any, target string, expected any) bool {
+	expectedRows, ok := expected.([]any)
+	if !ok || len(expectedRows) == 0 {
+		return false
+	}
+	rows := rowsFromData(data)
+	if len(rows) == 0 {
+		return false
+	}
+	for _, expectedRow := range expectedRows {
+		expectedMap, ok := expectedRow.(map[string]any)
+		if !ok {
+			return false
+		}
+		resID := strings.TrimSpace(stringFromAny(expectedMap["resId"]))
+		rank := strings.TrimSpace(stringFromAny(expectedMap["rank"]))
+		if resID == "" || rank == "" {
+			return false
+		}
+		matched := false
+		for _, row := range rows {
+			item, ok := row.(map[string]any)
+			if !ok {
+				continue
+			}
+			if roomID := strings.TrimSpace(firstAnyString(item, "roomId")); roomID != "" && roomID != target {
+				continue
+			}
+			sceneOrder, ok := item["sceneOrder"].(map[string]any)
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(stringFromAny(sceneOrder[resID])) == rank {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func nodeSortItemsPresent(data any, expected any) bool {
+	expectedRows, ok := expected.([]any)
+	if !ok || len(expectedRows) == 0 {
+		return false
+	}
+	rows := rowsFromData(data)
+	if len(rows) == 0 {
+		return false
+	}
+	for _, expectedRow := range expectedRows {
+		expectedMap, ok := expectedRow.(map[string]any)
+		if !ok {
+			return false
+		}
+		resID := strings.TrimSpace(stringFromAny(expectedMap["resId"]))
+		rank := strings.TrimSpace(stringFromAny(expectedMap["rank"]))
+		if resID == "" || rank == "" {
+			return false
+		}
+		matched := false
+		for _, row := range rows {
+			item, ok := row.(map[string]any)
+			if !ok {
+				continue
+			}
+			if nodeSortRowID(item) == resID && strings.TrimSpace(firstAnyString(item, "rank")) == rank {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func nodeSortRowID(item map[string]any) string {
+	return firstAnyString(item, "resId", "deviceId", "meshGroupId", "meshgroupId", "groupId", "id")
 }
 
 func sortItemMatches(item map[string]any, expected map[string]any) bool {

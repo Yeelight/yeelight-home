@@ -15,12 +15,11 @@ func buildFavoritePayload(request contract.Request, houseID string, requireID bo
 	payload := map[string]any{"houseId": requestNumberOrString(houseID)}
 	if requireID {
 		favoriteID := firstRequestString(request.Parameters, "favoriteId", "favouriteId", "id")
-		if favoriteID == "" {
-			return nil, fmt.Errorf("invalid_favorite_update_payload")
+		if favoriteID != "" {
+			payload["favoriteId"] = favoriteID
 		}
-		payload["favoriteId"] = favoriteID
 	}
-	typeID, ok := requestInt(firstNonNil(request.Parameters["typeId"], request.Parameters["resourceTypeId"]))
+	typeID, ok := resourceTypeIDFromRequest(request.Parameters)
 	if !ok {
 		return nil, fmt.Errorf("invalid_favorite_payload")
 	}
@@ -66,7 +65,7 @@ func buildFavoriteDeletePayload(request contract.Request, houseID string) (map[s
 	if favoriteID := firstRequestString(request.Parameters, "favoriteId", "favouriteId", "id"); favoriteID != "" {
 		payload["favoriteId"] = favoriteID
 	}
-	if typeID, ok := requestInt(firstNonNil(request.Parameters["typeId"], request.Parameters["resourceTypeId"])); ok {
+	if typeID, ok := resourceTypeIDFromRequest(request.Parameters); ok {
 		payload["typeId"] = typeID
 	}
 	if resID := firstRequestString(request.Parameters, "resId", "resourceId", "entityId", "deviceId", "sceneId", "groupId", "roomId"); resID != "" {
@@ -119,8 +118,10 @@ func resolveFavoriteDeleteTargets(ctx context.Context, intent string, endpoint a
 		if reason != "" {
 			return nil, result.APICalls, reason, nil
 		}
-		payload["favoriteId"] = favoriteIDFromRow(target)
-		payload["id"] = favoriteIDFromRow(target)
+		if favoriteID := favoriteIDFromRow(target); favoriteID != "" {
+			payload["favoriteId"] = favoriteID
+			payload["id"] = favoriteID
+		}
 		payload["deleteTarget"] = favoriteDeletePreviewRow(target)
 		return map[string]any{"deleteTarget": favoriteDeletePreviewRow(target)}, result.APICalls, "", nil
 	case "favorite.batch_delete":
@@ -136,13 +137,15 @@ func resolveFavoriteDeleteTargets(ctx context.Context, intent string, endpoint a
 			if reason != "" {
 				return nil, result.APICalls, reason, nil
 			}
-			favoriteID := favoriteIDFromRow(target)
-			if seen[favoriteID] {
+			deleteID := favoriteDeleteIdentityFromRow(target)
+			if seen[deleteID] {
 				return nil, result.APICalls, "duplicate_favorite_delete_target", nil
 			}
-			seen[favoriteID] = true
-			item["favoriteId"] = favoriteID
-			item["id"] = favoriteID
+			seen[deleteID] = true
+			if favoriteID := favoriteIDFromRow(target); favoriteID != "" {
+				item["favoriteId"] = favoriteID
+				item["id"] = favoriteID
+			}
 			item["deleteTarget"] = favoriteDeletePreviewRow(target)
 			previewItems = append(previewItems, favoriteDeletePreviewRow(target))
 		}
@@ -163,7 +166,7 @@ func resolveFavoriteDeleteItem(payload map[string]any, rows []map[string]any) (m
 	case 0:
 		return nil, "favorite_not_found"
 	case 1:
-		if favoriteIDFromRow(matches[0]) == "" {
+		if favoriteDeleteIdentityFromRow(matches[0]) == "" {
 			return nil, "favorite_id_missing"
 		}
 		return matches[0], ""
@@ -178,6 +181,9 @@ func favoriteRowsFromReadonlyData(data any) []map[string]any {
 		if favorites, ok := wrapper["favorites"]; ok {
 			return favoriteRowsFromReadonlyData(favorites)
 		}
+		if rows := favoriteRowsFromReadonlyContainers(wrapper); len(rows) > 0 {
+			return rows
+		}
 		for _, key := range []string{"rows", "list", "data"} {
 			if rows, ok := wrapper[key].([]any); ok {
 				return favoriteRowsFromReadonlyRows(rows)
@@ -190,6 +196,49 @@ func favoriteRowsFromReadonlyData(data any) []map[string]any {
 		return nil
 	}
 	return favoriteRowsFromReadonlyRows(rows)
+}
+
+func favoriteRowsFromReadonlyContainers(wrapper map[string]any) []map[string]any {
+	type container struct {
+		key    string
+		typeID int
+	}
+	containers := []container{
+		{key: "devices", typeID: groupTypeDevice},
+		{key: "meshgroups", typeID: groupTypeMesh},
+		{key: "meshGroups", typeID: groupTypeMesh},
+		{key: "userscenes", typeID: groupTypeScene},
+		{key: "userScenes", typeID: groupTypeScene},
+		{key: "scenes", typeID: groupTypeScene},
+	}
+	rows := []map[string]any{}
+	for _, spec := range containers {
+		rawRows, ok := wrapper[spec.key].([]any)
+		if !ok {
+			continue
+		}
+		for _, raw := range rawRows {
+			row, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			normalized := map[string]any{}
+			for key, value := range row {
+				normalized[key] = value
+			}
+			if normalized["typeId"] == nil {
+				normalized["typeId"] = spec.typeID
+			}
+			if normalized["resId"] == nil {
+				normalized["resId"] = firstNonNil(normalized["deviceId"], normalized["meshGroupId"], normalized["sceneId"], normalized["id"])
+			}
+			if normalized["favoriteId"] == nil && normalized["favouriteId"] == nil {
+				delete(normalized, "id")
+			}
+			rows = append(rows, normalized)
+		}
+	}
+	return rows
 }
 
 func favoriteRowsFromReadonlyRows(rows []any) []map[string]any {
@@ -219,7 +268,19 @@ func favoriteRowMatchesPayload(row map[string]any, payload map[string]any) bool 
 }
 
 func favoriteIDFromRow(row map[string]any) string {
-	return firstNonEmptyString(favoriteField(row, "id"), favoriteField(row, "favoriteId"), favoriteField(row, "favouriteId"))
+	return firstNonEmptyString(favoriteField(row, "favoriteId"), favoriteField(row, "favouriteId"), favoriteField(row, "id"))
+}
+
+func favoriteDeleteIdentityFromRow(row map[string]any) string {
+	if favoriteID := favoriteIDFromRow(row); favoriteID != "" {
+		return "favorite:" + favoriteID
+	}
+	typeID := favoriteField(row, "typeId")
+	resID := favoriteField(row, "resId")
+	if typeID == "" || resID == "" {
+		return ""
+	}
+	return "resource:" + typeID + ":" + resID
 }
 
 func favoriteField(row map[string]any, key string) string {

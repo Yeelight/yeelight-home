@@ -537,3 +537,39 @@ func (app *app) commitSpaceBatchOrganizationPlan(ctx context.Context, request co
 	}
 	return spaceBatchOrganizationCommitResponse(request, record, result), nil
 }
+
+func (app *app) commitDeviceMovePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+	deviceID := valueIDString(firstNonNil(record.Payload["deviceId"], record.Payload["id"]))
+	roomID := valueIDString(record.Payload["roomId"])
+	if deviceID == "" || roomID == "" {
+		return contract.Response{}, fmt.Errorf("invalid_device_move_payload")
+	}
+	batchRecord := record
+	batchRecord.Intent = "device.move_room.batch"
+	batchRecord.Payload = map[string]any{
+		"houseId": record.HouseID,
+		"items": map[string]any{
+			deviceID: roomID,
+		},
+	}
+	result, err := api.NewSpaceBatchOrganizationClient(endpoint, nil).Run(ctx, api.SpaceBatchOrganizationRequest{
+		Kind:           api.SpaceBatchDeviceMoveRoom,
+		HouseID:        record.HouseID,
+		Payload:        batchRecord.Payload,
+		VerifyAttempts: 5,
+		VerifyInterval: time.Second,
+		Credentials: api.SpaceOrganizationCredentials{
+			Authorization: authorization,
+			ClientID:      clientID,
+		},
+	})
+	if err != nil {
+		return contract.Response{}, err
+	}
+	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
+		return contract.Response{}, err
+	}
+	response := spaceBatchOrganizationCommitResponse(request, batchRecord, result)
+	response.Result["capability"] = "device.move"
+	return response, nil
+}

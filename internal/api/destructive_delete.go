@@ -57,7 +57,7 @@ func NewDestructiveDeleteClient(endpoint Endpoint, client *http.Client) Destruct
 func (client DestructiveDeleteClient) Run(ctx context.Context, request DestructiveDeleteRequest) (DestructiveDeleteResult, error) {
 	houseID := strings.TrimSpace(request.HouseID)
 	entityID := strings.TrimSpace(request.EntityID)
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return DestructiveDeleteResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
@@ -223,6 +223,9 @@ func (client DestructiveDeleteClient) findGateway(ctx context.Context, houseID s
 		return EntitySummary{}, 1, err
 	}
 	if !isBusinessOK(response) {
+		if isInvalidReferenceBusinessResponse(response) {
+			return EntitySummary{}, 1, nil
+		}
 		return EntitySummary{}, 1, fmt.Errorf("gateway.detail.get returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
 	row, _ := response["data"].(map[string]any)
@@ -255,6 +258,15 @@ func (client DestructiveDeleteClient) findGatewayFromList(ctx context.Context, h
 	return EntitySummary{}, 1, nil
 }
 
+func isInvalidReferenceBusinessResponse(response map[string]any) bool {
+	code := responseScalar(response, "code")
+	message := responseScalar(response, "message", "msg")
+	if code == "600" || code == "601" {
+		return true
+	}
+	return strings.Contains(message, "参数格式错误") || strings.Contains(message, "非法参数")
+}
+
 func (client DestructiveDeleteClient) findHome(ctx context.Context, houseID string, credentials requestCredentials) (EntitySummary, int, error) {
 	if strings.TrimSpace(houseID) == "" {
 		return EntitySummary{}, 0, fmt.Errorf("house id is required")
@@ -273,7 +285,17 @@ func (client DestructiveDeleteClient) findHome(ctx context.Context, houseID stri
 			return entity, result.APICalls, nil
 		}
 	}
-	return EntitySummary{}, result.APICalls, nil
+	fallback, fallbackErr := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
+		HouseID: houseID,
+		Credentials: EntityListCredentials{
+			Authorization: credentials.Authorization,
+			ClientID:      credentials.ClientID,
+		},
+	})
+	if fallbackErr != nil {
+		return EntitySummary{}, result.APICalls + fallback.APICalls, nil
+	}
+	return EntitySummary{Type: "home", ID: houseID, HouseID: houseID}, result.APICalls + fallback.APICalls, nil
 }
 
 func destructiveEntityType(kind DestructiveDeleteKind) string {

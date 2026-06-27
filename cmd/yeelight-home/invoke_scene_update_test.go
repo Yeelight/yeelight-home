@@ -20,7 +20,7 @@ func TestInvokeSceneUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-scene-update-plan","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","details":[{"typeId":2,"resId":"50018330","rank":0,"action":0,"params":{"set":{"p":true}}}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-plan","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -48,6 +48,14 @@ func TestInvokeSceneUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
 	record, ok, err := app.planStore.Load(planID)
 	if err != nil || !ok || record.Intent != "scene.update" || record.Payload["sceneId"] != "scene-1" {
 		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	}
+	details, ok := record.Payload["details"].([]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("details = %#v", record.Payload["details"])
+	}
+	detail, ok := details[0].(map[string]any)
+	if !ok || detail["resName"] != "主灯" || detail["action"] != float64(0) || detail["rank"] != float64(0) || detail["params"] != `{"set":{"p":true}}` {
+		t.Fatalf("detail = %#v", detail)
 	}
 }
 
@@ -110,7 +118,7 @@ func TestInvokePlanCommitUpdatesSceneFromStoredPlan(t *testing.T) {
 		"id":      "scene-1",
 		"name":    "回家灯光更新",
 		"details": []any{
-			map[string]any{"typeId": 2, "resId": float64(50018330), "rank": 0, "action": 0, "params": `{"set":{"p":true}}`},
+			map[string]any{"typeId": 2, "resId": float64(50018330), "params": map[string]any{"set": map[string]any{"p": true}}},
 		},
 	})
 
@@ -135,6 +143,14 @@ func TestInvokePlanCommitUpdatesSceneFromStoredPlan(t *testing.T) {
 	}
 	if writeBody["id"] != "scene-1" || writeBody["name"] != "回家灯光更新" {
 		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	details, ok := writeBody["details"].([]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("writeBody details = %#v", writeBody["details"])
+	}
+	detail, ok := details[0].(map[string]any)
+	if !ok || detail["resName"] != "50018330" || detail["action"] != float64(0) || detail["rank"] != float64(0) || detail["params"] != `{"set":{"p":true}}` {
+		t.Fatalf("writeBody detail = %#v", details[0])
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
 	if response["status"] != "success" || response["traceId"] != "scene-update-commit" {

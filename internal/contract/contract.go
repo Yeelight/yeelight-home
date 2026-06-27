@@ -206,6 +206,7 @@ func isKnownIntent(intent string) bool {
 		"thing.product.info.batch_get",
 		"thing.product.info.v3.batch_get",
 		"thing.product.list.v3",
+		"product.pedia.search",
 		"thing.product_domain.list",
 		"thing.product_faq.list",
 		"thing.product_faq.detail.get",

@@ -21,10 +21,10 @@ func TestPanelConfigurationClientUpdatesPanelButtonsWithReadAfterWrite(t *testin
 		case "/apis/iot/v1/panel/r/button/info/panel-1":
 			buttonReadCalls++
 			if buttonReadCalls < 2 {
-				_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"btn-1","keyValue":1,"resId":"old","resType":2}]}`))
+				_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"btn-1","keyValue":1,"index":1,"resId":"old","resType":2,"type":2}]}`))
 				return
 			}
-			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"btn-1","keyValue":1,"resId":"scene-1","resType":6,"visible":1}]}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"btn-1","keyValue":1,"index":1,"resId":"scene-1","resType":6,"visible":1,"type":2}]}`))
 		case "/apis/iot/v1/panel/w/button/update/panel-1":
 			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
 				t.Fatalf("decode write body: %v", err)
@@ -120,14 +120,18 @@ func TestPanelConfigurationClientUpdatesPanelButtonEventsWithReadAfterWrite(t *t
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/apis/iot/v1/panel/r/detail/panel-1":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"panel-1","name":"面板"}}`))
+			if buttonReadCalls == 0 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"panel-1","name":"面板","buttons":[{"id":"btn-1","buttonEvents":[{"id":"101","alias":"old","details":[{"resId":"old","typeId":2}]}]}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"panel-1","name":"面板","buttons":[{"id":"btn-1","buttonEvents":[{"id":"101","alias":"单击","details":[{"resId":"scene-1","typeId":6}]},{"id":"102","alias":"双击","details":[{"resId":"scene-2","typeId":6}]}]}]}}`))
 		case "/apis/iot/v1/panel/r/button/info/panel-1":
 			buttonReadCalls++
 			if buttonReadCalls == 1 {
-				_, _ = writer.Write([]byte(`{"success":true,"data":[{"buttonEventId":101,"alias":"old","details":[{"resId":"old","typeId":2}]}]}`))
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"2":[{"id":"btn-1","keyValue":1}]}}`))
 				return
 			}
-			_, _ = writer.Write([]byte(`{"success":true,"data":[{"buttonEventId":101,"alias":"单击","details":[{"resId":"scene-1","typeId":6}]},{"buttonEventId":102,"alias":"双击","details":[{"resId":"scene-2","typeId":6}]}]}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"2":[{"id":"btn-1","keyValue":1}]}}`))
 		case "/apis/iot/v1/panel/w/button/event/update":
 			if err := json.NewDecoder(request.Body).Decode(&singleBody); err != nil {
 				t.Fatalf("decode single body: %v", err)
@@ -165,7 +169,7 @@ func TestPanelConfigurationClientUpdatesPanelButtonEventsWithReadAfterWrite(t *t
 	if err != nil {
 		t.Fatalf("single Run error: %v", err)
 	}
-	if singleBody["buttonEventId"] != "101" || singleBody["alias"] != "单击" {
+	if singleBody["deviceId"] != "panel-1" || singleBody["buttonEventId"] != "101" || singleBody["alias"] != "单击" {
 		t.Fatalf("singleBody = %#v", singleBody)
 	}
 	if !singleResult.Verified || singleResult.VerifiedBy != "panel.button_event.update_read_after_write" {
@@ -189,8 +193,12 @@ func TestPanelConfigurationClientUpdatesPanelButtonEventsWithReadAfterWrite(t *t
 	if err != nil {
 		t.Fatalf("batch Run error: %v", err)
 	}
-	eventsJSON, ok := batchBody["buttonEvents"].(string)
-	if !ok || !strings.Contains(eventsJSON, "scene-2") {
+	events, ok := batchBody["buttonEvents"].([]any)
+	if !ok || len(events) != 2 {
+		t.Fatalf("batchBody = %#v", batchBody)
+	}
+	second, ok := events[1].(map[string]any)
+	if !ok || second["deviceId"] != "panel-1" || second["buttonEventId"] != "102" {
 		t.Fatalf("batchBody = %#v", batchBody)
 	}
 	if !batchResult.Verified || batchResult.VerifiedBy != "panel.button_event.batch_update_read_after_write" {

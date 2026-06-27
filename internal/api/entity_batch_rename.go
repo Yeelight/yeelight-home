@@ -50,7 +50,7 @@ func (client EntityBatchRenameClient) Run(ctx context.Context, request EntityBat
 	if err != nil {
 		return EntityBatchRenameResult{}, err
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return EntityBatchRenameResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}

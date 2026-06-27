@@ -150,7 +150,7 @@ yeelight-home thing product-info --product-ids 133121,198660 --json
 yeelight-home panel button-event-update --button-event-id <id> --params-json '<json>' --json
 ```
 
-`invoke --stdin` remains the stable machine interface for Skills and generated apps. Resource commands are for humans and support scripts that prefer ordinary flags.
+`invoke --stdin` remains the stable machine interface for Skills and generated apps. It accepts `--profile`, `--region`, and `--house-id` as one-shot overrides, using the same precedence as other Runtime commands. Resource commands are for humans and support scripts that prefer ordinary flags.
 
 ## Config Commands
 

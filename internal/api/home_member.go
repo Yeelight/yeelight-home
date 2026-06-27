@@ -60,7 +60,7 @@ func (client HomeMemberClient) Run(ctx context.Context, request HomeMemberReques
 	if houseID == "" {
 		return HomeMemberResult{}, fmt.Errorf("house id is required")
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return HomeMemberResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}

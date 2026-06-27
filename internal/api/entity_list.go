@@ -30,6 +30,8 @@ type EntitySummary struct {
 	HouseID string `json:"houseId,omitempty"`
 	RoomID  string `json:"roomId,omitempty"`
 	Online  *bool  `json:"online,omitempty"`
+	Bind    *bool  `json:"bind,omitempty"`
+	Virtual *bool  `json:"virtual,omitempty"`
 	Status  string `json:"status,omitempty"`
 }
 
@@ -65,6 +67,7 @@ func (client EntityListClient) Run(ctx context.Context, request EntityListReques
 	credentials := requestCredentials{
 		Authorization: request.Credentials.Authorization,
 		ClientID:      request.Credentials.ClientID,
+		HouseID:       houseID,
 	}
 	if houseID == "" {
 		return client.listHomes(ctx, credentials)
@@ -167,6 +170,12 @@ func projectEntities(entityType string, houseID string, response map[string]any)
 		}
 		if online, ok := item["online"].(bool); ok {
 			entity.Online = &online
+		}
+		if bind, ok := item["bind"].(bool); ok {
+			entity.Bind = &bind
+		}
+		if virtual, ok := item["virtual"].(bool); ok {
+			entity.Virtual = &virtual
 		}
 		entities = append(entities, entity)
 	}

@@ -170,7 +170,7 @@ func sanitizeKnobDetails(value any) ([]any, bool) {
 		if !ok {
 			return nil, false
 		}
-		clean := copyAllowedConfigFields(item, []string{"id", "index", "mode", "model", "resId", "resType", "action", "property", "value", "details"})
+		clean := copyAllowedConfigFields(item, []string{"id", "index", "configType", "mode", "model", "resId", "typeId", "resType", "resIndex", "resName", "param", "sens", "action", "property", "value", "details"})
 		if len(clean) == 0 {
 			return nil, false
 		}
@@ -229,7 +229,7 @@ func sanitizePanelButtonEventDetails(value any) ([]any, bool) {
 		if !ok {
 			return nil, false
 		}
-		clean := copyAllowedConfigFields(item, []string{"id", "resId", "typeId", "resType", "params", "repeatType", "repeatValue", "startTime", "endTime", "action", "property", "value", "delay", "duration"})
+		clean := copyAllowedConfigFields(item, []string{"id", "roomId", "resId", "typeId", "resType", "idx", "params", "rank", "resName", "repeatType", "repeatValue", "startTime", "endTime", "action", "property", "value", "delay", "duration"})
 		if len(clean) == 0 {
 			return nil, false
 		}

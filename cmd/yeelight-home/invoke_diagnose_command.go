@@ -78,6 +78,18 @@ func (app *app) invokeDiagnoseGateway(ctx context.Context, request contract.Requ
 		fallback = match.ID != ""
 	}
 	if match.ID == "" {
+		if gatewayResult, gatewayOK, gatewayErr := readGatewayDetailForDiagnosis(ctx, endpoint, entities.HouseID, target, authorization, clientID); gatewayErr != nil {
+			return contract.Response{}, gatewayErr
+		} else if gatewayOK {
+			unknowns := []string{"gateway_child_device_health_unavailable", "gateway_network_quality_unavailable", "gateway_sync_log_unavailable", "gateway_entity_projection_unavailable"}
+			warnings := append([]string{}, entities.Warnings...)
+			warnings = append(warnings, "gateway_entity_projection_unavailable")
+			warnings = append(warnings, gatewayResult.Warnings...)
+			evidence := map[string]any{
+				"gateway": gatewayDiagnosisEvidence(gatewayResult),
+			}
+			return diagnosticResponse(request, "partial", "已通过网关详情接口读取网关基础信息，但实体聚合中缺少该网关投影，专项诊断证据仍不完整。", "diagnose-gateway-readonly", entities, evidence, unknowns, warnings, entityListAPICalls(entities)+gatewayResult.APICalls), nil
+		}
 		return diagnosticClarificationResponse(request, "entity_not_found", target, candidates, []string{"gateway"}, entityListAPICalls(entities)), nil
 	}
 	if match.Type != "gateway" && match.Type != "device" {
@@ -100,6 +112,44 @@ func (app *app) invokeDiagnoseGateway(ctx context.Context, request contract.Requ
 		evidence["status"] = match.Status
 	}
 	return diagnosticResponse(request, "partial", fmt.Sprintf("已读取 %s 的网关相关基础信息，但缺少网关专项诊断证据。", match.Name), "diagnose-gateway-readonly", entities, evidence, unknowns, warnings, entityListAPICalls(entities)), nil
+}
+
+func readGatewayDetailForDiagnosis(ctx context.Context, endpoint api.Endpoint, houseID string, target entityGetTarget, authorization string, clientID string) (api.MetadataReadonlyResult, bool, error) {
+	if houseID == "" || target.id == "" {
+		return api.MetadataReadonlyResult{}, false, nil
+	}
+	result, err := api.NewMetadataReadonlyClient(endpoint, nil).RunGatewayDetailGet(ctx, api.MetadataReadonlyRequest{
+		HouseID:  houseID,
+		DeviceID: target.id,
+		Parameters: map[string]any{
+			"gatewayId": target.id,
+		},
+		Credentials: api.MetadataReadonlyCredentials{
+			Authorization: authorization,
+			ClientID:      clientID,
+		},
+	})
+	if err != nil {
+		return api.MetadataReadonlyResult{}, false, nil
+	}
+	if result.Partial || result.Data == nil {
+		return result, false, nil
+	}
+	return result, true, nil
+}
+
+func gatewayDiagnosisEvidence(result api.MetadataReadonlyResult) map[string]any {
+	evidence := map[string]any{
+		"source":      result.Capability,
+		"deviceId":    result.DeviceID,
+		"cloudWrites": false,
+	}
+	if data, ok := result.Data.(map[string]any); ok {
+		if detail, ok := data["detail"].(map[string]any); ok {
+			evidence["detail"] = detail
+		}
+	}
+	return evidence
 }
 
 func (app *app) invokeDiagnoseScene(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {

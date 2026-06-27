@@ -80,6 +80,33 @@ func TestInvokeFavoriteAddCreatesPendingPlanWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestInvokeFavoriteAddAcceptsSemanticEntityType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writeSeededHouseScopedListForConfigureTest(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-fav-semantic-secret", "client-fav-semantic-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-fav-add-semantic-plan","locale":"zh-CN","utterance":"把主灯加入收藏","intent":"favorite.add","parameters":{"houseId":"200171","entityType":"device","resId":"50018330","rank":1}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	record, ok, err := app.planStore.Load(response["confirmation"].(map[string]any)["planId"].(string))
+	typeID, typeOK := requestInt(record.Payload["typeId"])
+	if err != nil || !ok || !typeOK || typeID != 2 {
+		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	}
+}
+
 func TestInvokeFavoriteBatchAddCreatesPendingPlanWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -117,6 +144,52 @@ func TestInvokeFavoriteBatchAddCreatesPendingPlanWithoutWriting(t *testing.T) {
 	record, ok, err := app.planStore.Load(planID)
 	if err != nil || !ok || record.Intent != "favorite.batch_add" {
 		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	}
+}
+
+func TestInvokeHomeSortAcceptsSemanticSortAndEntityType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path == "/apis/iot/v1/sort/r/getSort" {
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"sort":[]}}`))
+			return
+		}
+		writeSeededHouseScopedListForConfigureTest(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-sort-semantic-secret", "client-sort-semantic-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-sort-semantic-plan","locale":"zh-CN","utterance":"把灯光区主灯排到第一位","intent":"home.sort.configure","parameters":{"houseId":"200171","sortType":"device_room","roomId":"401391","items":[{"entityType":"device","resId":"50018330","rank":1}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	record, ok, err := app.planStore.Load(response["confirmation"].(map[string]any)["planId"].(string))
+	if err != nil || !ok {
+		t.Fatalf("record ok=%v err=%v", ok, err)
+	}
+	if sortType, ok := requestInt(record.Payload["type"]); !ok || sortType != 1 {
+		t.Fatalf("payload = %#v", record.Payload)
+	}
+	if target := requestString(record.Payload["target"]); target != "401391" {
+		t.Fatalf("payload = %#v", record.Payload)
+	}
+	if roomID := requestString(record.Payload["roomId"]); roomID != "401391" {
+		t.Fatalf("payload = %#v", record.Payload)
+	}
+	items := record.Payload["items"].([]any)
+	first := items[0].(map[string]any)
+	typeID, typeOK := requestInt(first["typeId"])
+	resID := requestString(first["resId"])
+	if !typeOK || typeID != 2 || resID != "50018330" {
+		t.Fatalf("payload = %#v", record.Payload)
 	}
 }
 
@@ -159,6 +232,43 @@ func TestInvokeFavoriteDeleteCreatesPendingPlanWithoutWriting(t *testing.T) {
 	}
 	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
 	if err != nil || !ok || record.Intent != "favorite.delete" || record.Payload["favoriteId"] != "fav-1" {
+		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	}
+}
+
+func TestInvokeFavoriteDeleteAcceptsNestedDeviceResponseWithoutFavoriteID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/favourite/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"id":"50018330","deviceId":"50018330","houseId":"200171","rank":1}],"meshgroups":[],"userscenes":[]}}`))
+		default:
+			writeSeededHouseScopedListForConfigureTest(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-fav-delete-secret", "client-fav-delete-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-fav-delete-nested-plan","locale":"zh-CN","utterance":"把主灯从首页收藏里移除掉","intent":"favorite.delete","parameters":{"houseId":"200171","typeId":2,"resId":"50018330","rank":1}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	confirmation := response["confirmation"].(map[string]any)
+	preview := confirmation["payloadPreview"].(map[string]any)["semanticPreview"].(map[string]any)
+	deleteTarget := preview["deleteTarget"].(map[string]any)
+	if deleteTarget["typeId"] != float64(2) || deleteTarget["resId"] != "50018330" {
+		t.Fatalf("preview = %#v", preview)
+	}
+	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
+	if err != nil || !ok || record.Intent != "favorite.delete" || record.Payload["favoriteId"] != nil {
 		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
 	}
 }
@@ -344,7 +454,7 @@ func TestInvokePlanCommitBatchDeletesFavoritesFromStoredPlan(t *testing.T) {
 }
 
 func TestInvokePlanCommitBatchAddsFavoritesFromStoredPlan(t *testing.T) {
-	writeCount := 0
+	var writeBody []any
 	favoriteListCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -356,8 +466,10 @@ func TestInvokePlanCommitBatchAddsFavoritesFromStoredPlan(t *testing.T) {
 				return
 			}
 			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"fav-1","houseId":200171,"typeId":2,"resId":50018330,"rank":1},{"id":"fav-2","houseId":200171,"typeId":6,"resId":"700001","rank":2}]}`))
-		case "/apis/iot/v1/favourite/w/insert":
-			writeCount++
+		case "/apis/iot/v1/favourite/w/batchinsert":
+			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
+				t.Fatalf("decode favorite batch insert body: %v", err)
+			}
 			_, _ = writer.Write([]byte(`{"success":true}`))
 		default:
 			http.NotFound(writer, request)
@@ -381,8 +493,8 @@ func TestInvokePlanCommitBatchAddsFavoritesFromStoredPlan(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if writeCount != 2 {
-		t.Fatalf("writeCount = %d", writeCount)
+	if len(writeBody) != 2 {
+		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
 	result := response["result"].(map[string]any)
@@ -434,6 +546,32 @@ func TestInvokePlanCommitUpdatesFavoriteFromStoredPlan(t *testing.T) {
 	}
 }
 
+func TestInvokeFavoriteUpdateAcceptsResourceIdentityWithoutFavoriteID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writeSeededHouseScopedListForConfigureTest(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-fav-update-secret", "client-fav-update-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-fav-update-resource-plan","locale":"zh-CN","utterance":"把主灯首页收藏排到第二位","intent":"favorite.update","parameters":{"houseId":"200171","typeId":2,"resId":"50018330","rank":2}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	record, ok, err := app.planStore.Load(response["confirmation"].(map[string]any)["planId"].(string))
+	if err != nil || !ok || record.Intent != "favorite.update" || record.Payload["favoriteId"] != nil || record.Payload["rank"] != float64(2) {
+		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	}
+}
+
 func TestInvokeHomeSortConfigurePlanIncludesSemanticPreview(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -460,6 +598,38 @@ func TestInvokeHomeSortConfigurePlanIncludesSemanticPreview(t *testing.T) {
 	payloadPreview := confirmation["payloadPreview"].(map[string]any)
 	semanticPreview := payloadPreview["semanticPreview"].(map[string]any)
 	if semanticPreview["currentItems"] != float64(1) || semanticPreview["plannedItems"] != float64(1) {
+		t.Fatalf("semanticPreview = %#v", semanticPreview)
+	}
+}
+
+func TestInvokeHomeSortConfigureCreatesPlanWhenPreviewReadFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/sort/r/getSort":
+			_, _ = writer.Write([]byte(`{"success":false,"code":500,"message":"服务器内部错误"}`))
+		default:
+			writeSeededHouseScopedListForConfigureTest(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-sort-preview-secret", "client-sort-preview-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-sort-preview-fail","locale":"zh-CN","utterance":"把客厅主灯排到第一位","intent":"home.sort.configure","parameters":{"houseId":"200171","sortType":"device_room","roomId":"401391","items":[{"entityType":"device","resId":"50018330","rank":1}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	confirmation := response["confirmation"].(map[string]any)
+	semanticPreview := confirmation["payloadPreview"].(map[string]any)["semanticPreview"].(map[string]any)
+	if semanticPreview["previewUnavailable"] != true || semanticPreview["warning"] != "home_sort_preview_unavailable" {
 		t.Fatalf("semanticPreview = %#v", semanticPreview)
 	}
 }

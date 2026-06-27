@@ -65,6 +65,7 @@ func (client MetadataReadonlyClient) RunDeviceVirtualCountGet(ctx context.Contex
 }
 
 func (client MetadataReadonlyClient) RunNodeSortedDeviceList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
+	houseID := strings.TrimSpace(request.HouseID)
 	resType := strings.TrimSpace(firstNonEmpty(
 		stringFromAny(request.Parameters["resType"]),
 		stringFromAny(request.Parameters["nodeType"]),
@@ -77,24 +78,30 @@ func (client MetadataReadonlyClient) RunNodeSortedDeviceList(ctx context.Context
 	))
 	if resType == "" || resID == "" {
 		result := metadataReadonlyMissingContext(client.endpoint.Region, "node.sorted_device.list", "node_context_missing")
-		result.HouseID = strings.TrimSpace(request.HouseID)
+		result.HouseID = houseID
 		return result, nil
 	}
-	response, err := client.call(ctx, http.MethodPost, "/v1/node/r/"+pathSegment(resType)+"/"+pathSegment(resID)+"/device", nil, request.Credentials)
+	response, err := client.callWithHouseHeader(ctx, http.MethodPost, "/v1/node/r/"+pathSegment(resType)+"/"+pathSegment(resID)+"/device", nil, request.Credentials, houseID)
 	if err != nil {
 		return MetadataReadonlyResult{}, err
 	}
 	if !isBusinessOK(response) {
-		return MetadataReadonlyResult{}, metadataReadonlyBusinessError("node sorted device list", response)
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, houseID, "", "node.sorted_device.list", response), nil
+	}
+	devices := projectSortedDeviceRows(response["data"])
+	if resType == "1" {
+		if enriched, err := client.enrichSortedDeviceRows(ctx, houseID, devices, request.Credentials); err == nil {
+			devices = enriched
+		}
 	}
 	return MetadataReadonlyResult{
 		Region:     client.endpoint.Region,
-		HouseID:    strings.TrimSpace(request.HouseID),
+		HouseID:    houseID,
 		Capability: "node.sorted_device.list",
 		Data: map[string]any{
 			"resType": resType,
 			"resId":   resID,
-			"devices": projectSortedDeviceRows(response["data"]),
+			"devices": devices,
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,

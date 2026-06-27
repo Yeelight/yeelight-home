@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -165,7 +167,9 @@ func (client MetadataReadonlyClient) RunGroupList(ctx context.Context, request M
 	if houseID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "group.list", "house_context_missing"), nil
 	}
-	response, err := client.call(ctx, http.MethodPost, "/v1/group/r/all", map[string]any{"houseId": houseID}, request.Credentials)
+	pageNo := positiveInt(firstNonNil(request.Parameters["pageNo"], request.Parameters["page"]), 1)
+	pageSize := positiveInt(firstNonNil(request.Parameters["pageSize"], request.Parameters["size"], request.Parameters["limit"]), 100)
+	response, err := client.call(ctx, http.MethodGet, fmt.Sprintf("/v2/thing/manage/house/%s/group/r/info/%d/%d", pathSegment(houseID), pageNo, pageSize), nil, request.Credentials)
 	if err != nil {
 		return MetadataReadonlyResult{}, err
 	}
@@ -201,12 +205,9 @@ func (client MetadataReadonlyClient) RunGroupSearch(ctx context.Context, request
 		result.HouseID = houseID
 		return result, nil
 	}
-	body := map[string]any{
-		"fuzzyName": fuzzyName,
-		"pageNo":    positiveInt(firstNonNil(request.Parameters["pageNo"], request.Parameters["page"]), 1),
-		"pageSize":  positiveInt(firstNonNil(request.Parameters["pageSize"], request.Parameters["size"], request.Parameters["limit"]), 20),
-	}
-	response, err := client.call(ctx, http.MethodPost, "/v1/group/r/"+pathSegment(houseID)+"/fuzzy", body, request.Credentials)
+	pageNo := positiveInt(firstNonNil(request.Parameters["pageNo"], request.Parameters["page"]), 1)
+	pageSize := positiveInt(firstNonNil(request.Parameters["pageSize"], request.Parameters["size"], request.Parameters["limit"]), 100)
+	response, err := client.call(ctx, http.MethodGet, fmt.Sprintf("/v2/thing/manage/house/%s/group/r/info/%d/%d", pathSegment(houseID), pageNo, pageSize), nil, request.Credentials)
 	if err != nil {
 		return MetadataReadonlyResult{}, err
 	}
@@ -218,7 +219,8 @@ func (client MetadataReadonlyClient) RunGroupSearch(ctx context.Context, request
 		HouseID:    houseID,
 		Capability: "group.search",
 		Data: map[string]any{
-			"groups": projectGroupRows(response["data"]),
+			"groups": filterProjectedRowsByName(projectGroupRows(response["data"]), fuzzyName),
+			"query":  map[string]any{"name": fuzzyName, "pageNo": pageNo, "pageSize": pageSize},
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,
@@ -253,11 +255,25 @@ func (client MetadataReadonlyClient) RunSceneSearch(ctx context.Context, request
 	if houseID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "scene.search", "house_context_missing"), nil
 	}
+	keyword := strings.TrimSpace(firstNonEmpty(
+		stringFromAny(request.Parameters["name"]),
+		stringFromAny(request.Parameters["keyword"]),
+		stringFromAny(request.Parameters["query"]),
+		stringFromAny(request.Parameters["fuzzyName"]),
+	))
+	if keyword == "" {
+		result := metadataReadonlyMissingContext(client.endpoint.Region, "scene.search", "scene_search_keyword_missing")
+		result.HouseID = houseID
+		return result, nil
+	}
 	body := map[string]any{}
-	for _, key := range []string{"name", "keyword", "query", "pageNo", "pageSize", "sort", "order", "orderBy"} {
+	for _, key := range []string{"name", "fuzzyName", "keyword", "query", "pageNo", "pageSize", "sort", "order", "orderBy"} {
 		if value, ok := request.Parameters[key]; ok {
 			body[key] = value
 		}
+	}
+	if body["name"] == nil {
+		body["name"] = keyword
 	}
 	if body["pageNo"] == nil {
 		body["pageNo"] = 1
@@ -265,7 +281,25 @@ func (client MetadataReadonlyClient) RunSceneSearch(ctx context.Context, request
 	if body["pageSize"] == nil {
 		body["pageSize"] = 20
 	}
-	return client.readPath(ctx, request, "scene.search", "/v1/scene/"+houseID+"/r/fuzzy", http.MethodPost, body, map[string]any{"scenes": nil})
+	response, err := client.call(ctx, http.MethodPost, "/v1/scene/"+houseID+"/r/fuzzy", body, request.Credentials)
+	if err != nil {
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, houseID, request.DeviceID, "scene.search", response), nil
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		Capability: "scene.search",
+		Data: map[string]any{
+			"scenes": filterProjectedRowsByName(projectSceneRows(response["data"]), keyword),
+			"query":  map[string]any{"name": keyword, "pageNo": body["pageNo"], "pageSize": body["pageSize"]},
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
 }
 
 func (client MetadataReadonlyClient) RunAutomationSupportedList(ctx context.Context, request MetadataReadonlyRequest, v2 bool) (MetadataReadonlyResult, error) {
@@ -399,6 +433,24 @@ func projectGroupRows(data any) []any {
 		}
 	}
 	return groups
+}
+
+func filterProjectedRowsByName(rows []any, name string) []any {
+	keyword := strings.TrimSpace(name)
+	if keyword == "" {
+		return rows
+	}
+	filtered := make([]any, 0, len(rows))
+	for _, row := range rows {
+		item, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		if strings.Contains(stringFromAny(item["name"]), keyword) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }
 
 func projectDeviceRows(data any) []any {
@@ -581,10 +633,14 @@ func (client MetadataReadonlyClient) RunMeshgroupDetailGet(ctx context.Context, 
 func (client MetadataReadonlyClient) readPath(ctx context.Context, request MetadataReadonlyRequest, capability string, path string, method string, body map[string]any, projection map[string]any) (MetadataReadonlyResult, error) {
 	response, err := client.call(ctx, method, path, body, request.Credentials)
 	if err != nil {
+		var statusErr HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			return metadataReadonlyAuthBoundaryResult(client.endpoint.Region, request.HouseID, request.DeviceID, capability, statusErr.StatusCode), nil
+		}
 		return MetadataReadonlyResult{}, err
 	}
 	if !isBusinessOK(response) {
-		return MetadataReadonlyResult{}, metadataReadonlyBusinessError(capability, response)
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, request.HouseID, request.DeviceID, capability, response), nil
 	}
 	data := map[string]any{}
 	for key := range projection {

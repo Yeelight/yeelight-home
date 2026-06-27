@@ -113,7 +113,7 @@ See [CONFIG.md](CONFIG.md) for full command and precedence details.
 
 ### Human Commands Versus `invoke`
 
-`invoke --stdin` is the stable machine contract for Skills, generated apps, and automation hosts. It accepts one SkillRequest JSON object and returns one SkillResponse JSON object.
+`invoke --stdin` is the stable machine contract for Skills, generated apps, and automation hosts. It accepts one SkillRequest JSON object and returns one SkillResponse JSON object. It also accepts `--profile`, `--region`, and `--house-id` for one-shot context overrides.
 
 Human operators should usually use resource commands:
 
@@ -251,10 +251,11 @@ Run `home select` only when you want future house-scoped commands to use a defau
 ### `invoke`
 
 ```sh
-yeelight-home invoke --stdin
+yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id <id>]
 ```
 
 Reads a SkillRequest JSON object from stdin and writes a SkillResponse JSON object to stdout. This is the only command Skills should call for smart-home operations.
+Flag overrides are applied before request parameters are resolved; request `parameters.region` and `parameters.houseId` still work when the corresponding flag is omitted.
 
 Interactive users do not need to hand-write SkillRequest JSON for common operations. Prefer resource commands such as `device list`, `scene execute`, `light on`, `room create`, `automation enable`, and `plan commit`.
 

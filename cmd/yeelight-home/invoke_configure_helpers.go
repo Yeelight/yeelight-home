@@ -110,7 +110,7 @@ func automationCreateSpec() configureCreateSpec {
 			"提交前重新读取家庭实体列表",
 			"自动化名不存在时才创建",
 			"条件结构和动作资源需通过 owner-reviewed 自动化校验器",
-			"当前版本仅生成计划，真实提交保持阻断",
+			"创建后通过自动化列表按名称验证",
 		},
 		buildPayload: func(request contract.Request, houseID string) (map[string]any, error) {
 			repeatType, ok := requestInt(request.Parameters["repeatType"])

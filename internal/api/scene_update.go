@@ -53,7 +53,7 @@ func (client SceneUpdateClient) Run(ctx context.Context, request SceneUpdateRequ
 	if sceneID == "" {
 		return SceneUpdateResult{}, fmt.Errorf("scene id is required")
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return SceneUpdateResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
@@ -163,7 +163,54 @@ func copySceneUpdatePayload(payload map[string]any, sceneID string, houseID stri
 	}
 	body["id"] = requestNumberOrStringForAPI(sceneID)
 	body["houseId"] = requestNumberOrStringForAPI(houseID)
+	body["details"] = normalizeSceneUpdateDetails(body["details"])
 	return body
+}
+
+func normalizeSceneUpdateDetails(value any) any {
+	switch rows := value.(type) {
+	case []map[string]any:
+		normalized := make([]any, 0, len(rows))
+		for _, item := range rows {
+			normalized = append(normalized, normalizeSceneUpdateDetail(item))
+		}
+		return normalized
+	case []any:
+		normalized := make([]any, 0, len(rows))
+		for _, raw := range rows {
+			item, ok := raw.(map[string]any)
+			if !ok {
+				normalized = append(normalized, raw)
+				continue
+			}
+			normalized = append(normalized, normalizeSceneUpdateDetail(item))
+		}
+		return normalized
+	default:
+		return value
+	}
+}
+
+func normalizeSceneUpdateDetail(item map[string]any) map[string]any {
+	copied := map[string]any{}
+	for key, itemValue := range item {
+		copied[key] = itemValue
+	}
+	if params, ok := copied["params"]; ok {
+		if compact, err := jsonString(params); err == nil {
+			copied["params"] = compact
+		}
+	}
+	if strings.TrimSpace(stringFromAny(copied["resName"])) == "" {
+		copied["resName"] = stringFromAny(copied["resId"])
+	}
+	if strings.TrimSpace(stringFromAny(copied["action"])) == "" {
+		copied["action"] = 0
+	}
+	if strings.TrimSpace(stringFromAny(copied["rank"])) == "" {
+		copied["rank"] = 0
+	}
+	return copied
 }
 
 func sceneUpdateMatches(detail map[string]any, payload map[string]any) bool {
@@ -175,6 +222,7 @@ func sceneUpdateMatches(detail map[string]any, payload map[string]any) bool {
 		return false
 	}
 	if expectedDetails, ok := payload["details"]; ok {
+		expectedDetails = normalizeSceneUpdateDetails(expectedDetails)
 		return configRowsContainExpected(detail["details"], expectedDetails, []string{"typeId", "resId", "rank", "action", "params"})
 	}
 	return true

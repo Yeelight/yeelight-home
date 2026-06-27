@@ -56,7 +56,7 @@ func TestHomeSpaceConfigurationClientUpdatesHomeWithDetailVerification(t *testin
 }
 
 func TestHomeSpaceConfigurationClientBatchCreatesRooms(t *testing.T) {
-	var writeBody map[string]any
+	var writeBodies []map[string]any
 	roomListCalls := 0
 	server := newHomeSpaceEntityServer(t, func(writer http.ResponseWriter, request *http.Request) bool {
 		switch request.URL.Path {
@@ -68,10 +68,12 @@ func TestHomeSpaceConfigurationClientBatchCreatesRooms(t *testing.T) {
 			}
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"书房"},{"id":"room-2","name":"茶室"}]}}`))
 			return true
-		case "/apis/iot/v2/thing/manage/house/200171/room/w/batch_create":
+		case "/apis/iot/v2/thing/manage/house/200171/room/w/create":
+			var writeBody map[string]any
 			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
-				t.Fatalf("decode room batch create body: %v", err)
+				t.Fatalf("decode room create body: %v", err)
 			}
+			writeBodies = append(writeBodies, writeBody)
 			_, _ = writer.Write([]byte(`{"success":true}`))
 			return true
 		default:
@@ -95,9 +97,8 @@ func TestHomeSpaceConfigurationClientBatchCreatesRooms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error: %v", err)
 	}
-	rooms := writeBody["rooms"].([]any)
-	if len(rooms) != 2 || result.ItemCount != 2 || !result.Verified {
-		t.Fatalf("writeBody=%#v result=%#v", writeBody, result)
+	if len(writeBodies) != 2 || writeBodies[0]["name"] != "书房" || result.ItemCount != 2 || !result.Verified {
+		t.Fatalf("writeBodies=%#v result=%#v", writeBodies, result)
 	}
 }
 

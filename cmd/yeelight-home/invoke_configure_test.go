@@ -301,42 +301,53 @@ func TestInvokePlanCommitCreatesAreaFromStoredPlan(t *testing.T) {
 	}
 }
 
-func TestInvokeAutomationCreatePlanCommitIsBlocked(t *testing.T) {
+func TestInvokePlanCommitCreatesAutomationFromStoredPlan(t *testing.T) {
+	var createBody map[string]any
+	automationListCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		writeSeededHouseScopedListForConfigureTest(writer, request)
+		switch request.URL.Path {
+		case "/apis/iot/v1/automations/r/list":
+			automationListCalls++
+			if automationListCalls < 3 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"automation-created","name":"每天关灯"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/automation/w/create":
+			if err := json.NewDecoder(request.Body).Decode(&createBody); err != nil {
+				t.Fatalf("decode create body: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":"automation-created"}`))
+		default:
+			writeSeededHouseScopedListForConfigureTest(writer, request)
+		}
 	}))
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-configure-secret", "client-configure-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-automation-plan","locale":"zh-CN","utterance":"每天晚上十点关灯","intent":"automation.create","parameters":{"houseId":"200171","name":"每天关灯","startTime":"00:00:00","endTime":"23:59:59","repeatType":2,"repeatValue":"0x7f","params":{"type":"and","conditions":[{"type":"timer","clock":"22:00:00"}]},"actions":[{"typeId":2,"resId":"50018330","resName":"主灯","rank":0,"params":"{\"set\":{\"p\":false}}"}]}}`
+	planID := createAutomationPlanForTest(t, app, "200171", "每天关灯")
+
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
-	}
-	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
-		t.Fatalf("response = %#v", response)
-	}
-	planID := response["confirmation"].(map[string]any)["planId"].(string)
-
 	stdout.Reset()
 	stderr.Reset()
 	commitInput := `{"contractVersion":"1.0","requestId":"req-automation-commit","locale":"zh-CN","utterance":"确认执行","intent":"plan.commit","parameters":{"planId":"` + planID + `"}}`
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "blocked" || response["traceId"] != "plan-commit-blocked" {
+	if createBody["name"] != "每天关灯" || createBody["houseId"] != float64(200171) {
+		t.Fatalf("createBody = %#v", createBody)
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "metadata-create-commit" {
 		t.Fatalf("response = %#v", response)
 	}
-	errorResult, ok := response["error"].(map[string]any)
-	if !ok || errorResult["code"] != "automation_commit_disabled" {
-		t.Fatalf("error = %#v", response["error"])
+	result := response["result"].(map[string]any)
+	if result["entityType"] != "automation" || result["entityId"] != "automation-created" || result["verified"] != true {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -504,6 +515,35 @@ func createAreaPlanForTest(t *testing.T, app *app, houseID string, name string) 
 		t.Fatalf("BuildAreaCreatePayload error: %v", err)
 	}
 	record, err := plan.NewRecord("default", "dev", houseID, "area.create", "req-area-plan-seed", "创建区域 "+name, payload, []string{"test precondition"}, time.Now(), time.Minute)
+	if err != nil {
+		t.Fatalf("NewRecord error: %v", err)
+	}
+	if err := app.planStore.Save(record); err != nil {
+		t.Fatalf("Save plan error: %v", err)
+	}
+	return record.ID
+}
+
+func createAutomationPlanForTest(t *testing.T, app *app, houseID string, name string) string {
+	t.Helper()
+	payload := map[string]any{
+		"houseId":     requestNumberOrString(houseID),
+		"name":        name,
+		"startTime":   "00:00:00",
+		"endTime":     "23:59:59",
+		"repeatType":  2,
+		"repeatValue": "0x7f",
+		"params": map[string]any{
+			"type": "and",
+			"conditions": []any{
+				map[string]any{"type": "timer", "clock": "22:00:00"},
+			},
+		},
+		"actions": []any{
+			map[string]any{"typeId": 2, "resId": "50018330", "resName": "主灯", "rank": 0, "params": `{"set":{"p":false}}`},
+		},
+	}
+	record, err := plan.NewRecord("default", "dev", houseID, "automation.create", "req-automation-plan-seed", "创建自动化 "+name, payload, []string{"test precondition"}, time.Now(), time.Minute)
 	if err != nil {
 		t.Fatalf("NewRecord error: %v", err)
 	}

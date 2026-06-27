@@ -47,3 +47,26 @@ func (endpoint Endpoint) AccountBaseURL() string {
 	baseURL := strings.TrimRight(strings.TrimSpace(endpoint.BaseURL), "/")
 	return strings.TrimSuffix(baseURL, "/apis/iot")
 }
+
+func (endpoint Endpoint) PediaBaseURL() string {
+	baseURL := strings.TrimRight(strings.TrimSpace(endpoint.BaseURL), "/")
+	if strings.HasSuffix(baseURL, "/apis/iot") {
+		accountBaseURL := strings.TrimSuffix(baseURL, "/apis/iot")
+		if isLocalTestBaseURL(accountBaseURL) {
+			return accountBaseURL + "/apis/c"
+		}
+	}
+	return "https://api.yeelight.com/apis/c"
+}
+
+func isLocalTestBaseURL(baseURL string) bool {
+	normalized := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	switch {
+	case strings.HasPrefix(normalized, "http://127.0.0.1:"),
+		strings.HasPrefix(normalized, "http://localhost:"),
+		strings.HasPrefix(normalized, "http://[::1]:"):
+		return true
+	default:
+		return false
+	}
+}

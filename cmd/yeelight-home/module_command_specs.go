@@ -166,6 +166,10 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 		"cancel": {Intent: "plan.cancel", Utterance: "取消待确认计划", TargetIDKeys: []string{"plan-id", "planId", "id"}},
 		"commit": {Intent: "plan.commit", Utterance: "提交待确认计划", TargetIDKeys: []string{"plan-id", "planId", "id"}},
 	},
+	"product": {
+		"pedia":  {Intent: "product.pedia.search", Utterance: "搜索产品百科资料"},
+		"search": {Intent: "product.pedia.search", Utterance: "搜索产品百科资料"},
+	},
 	"progress": {
 		"get": {Intent: "progress.get", Utterance: "查看进度", TargetIDKeys: []string{"progress-id", "progressId", "id"}},
 	},
@@ -210,10 +214,13 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 		"list":   {Intent: "sensor.list", Utterance: "列出传感器"},
 	},
 	"thing": {
+		"category":         {Intent: "thing.category.list", Utterance: "列出物模型品类"},
 		"categories":       {Intent: "thing.category.list", Utterance: "列出物模型品类"},
 		"component":        {Intent: "thing.component.get", Utterance: "查看物模型组件", TargetIDKeys: []string{"component-id", "componentId", "id"}},
 		"components":       {Intent: "thing.component.list", Utterance: "列出物模型组件"},
 		"domains":          {Intent: "thing.product_domain.list", Utterance: "列出产品域"},
+		"product-domain":   {Intent: "thing.product_domain.list", Utterance: "列出产品域"},
+		"product-domains":  {Intent: "thing.product_domain.list", Utterance: "列出产品域"},
 		"faq-detail":       {Intent: "thing.product_faq.detail.get", Utterance: "查看产品 FAQ 详情", TargetIDKeys: []string{"faq-id", "faqId", "id"}},
 		"faq-item-types":   {Intent: "thing.product_faq.item_type.list", Utterance: "列出产品 FAQ 条目类型"},
 		"faq-locales":      {Intent: "thing.product_faq.locale.list", Utterance: "列出产品 FAQ 语言"},

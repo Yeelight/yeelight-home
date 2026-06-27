@@ -48,6 +48,8 @@ Common examples:
   yeelight-home help device detail
   yeelight-home device list --json
   yeelight-home device detail --device-id <id> --json
+  yeelight-home product search --keyword 青空灯 --json
+  yeelight-home product search --product-model YP-0117 --json
   yeelight-home scene execute --scene-id <id> --json
   yeelight-home light on --device-id <id> --json
   yeelight-home automation enable --automation-id <id> --json
@@ -78,6 +80,7 @@ var moduleCommandDescriptions = map[string]string{
 	"node":           "Inspect node sorting and property configuration",
 	"panel":          "List, inspect, and configure panels, screens, and buttons",
 	"plan":           "Commit or cancel pending Runtime plans",
+	"product":        "Search Yeelight product pedia records, manuals, FAQ candidates, and attachments",
 	"progress":       "Inspect async operation progress",
 	"recommendation": "List and provide feedback on recommendations",
 	"room":           "List, search, create, update, rename, move, or delete rooms",
@@ -111,6 +114,7 @@ var moduleCommandExamples = map[string][]string{
 	"node":           {"yeelight-home node sorted-devices --node-id <id> --json", "yeelight-home node property-config --node-id <id> --json"},
 	"panel":          {"yeelight-home panel list --json", "yeelight-home panel detail --panel-id <id> --json", "yeelight-home panel button-configure --panel-id <id> --params-json '<json>' --json"},
 	"plan":           {"yeelight-home plan commit --plan-id <id> --json", "yeelight-home plan cancel --plan-id <id> --json"},
+	"product":        {"yeelight-home product search --keyword 青空灯 --json", "yeelight-home product search --product-model YP-0117 --json", "yeelight-home product pedia --material-code 1-000003268 --json"},
 	"progress":       {"yeelight-home progress get --progress-id <id> --json"},
 	"recommendation": {"yeelight-home recommendation list --json", "yeelight-home recommendation feedback --params-json '<json>' --json"},
 	"room":           {"yeelight-home room list --json", "yeelight-home room detail --room-id <id> --json", "yeelight-home room rename --room-id <id> --name <new-name> --json"},
@@ -261,14 +265,16 @@ Use yeelight-home help home <action> for resource action flags.
 	"memory":         moduleHelpText("memory"),
 	"panel":          moduleHelpText("panel"),
 	"plan":           moduleHelpText("plan"),
+	"product":        moduleHelpText("product"),
 	"recommendation": moduleHelpText("recommendation"),
 	"room":           moduleHelpText("room"),
 	"scene":          moduleHelpText("scene"),
 	"thing":          moduleHelpText("thing"),
 	"invoke": `Usage:
-  yeelight-home invoke --stdin
+  yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id <id>]
 
 Reads one Skill Runtime JSON request from stdin and returns one JSON response.
+Flags override environment/profile defaults before request parameters are resolved.
 `,
 	"profile": `Usage:
   yeelight-home profile list [--json]

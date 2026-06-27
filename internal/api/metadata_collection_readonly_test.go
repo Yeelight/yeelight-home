@@ -22,6 +22,9 @@ func TestMetadataCollectionReadonlySceneAutomationAndNodeProjection(t *testing.T
 		case "/apis/iot/v1/device/r/1001/virturlNum":
 			_, _ = writer.Write([]byte(`{"success":true,"data":7}`))
 		case "/apis/iot/v1/node/r/1/10/device":
+			if request.Header.Get("houseId") != "1001" || request.Header.Get("house-id") != "1001" {
+				t.Fatalf("node sorted device list missing house headers: houseId=%q house-id=%q", request.Header.Get("houseId"), request.Header.Get("house-id"))
+			}
 			_, _ = writer.Write([]byte(`{"success":true,"data":[{"deviceId":41,"alias":"筒灯","mac":"AA:BB:CC","rank":2,"capability":"p,l"}]}`))
 		default:
 			http.NotFound(writer, request)
@@ -103,6 +106,31 @@ func TestNodeSortedDeviceListRequiresNodeContext(t *testing.T) {
 		t.Fatalf("RunNodeSortedDeviceList error: %v", err)
 	}
 	if !result.Partial || result.APICalls != 0 || len(result.Warnings) != 1 || result.Warnings[0] != "node_context_missing" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNodeSortedDeviceListBusinessErrorReturnsPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"success":false,"code":601,"message":"非法参数：houseId"}`))
+	}))
+	defer server.Close()
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunNodeSortedDeviceList(context.Background(), MetadataReadonlyRequest{
+		HouseID: "1001",
+		Parameters: map[string]any{
+			"resType": "1",
+			"resId":   "10",
+		},
+		Credentials: MetadataReadonlyCredentials{
+			Authorization: "Bearer token-node-secret",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunNodeSortedDeviceList error: %v", err)
+	}
+	if !result.Partial || result.APICalls != 1 || len(result.Warnings) != 1 || result.Warnings[0] != "cloud_business_response_not_success" {
 		t.Fatalf("result = %#v", result)
 	}
 }

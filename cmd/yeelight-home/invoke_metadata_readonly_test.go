@@ -98,6 +98,57 @@ func TestInvokePanelGetUsesCloudReadonlyAdapters(t *testing.T) {
 	}
 }
 
+func TestInvokeSceneSearchFiltersCloudFuzzyRowsByName(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/scene/1001/r/fuzzy" {
+			http.NotFound(writer, request)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode scene search body: %v", err)
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"sceneId":31,"houseId":1001,"name":"卧室晚安","details":[{}],"accessToken":"not-allowed"},{"sceneId":32,"houseId":1001,"name":"客厅观影","details":[{}],"accessToken":"not-allowed"}]}}`))
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-scene-secret", "client-scene-1", "1001")
+
+	input := `{"contractVersion":"1.0","requestId":"req-scene-search","locale":"zh-CN","utterance":"搜索卧室情景","intent":"scene.search","parameters":{"houseId":"1001","name":"卧室","pageNo":2,"pageSize":5}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	for _, forbidden := range []string{"token-scene-secret", "not-allowed"} {
+		if strings.Contains(stdout.String(), forbidden) || strings.Contains(stderr.String(), forbidden) {
+			t.Fatalf("output leaked %q: stdout=%s stderr=%s", forbidden, stdout.String(), stderr.String())
+		}
+	}
+	if gotBody["name"] != "卧室" || gotBody["pageNo"] != float64(2) || gotBody["pageSize"] != float64(5) {
+		t.Fatalf("gotBody = %#v", gotBody)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "scene-search-readonly" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	scenes := data["scenes"].([]any)
+	if len(scenes) != 1 {
+		t.Fatalf("scenes = %#v", scenes)
+	}
+	scene := scenes[0].(map[string]any)
+	if scene["name"] != "卧室晚安" {
+		t.Fatalf("scene = %#v", scene)
+	}
+}
+
 func TestInvokeHomeMemberListUsesCloudReadonlyAdapterWithRedaction(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -189,6 +240,63 @@ func TestInvokeHomeMemberCurrentAndStatUseReadonlyAdapters(t *testing.T) {
 	}
 	if strings.Join(gotCalls, "\n") != strings.Join(expectedCalls, "\n") {
 		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+}
+
+func TestInvokeHomeMemberCurrentDefaultsToCurrentAccountUID(t *testing.T) {
+	var gotCalls []string
+	var gotMemberBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/account/user/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"uid":"1234567890","nickname":"业主","phoneNumber":"13800138000","email":"owner@example.com","accessToken":"not-allowed"}}`))
+		case "/apis/iot/v1/house/r/memberinfoV2":
+			if err := json.NewDecoder(request.Body).Decode(&gotMemberBody); err != nil {
+				t.Fatalf("decode member body: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"uid":"1234567890","nickname":"业主","phoneNumber":"13800138000","email":"owner@example.com","userRole":"owner","accessToken":"not-allowed"}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-home-read-secret", "client-home-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-home-member-current-auto","locale":"zh-CN","utterance":"查看我在当前家庭里的成员身份","intent":"home.member.current.get","parameters":{"houseId":"house-1"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	for _, forbidden := range []string{"token-home-read-secret", "not-allowed", "1234567890", "13800138000", "owner@example.com"} {
+		if strings.Contains(stdout.String(), forbidden) || strings.Contains(stderr.String(), forbidden) {
+			t.Fatalf("output leaked %q: stdout=%s stderr=%s", forbidden, stdout.String(), stderr.String())
+		}
+	}
+	expectedCalls := []string{
+		"GET /apis/account/user/info",
+		"POST /apis/iot/v1/house/r/memberinfoV2",
+	}
+	if strings.Join(gotCalls, "\n") != strings.Join(expectedCalls, "\n") {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	if gotMemberBody["uid"] != "1234567890" {
+		t.Fatalf("gotMemberBody = %#v", gotMemberBody)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	metrics := response["metrics"].(map[string]any)
+	if metrics["apiCalls"] != float64(2) {
+		t.Fatalf("metrics = %#v", metrics)
 	}
 }
 
@@ -322,15 +430,24 @@ func TestInvokeFavoriteListUsesCloudReadonlyAdapter(t *testing.T) {
 	}
 }
 
-func TestInvokeHomeSortListRequiresSortContextWithoutCloudCall(t *testing.T) {
+func TestInvokeHomeSortListReadsCloudWithTypeAndTarget(t *testing.T) {
+	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		t.Fatalf("unexpected HTTP call: %s %s", request.Method, request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/sort/r/getSort" {
+			http.NotFound(writer, request)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode sort list body: %v", err)
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":[{"typeId":2,"resId":50018330,"rank":1}]}`))
 	}))
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-sort-secret", "client-sort-1", "house-1")
 
-	input := `{"contractVersion":"1.0","requestId":"req-sort-list","locale":"zh-CN","utterance":"查看首页排序","intent":"home.sort.list","parameters":{"houseId":"house-1"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-sort-list","locale":"zh-CN","utterance":"查看房间设备排序","intent":"home.sort.list","parameters":{"houseId":"house-1","sortType":"device_room","roomId":"room-1"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -341,13 +458,18 @@ func TestInvokeHomeSortListRequiresSortContextWithoutCloudCall(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["status"] != "partial" {
+	if response["status"] != "success" {
 		t.Fatalf("response = %#v", response)
 	}
+	sortType, typeOK := requestInt(gotBody["type"])
+	if !typeOK || sortType != 1 || requestString(gotBody["target"]) != "room-1" || requestString(gotBody["roomId"]) != "room-1" {
+		t.Fatalf("gotBody = %#v", gotBody)
+	}
 	result := response["result"].(map[string]any)
-	unknowns := result["unknownEvidence"].([]any)
-	if len(unknowns) != 1 || unknowns[0] != "home_sort_query_context_missing" {
-		t.Fatalf("unknownEvidence = %#v", unknowns)
+	data := result["data"].(map[string]any)
+	sortRows := data["sort"].([]any)
+	if len(sortRows) != 1 {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

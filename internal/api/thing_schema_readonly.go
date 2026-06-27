@@ -67,7 +67,7 @@ func (client MetadataReadonlyClient) readThingSchemaPath(ctx context.Context, re
 		return MetadataReadonlyResult{}, err
 	}
 	if !isBusinessOK(response) {
-		return MetadataReadonlyResult{}, metadataReadonlyBusinessError(capability, response)
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, request.HouseID, request.DeviceID, capability, response), nil
 	}
 	data := map[string]any{
 		"schemaVersion": "cloud-v1",

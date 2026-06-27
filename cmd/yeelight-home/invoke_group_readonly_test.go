@@ -11,18 +11,14 @@ import (
 
 func TestInvokeGroupListAndSearchUseCloudReadonlyAdapters(t *testing.T) {
 	var gotCalls []string
-	var gotSearchBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
-		case "/apis/iot/v1/group/r/all":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"userGroupId":21,"houseId":1001,"name":"一楼","roomIds":[10,11],"accessToken":"not-allowed"}]}}`))
-		case "/apis/iot/v1/group/r/1001/fuzzy":
-			if err := json.NewDecoder(request.Body).Decode(&gotSearchBody); err != nil {
-				t.Fatalf("decode search body: %v", err)
-			}
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":22,"houseId":1001,"nane":"二楼","roomIds":[12],"secret":"not-allowed"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/1001/group/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":21,"houseId":1001,"name":"一楼","roomId":10,"secret":"not-allowed"},{"id":22,"houseId":1001,"name":"二楼","roomId":12,"secret":"not-allowed"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/1001/group/r/info/2/5":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":22,"houseId":1001,"name":"二楼","roomId":12,"secret":"not-allowed"}]}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -31,9 +27,9 @@ func TestInvokeGroupListAndSearchUseCloudReadonlyAdapters(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-group-secret", "client-group-1", "1001")
 
-	for _, input := range []string{
-		`{"contractVersion":"1.0","requestId":"req-group-list","locale":"zh-CN","utterance":"列出这个家的分组","intent":"group.list","parameters":{"houseId":"1001"}}`,
-		`{"contractVersion":"1.0","requestId":"req-group-search","locale":"zh-CN","utterance":"搜索二楼分组","intent":"group.search","parameters":{"houseId":"1001","name":"二","pageNo":2,"pageSize":5}}`,
+	for index, input := range []string{
+		`{"contractVersion":"1.0","requestId":"req-group-list","locale":"zh-CN","utterance":"列出这个家的设备组","intent":"group.list","parameters":{"houseId":"1001"}}`,
+		`{"contractVersion":"1.0","requestId":"req-group-search","locale":"zh-CN","utterance":"搜索二楼设备组","intent":"group.search","parameters":{"houseId":"1001","name":"二","pageNo":2,"pageSize":5}}`,
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -56,15 +52,16 @@ func TestInvokeGroupListAndSearchUseCloudReadonlyAdapters(t *testing.T) {
 		result := response["result"].(map[string]any)
 		data := result["data"].(map[string]any)
 		groups := data["groups"].([]any)
-		if len(groups) != 1 {
+		expectedCount := 2
+		if index == 1 {
+			expectedCount = 1
+		}
+		if len(groups) != expectedCount {
 			t.Fatalf("groups = %#v", data["groups"])
 		}
 	}
-	if strings.Join(gotCalls, "\n") != "POST /apis/iot/v1/group/r/all\nPOST /apis/iot/v1/group/r/1001/fuzzy" {
+	if strings.Join(gotCalls, "\n") != "GET /apis/iot/v2/thing/manage/house/1001/group/r/info/1/100\nGET /apis/iot/v2/thing/manage/house/1001/group/r/info/2/5" {
 		t.Fatalf("gotCalls = %#v", gotCalls)
-	}
-	if gotSearchBody["fuzzyName"] != "二" || gotSearchBody["pageNo"] != float64(2) || gotSearchBody["pageSize"] != float64(5) {
-		t.Fatalf("gotSearchBody = %#v", gotSearchBody)
 	}
 }
 

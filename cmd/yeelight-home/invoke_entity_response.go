@@ -338,9 +338,15 @@ func (target entityGetTarget) toMap() map[string]any {
 
 func entityGetTargetFromRequest(request contract.Request) entityGetTarget {
 	target := entityGetTarget{
-		id:         firstRequestString(request.Parameters, "entityId", "entityID", "id"),
-		name:       firstRequestString(request.Parameters, "entityName", "name"),
+		id: firstRequestString(request.Parameters,
+			"entityId", "entityID", "deviceId", "deviceID", "roomId", "roomID", "areaId", "areaID",
+			"groupId", "groupID", "sceneId", "sceneID", "automationId", "automationID", "gatewayId", "gatewayID", "id",
+		),
+		name:       firstRequestString(request.Parameters, "entityName", "deviceName", "roomName", "areaName", "groupName", "sceneName", "automationName", "gatewayName", "name"),
 		entityType: firstRequestString(request.Parameters, "entityType", "type"),
+	}
+	if target.entityType == "" {
+		target.entityType = entityTypeFromTargetParameters(request.Parameters)
 	}
 	if len(request.Targets) == 0 {
 		return target
@@ -351,6 +357,27 @@ func entityGetTargetFromRequest(request contract.Request) entityGetTarget {
 		name:       firstNonEmptyString(firstRequestString(firstTarget, "name", "entityName"), target.name),
 		entityType: firstNonEmptyString(firstRequestString(firstTarget, "entityType", "type"), target.entityType),
 	}
+}
+
+func entityTypeFromTargetParameters(parameters map[string]any) string {
+	for _, candidate := range []struct {
+		keys       []string
+		entityType string
+	}{
+		{[]string{"deviceId", "deviceID", "gatewayId", "gatewayID"}, "device"},
+		{[]string{"roomId", "roomID"}, "room"},
+		{[]string{"areaId", "areaID"}, "area"},
+		{[]string{"groupId", "groupID"}, "group"},
+		{[]string{"sceneId", "sceneID"}, "scene"},
+		{[]string{"automationId", "automationID"}, "automation"},
+	} {
+		for _, key := range candidate.keys {
+			if firstRequestString(parameters, key) != "" {
+				return candidate.entityType
+			}
+		}
+	}
+	return ""
 }
 
 func findEntity(target entityGetTarget, entities []api.EntitySummary) (api.EntitySummary, []api.EntitySummary, string) {

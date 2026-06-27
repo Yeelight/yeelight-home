@@ -319,6 +319,63 @@ func TestSpaceOrganizationClientUpdatesGroupNameWithoutRoomTarget(t *testing.T) 
 	}
 }
 
+func TestSpaceOrganizationClientVerifiesGroupUpdateWithDetailWhenListOmitsRoomID(t *testing.T) {
+	var writeBody map[string]any
+	groupListCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/200171/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"401391","name":"客厅"},{"id":"401392","name":"卧室"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/group/r/info/1/100":
+			groupListCalls++
+			if groupListCalls < 2 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"group-1","name":"灯组"}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"group-1","name":"主灯组"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/group/group-1/r/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"group-1","name":"主灯组","roomId":"401392"}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/group/group-1/w/modify":
+			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
+				t.Fatalf("decode group update body: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	result, err := NewSpaceOrganizationClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client()).Run(context.Background(), SpaceOrganizationRequest{
+		Kind:           SpaceOrganizationGroupUpdate,
+		HouseID:        "200171",
+		VerifyAttempts: 1,
+		Payload: map[string]any{
+			"houseId": float64(200171),
+			"groupId": "group-1",
+			"id":      "group-1",
+			"name":    "主灯组",
+			"roomId":  "401392",
+		},
+		Credentials: SpaceOrganizationCredentials{Authorization: "secret-token", ClientID: "client-1"},
+	})
+	if err != nil {
+		t.Fatalf("group update error: %v", err)
+	}
+	if writeBody["groupId"] != nil || writeBody["id"] != "group-1" || writeBody["roomId"] != "401392" {
+		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	if !result.Verified || result.EntityType != "group" || result.Name != "主灯组" || result.RoomID != "401392" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestSpaceOrganizationClientReportsVerificationMismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

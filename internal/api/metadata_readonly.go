@@ -16,6 +16,7 @@ type MetadataReadonlyCredentials struct {
 type MetadataReadonlyRequest struct {
 	HouseID     string
 	DeviceID    string
+	Utterance   string
 	Parameters  map[string]any
 	Credentials MetadataReadonlyCredentials
 }
@@ -76,12 +77,25 @@ func (client MetadataReadonlyClient) RunHomeMemberCurrentGet(ctx context.Context
 		stringFromAny(request.Parameters["userId"]),
 		stringFromAny(request.Parameters["memberId"]),
 	))
+	apiCalls := 0
+	if houseID != "" && uid == "" {
+		currentUID, calls, err := NewHomeMemberClient(client.endpoint, client.client).CurrentUserID(ctx, HomeMemberCredentials{
+			Authorization: request.Credentials.Authorization,
+			ClientID:      request.Credentials.ClientID,
+		})
+		apiCalls += calls
+		if err != nil {
+			return MetadataReadonlyResult{}, err
+		}
+		uid = currentUID
+	}
 	if houseID == "" || uid == "" {
 		result := metadataReadonlyMissingContext(client.endpoint.Region, "home.member.current.get", "member_context_missing")
 		result.HouseID = houseID
 		return result, nil
 	}
 	response, err := client.call(ctx, http.MethodPost, "/v1/house/r/memberinfoV2", map[string]any{"houseId": houseID, "uid": uid}, request.Credentials)
+	apiCalls++
 	if err != nil {
 		return MetadataReadonlyResult{}, err
 	}
@@ -96,7 +110,7 @@ func (client MetadataReadonlyClient) RunHomeMemberCurrentGet(ctx context.Context
 			"members": projectMemberRows(response["data"]),
 		},
 		RawShape: responseDataType(response),
-		APICalls: 1,
+		APICalls: apiCalls,
 		Warnings: []string{},
 	}, nil
 }
@@ -252,23 +266,43 @@ func (client MetadataReadonlyClient) RunHomeSortList(ctx context.Context, reques
 	if houseID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "home.sort.list", "house_context_missing"), nil
 	}
-	body := map[string]any{"houseId": houseID}
-	for _, key := range []string{"typeId", "resId", "roomId", "type", "target", "subIndex"} {
-		if value, ok := request.Parameters[key]; ok {
-			body[key] = value
-		}
-	}
-	if body["typeId"] == nil || body["resId"] == nil || body["roomId"] == nil {
+	body, warning := NormalizeHomeSortPayload(houseID, request.Parameters)
+	if warning != "" {
 		result := metadataReadonlyMissingContext(client.endpoint.Region, "home.sort.list", "home_sort_query_context_missing")
 		result.HouseID = houseID
+		result.Warnings = append(result.Warnings, warning)
 		return result, nil
 	}
+	if body["type"] == nil && body["typeId"] == nil && body["resId"] == nil && body["roomId"] == nil {
+		body = map[string]any{"houseId": houseID}
+	}
+	if result, ok, err := client.runHomeSortSpecificRead(ctx, houseID, body, request.Credentials); ok || err != nil {
+		return result, err
+	}
+	delete(body, "items")
 	response, err := client.call(ctx, http.MethodPost, "/v1/sort/r/getSort", body, request.Credentials)
 	if err != nil {
 		return MetadataReadonlyResult{}, err
 	}
 	if !isBusinessOK(response) {
-		return MetadataReadonlyResult{}, metadataReadonlyBusinessError("home sort list", response)
+		return MetadataReadonlyResult{
+			Region:     client.endpoint.Region,
+			HouseID:    houseID,
+			Capability: "home.sort.list",
+			Data: map[string]any{
+				"query": sanitizeCloudData(body),
+				"backendEvidence": map[string]any{
+					"controller": "SortControllerIotApi#getSort",
+					"adapter":    "DeviceMultOrderDubboService#getOrder",
+					"code":       responseScalar(response, "code"),
+					"message":    responseScalar(response, "message", "msg"),
+				},
+			},
+			RawShape: responseDataType(response),
+			APICalls: 1,
+			Partial:  true,
+			Warnings: []string{"home_sort_cloud_read_failed"},
+		}, nil
 	}
 	return MetadataReadonlyResult{
 		Region:     client.endpoint.Region,
@@ -283,10 +317,75 @@ func (client MetadataReadonlyClient) RunHomeSortList(ctx context.Context, reques
 	}, nil
 }
 
+func (client MetadataReadonlyClient) runHomeSortSpecificRead(ctx context.Context, houseID string, body map[string]any, credentials MetadataReadonlyCredentials) (MetadataReadonlyResult, bool, error) {
+	sortType := strings.TrimSpace(stringFromAny(body["type"]))
+	target := strings.TrimSpace(stringFromAny(body["target"]))
+	if sortType == "" || target == "" {
+		return MetadataReadonlyResult{}, false, nil
+	}
+	switch sortType {
+	case "1":
+		response, err := client.callWithHouseHeader(ctx, http.MethodPost, "/v1/node/r/1/"+pathSegment(target)+"/device", nil, credentials, houseID)
+		if err != nil {
+			return MetadataReadonlyResult{}, false, nil
+		}
+		if !isBusinessOK(response) {
+			return MetadataReadonlyResult{}, false, nil
+		}
+		sortRows := projectSortedDeviceRows(response["data"])
+		if enriched, err := client.enrichSortedDeviceRows(ctx, houseID, sortRows, credentials); err == nil {
+			sortRows = enriched
+		}
+		return MetadataReadonlyResult{
+			Region:     client.endpoint.Region,
+			HouseID:    houseID,
+			Capability: "home.sort.list",
+			Data: map[string]any{
+				"query":    sanitizeCloudData(body),
+				"readback": "node.sorted_device.list",
+				"sort":     sortRows,
+			},
+			RawShape: responseDataType(response),
+			APICalls: 1,
+			Warnings: []string{},
+		}, true, nil
+	case "2":
+		response, err := client.call(ctx, http.MethodPost, "/v1/sort/r/room/scene", map[string]any{
+			"ids": []any{requestNumberOrStringForAPI(target)},
+		}, credentials)
+		if err != nil {
+			return MetadataReadonlyResult{}, false, nil
+		}
+		if !isBusinessOK(response) {
+			return MetadataReadonlyResult{}, false, nil
+		}
+		return MetadataReadonlyResult{
+			Region:     client.endpoint.Region,
+			HouseID:    houseID,
+			Capability: "home.sort.list",
+			Data: map[string]any{
+				"query":    sanitizeCloudData(body),
+				"readback": "room.scene.sort",
+				"sort":     sanitizeCloudData(response["data"]),
+			},
+			RawShape: responseDataType(response),
+			APICalls: 1,
+			Warnings: []string{},
+		}, true, nil
+	default:
+		return MetadataReadonlyResult{}, false, nil
+	}
+}
+
 func (client MetadataReadonlyClient) call(ctx context.Context, method string, path string, body map[string]any, credentials MetadataReadonlyCredentials) (map[string]any, error) {
+	return client.callWithHouseHeader(ctx, method, path, body, credentials, "")
+}
+
+func (client MetadataReadonlyClient) callWithHouseHeader(ctx context.Context, method string, path string, body map[string]any, credentials MetadataReadonlyCredentials, houseID string) (map[string]any, error) {
 	return callJSON(ctx, client.client, method, strings.TrimRight(client.endpoint.BaseURL, "/")+path, body, requestCredentials{
 		Authorization: credentials.Authorization,
 		ClientID:      credentials.ClientID,
+		HouseID:       houseID,
 	})
 }
 
@@ -298,6 +397,35 @@ func metadataReadonlyMissingContext(region string, capability string, warning st
 		APICalls:   0,
 		Partial:    true,
 		Warnings:   []string{warning},
+	}
+}
+
+func metadataReadonlyPartialBusinessResult(region string, houseID string, deviceID string, capability string, response map[string]any) MetadataReadonlyResult {
+	return MetadataReadonlyResult{
+		Region:     region,
+		HouseID:    strings.TrimSpace(houseID),
+		DeviceID:   strings.TrimSpace(deviceID),
+		Capability: capability,
+		RawShape:   responseDataType(response),
+		APICalls:   1,
+		Partial:    true,
+		Warnings:   []string{"cloud_business_response_not_success"},
+	}
+}
+
+func metadataReadonlyAuthBoundaryResult(region string, houseID string, deviceID string, capability string, statusCode int) MetadataReadonlyResult {
+	return MetadataReadonlyResult{
+		Region:     region,
+		HouseID:    strings.TrimSpace(houseID),
+		DeviceID:   strings.TrimSpace(deviceID),
+		Capability: capability,
+		Data: map[string]any{
+			"httpStatus": statusCode,
+		},
+		RawShape: "<http_auth_boundary>",
+		APICalls: 1,
+		Partial:  true,
+		Warnings: []string{"cloud_authorization_boundary"},
 	}
 }
 

@@ -217,3 +217,36 @@ func TestMaintenanceReadonlyMissingContextDoesNotCallCloud(t *testing.T) {
 		})
 	}
 }
+
+func TestNodePropertyConfigHTTPBadRequestReturnsPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/apis/iot/v1/nodeConfig/r/node_property" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		http.Error(writer, `{"code":400,"message":"参数格式错误"}`, http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunNodePropertyConfigGet(context.Background(), MetadataReadonlyRequest{
+		HouseID:  "house-1",
+		DeviceID: "device-1",
+		Parameters: map[string]any{
+			"nodeId":   "device-1",
+			"nodeType": "device",
+		},
+		Credentials: MetadataReadonlyCredentials{Authorization: "Bearer token-maintenance-secret"},
+	})
+	if err != nil {
+		t.Fatalf("RunNodePropertyConfigGet error = %v", err)
+	}
+	if !result.Partial || result.APICalls != 1 || result.RawShape != "<http_400>" {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.HouseID != "house-1" || result.DeviceID != "device-1" || result.Capability != "node.property_config.get" {
+		t.Fatalf("context = %#v", result)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != "cloud_read_endpoint_unavailable" {
+		t.Fatalf("warnings = %#v", result.Warnings)
+	}
+}

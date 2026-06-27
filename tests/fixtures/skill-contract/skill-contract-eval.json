@@ -955,6 +955,102 @@
       ]
     },
     {
+      "id": "product-pedia-manual-search",
+      "utterance": "帮我查一下青空灯产品资料和说明书",
+      "expectedIntent": "product.pedia.search",
+      "mustUse": [
+        "scripts/invoke",
+        "yeelight-home invoke --stdin"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token"
+      ]
+    },
+    {
+      "id": "product-pedia-faq-search",
+      "utterance": "Yeelight 青空灯有哪些常见问题 FAQ？",
+      "expectedIntent": "product.pedia.search",
+      "mustUse": [
+        "scripts/invoke",
+        "yeelight-home invoke --stdin"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token"
+      ]
+    },
+    {
+      "id": "product-pedia-material-code-manual-search",
+      "utterance": "帮我找一下 1-000003268 的说明书",
+      "expectedIntent": "product.pedia.search",
+      "mustUse": [
+        "scripts/invoke",
+        "yeelight-home invoke --stdin"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token"
+      ]
+    },
+    {
+      "id": "product-pedia-model-search",
+      "utterance": "YP-0117 是什么产品，支持 Yeelight Pro 吗？",
+      "expectedIntent": "product.pedia.search",
+      "mustUse": [
+        "scripts/invoke",
+        "yeelight-home invoke --stdin"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token"
+      ]
+    },
+    {
+      "id": "product-pedia-full-name-faq-search",
+      "utterance": "Yeelight Pro Nightingale青空灯夙夜版 FAQ 在哪里？",
+      "expectedIntent": "product.pedia.search",
+      "mustUse": [
+        "scripts/invoke",
+        "yeelight-home invoke --stdin"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token"
+      ]
+    },
+    {
+      "id": "product-pedia-sku-attachment-search",
+      "utterance": "YLP-Nightingale青空灯-夙夜版有没有产品图和说明书？",
+      "expectedIntent": "product.pedia.search",
+      "mustUse": [
+        "scripts/invoke",
+        "yeelight-home invoke --stdin"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token"
+      ]
+    },
+    {
       "id": "thing-product-info-batch-readonly",
       "utterance": "查看产品 1001 的 v2 产品定义",
       "expectedIntent": "thing.product.info.batch_get",

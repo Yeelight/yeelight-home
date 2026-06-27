@@ -184,6 +184,165 @@ func TestInvokeLightingDesignApplyCreatesPendingPlanWithoutWriting(t *testing.T)
 	}
 }
 
+func TestInvokeLightingDesignApplyPrefersExplicitValuesOverRecipe(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-1","name":"主灯","roomId":"room-1","online":true}]}}`))
+		case "/apis/iot/v2/thing/schema/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"id":"device-1","name":"主灯","properties":[{"propId":"p"},{"propId":"l"},{"propId":"ct"}]}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-design-apply-secret", "client-design-apply-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-design-apply-explicit","locale":"zh-CN","utterance":"恢复原来的关灯亮度100色温2700","intent":"lighting.design.apply","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"mood":"阅读","power":false,"brightness":100,"colorTemperature":2700}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	confirmation := response["confirmation"].(map[string]any)
+	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
+	if err != nil || !ok {
+		t.Fatalf("Load error ok=%v err=%v", ok, err)
+	}
+	actions := record.Payload["actions"].([]any)
+	got := map[string]any{}
+	for _, raw := range actions {
+		action := raw.(map[string]any)
+		got[action["propertyName"].(string)] = action["value"]
+	}
+	brightness, brightnessOK := requestInt(got["l"])
+	colorTemperature, colorTemperatureOK := requestInt(got["ct"])
+	if got["p"] != false || !brightnessOK || brightness != 100 || !colorTemperatureOK || colorTemperature != 2700 {
+		t.Fatalf("actions = %#v", actions)
+	}
+}
+
+func TestInvokeLightingDesignApplyUsesExplicitDesignActions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-1","name":"主灯","roomId":"room-1","online":true}]}}`))
+		case "/apis/iot/v2/thing/schema/house/house-1/device/r/info/1/100":
+			t.Fatalf("explicit design actions should not require capability schema read")
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-design-explicit-secret", "client-design-explicit-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-design-apply-actions","locale":"zh-CN","utterance":"恢复原来的关灯亮度100色温3900","intent":"lighting.design.apply","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"design":{"actions":[{"propertyName":"p","value":false},{"propertyName":"l","value":100},{"propertyName":"ct","value":3900}]}}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	confirmation := response["confirmation"].(map[string]any)
+	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
+	if err != nil || !ok {
+		t.Fatalf("Load error ok=%v err=%v", ok, err)
+	}
+	actions := record.Payload["actions"].([]any)
+	if len(actions) != 3 {
+		t.Fatalf("actions = %#v", actions)
+	}
+	got := map[string]any{}
+	for _, raw := range actions {
+		action := raw.(map[string]any)
+		got[action["propertyName"].(string)] = action["value"]
+		if action["deviceId"] != "device-1" {
+			t.Fatalf("action = %#v", action)
+		}
+	}
+	brightness, brightnessOK := requestInt(got["l"])
+	colorTemperature, colorTemperatureOK := requestInt(got["ct"])
+	if got["p"] != false || !brightnessOK || brightness != 100 || !colorTemperatureOK || colorTemperature != 3900 {
+		t.Fatalf("actions = %#v", actions)
+	}
+}
+
+func TestInvokeLightingDesignApplyOnlyUsesExplicitPowerWhenOnlyPowerProvided(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-1","name":"主灯","roomId":"room-1","online":true}]}}`))
+		case "/apis/iot/v2/thing/schema/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"id":"device-1","name":"主灯","properties":[{"propId":"p"},{"propId":"l"},{"propId":"ct"}]}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-design-apply-secret", "client-design-apply-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-design-apply-power-only","locale":"zh-CN","utterance":"只把主灯关掉","intent":"lighting.design.apply","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"power":false}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "confirmation_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	confirmation := response["confirmation"].(map[string]any)
+	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
+	if err != nil || !ok {
+		t.Fatalf("Load error ok=%v err=%v", ok, err)
+	}
+	actions := record.Payload["actions"].([]any)
+	if len(actions) != 1 {
+		t.Fatalf("actions = %#v", actions)
+	}
+	action := actions[0].(map[string]any)
+	if action["propertyName"] != "p" || action["value"] != false {
+		t.Fatalf("action = %#v", action)
+	}
+}
+
 func TestInvokePlanCommitAppliesLightingDesignFromStoredPlan(t *testing.T) {
 	writeBodies := map[string]map[string]any{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

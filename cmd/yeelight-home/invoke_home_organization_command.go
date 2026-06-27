@@ -40,7 +40,15 @@ func (app *app) invokeHomeOrganizationPlan(ctx context.Context, request contract
 	if request.Intent == "home.sort.configure" {
 		sortPreview, calls, err := homeSortPreview(ctx, endpoint, houseID, authorization, clientID, payload)
 		if err != nil {
-			return contract.Response{}, err
+			sortPreview = map[string]any{
+				"previewUnavailable": true,
+				"warning":            "home_sort_preview_unavailable",
+				"detail":             err.Error(),
+				"plannedItems":       len(payloadItems(payload)),
+				"type":               payload["type"],
+				"target":             payload["target"],
+			}
+			calls = 1
 		}
 		preview = sortPreview
 		previewCalls = calls
@@ -124,19 +132,25 @@ func buildHomeOrganizationPayload(request contract.Request, houseID string) (map
 }
 
 func buildHomeSortConfigurePayload(request contract.Request, houseID string) (map[string]any, error) {
-	sortType := firstRequestString(request.Parameters, "type", "sortType")
-	target := firstRequestString(request.Parameters, "target", "roomId", "areaId")
-	if sortType == "" || target == "" {
-		return nil, fmt.Errorf("invalid_home_sort_configure_payload")
-	}
 	items, ok := requestSortItems(request)
 	if !ok {
 		return nil, fmt.Errorf("invalid_home_sort_configure_payload")
 	}
-	payload := map[string]any{
+	source := map[string]any{}
+	for key, value := range request.Parameters {
+		source[key] = value
+	}
+	source["items"] = items
+	payload, warning := api.NormalizeHomeSortPayload(houseID, source)
+	if warning != "" || payload["type"] == nil || payload["target"] == nil {
+		return nil, fmt.Errorf("invalid_home_sort_configure_payload")
+	}
+	payload["houseId"] = houseID
+	payload["items"] = items
+	payload = map[string]any{
 		"houseId": houseID,
-		"type":    sortType,
-		"target":  target,
+		"type":    payload["type"],
+		"target":  payload["target"],
 		"items":   items,
 	}
 	if len(items) == 1 {
@@ -147,8 +161,12 @@ func buildHomeSortConfigurePayload(request contract.Request, houseID string) (ma
 			}
 		}
 	}
-	if value := firstRequestString(request.Parameters, "roomId"); value != "" {
-		payload["roomId"] = value
+	if value, ok := source["roomId"]; ok {
+		payload["roomId"] = requestNumberOrString(requestString(value))
+	} else if value, ok := payload["target"]; ok {
+		if sortType, sortOK := requestInt(payload["type"]); sortOK && (sortType == 1 || sortType == 2) {
+			payload["roomId"] = value
+		}
 	}
 	return payload, nil
 }
@@ -176,6 +194,9 @@ func homeSortPreview(ctx context.Context, endpoint api.Endpoint, houseID string,
 	})
 	if err != nil {
 		return nil, 1, err
+	}
+	if result.Partial {
+		return nil, result.APICalls, fmt.Errorf("home sort preview unavailable: %s", strings.Join(result.Warnings, ","))
 	}
 	return map[string]any{
 		"currentItems": homeSortResultItemCount(result.Data),
@@ -221,7 +242,7 @@ func requestSortItems(request contract.Request) ([]any, bool) {
 }
 
 func normalizeSortItem(source map[string]any) (map[string]any, bool) {
-	typeID, ok := requestInt(source["typeId"])
+	typeID, ok := resourceTypeIDFromRequest(source)
 	if !ok {
 		return nil, false
 	}
@@ -239,6 +260,32 @@ func normalizeSortItem(source map[string]any) (map[string]any, bool) {
 		item["subIndex"] = subIndex
 	}
 	return item, true
+}
+
+func resourceTypeIDFromRequest(source map[string]any) (int, bool) {
+	if typeID, ok := requestInt(firstNonNil(source["typeId"], source["resourceTypeId"])); ok {
+		if _, valid := entityTypeForGroupType(typeID); valid {
+			return typeID, true
+		}
+		return 0, false
+	}
+	entityType := strings.TrimSpace(requestString(firstNonNil(source["entityType"], source["resourceType"], source["type"])))
+	switch entityType {
+	case "room":
+		return groupTypeRoom, true
+	case "device":
+		return groupTypeDevice, true
+	case "group":
+		return groupTypeCustom, true
+	case "meshgroup", "mesh_group":
+		return groupTypeMesh, true
+	case "scene":
+		return groupTypeScene, true
+	case "automation":
+		return groupTypeAutomation, true
+	default:
+		return 0, false
+	}
 }
 
 func validateHomeOrganizationPayload(intent string, payload map[string]any, entities api.EntityListResult) string {

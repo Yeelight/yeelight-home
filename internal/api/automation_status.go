@@ -71,7 +71,7 @@ func (client AutomationStatusClient) Run(ctx context.Context, request Automation
 	if automationID == "" {
 		return AutomationStatusResult{}, fmt.Errorf("automation id is required")
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return AutomationStatusResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}

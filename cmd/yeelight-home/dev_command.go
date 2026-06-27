@@ -14,7 +14,7 @@ import (
 
 func (app *app) runDev(args []string, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home dev <seed-house|seed-room|seed-scene|seed-automation>")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home dev <seed-house|seed-room|seed-device|seed-scene|seed-automation>")
 		return exitInvalidInput
 	}
 	switch args[0] {
@@ -22,6 +22,8 @@ func (app *app) runDev(args []string, stdout io.Writer, stderr io.Writer) int {
 		return app.runDevSeedHouse(args[1:], stdout, stderr)
 	case "seed-room":
 		return app.runDevSeedRoom(args[1:], stdout, stderr)
+	case "seed-device":
+		return app.runDevSeedDevice(args[1:], stdout, stderr)
 	case "seed-scene":
 		return app.runDevSeedScene(args[1:], stdout, stderr)
 	case "seed-automation":
@@ -202,6 +204,64 @@ func (app *app) runDevSeedRoom(args []string, stdout io.Writer, stderr io.Writer
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "dev seed-room: %v\n", err)
+		return exitInternalError
+	}
+	return writeJSON(stdout, stderr, result)
+}
+
+func (app *app) runDevSeedDevice(args []string, stdout io.Writer, stderr io.Writer) int {
+	flags, err := parseFlags(args)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-device: %v\n", err)
+		return exitInvalidInput
+	}
+	if !flags.bool("json") {
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home dev seed-device --json --region dev --house-id <id> --name <name> --allow-write-dev")
+		return exitInvalidInput
+	}
+	if !flags.bool("allow-write-dev") {
+		_, _ = fmt.Fprintln(stderr, "dev seed-device requires --allow-write-dev")
+		return exitInvalidInput
+	}
+	endpoint, err := resolveEndpointForFlags(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-device: %v\n", err)
+		return exitInvalidInput
+	}
+	if endpoint.Region != "dev" {
+		_, _ = fmt.Fprintln(stderr, "dev seed-device is only allowed for dev region")
+		return exitInvalidInput
+	}
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-device: %v\n", err)
+		return exitInternalError
+	}
+	metadata, credentials, err := app.loadDevSeedProfile(profile)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-device: %v\n", err)
+		return exitInvalidInput
+	}
+	houseID := flags.string("house-id", metadata.HouseID)
+	if strings.TrimSpace(houseID) == "" {
+		_, _ = fmt.Fprintln(stderr, "dev seed-device: house id is required; run dev seed-house first or pass --house-id")
+		return exitInvalidInput
+	}
+	result, err := api.NewDevSeedClient(endpoint, nil).EnsureDevice(context.Background(), api.DevSeedDeviceRequest{
+		HouseID:        houseID,
+		RoomID:         flags.string("room-id", ""),
+		Name:           flags.string("name", "Codex Dev Test Device"),
+		PID:            flags.int("pid", 1),
+		DeviceType:     flags.int("type", 1),
+		ConnectType:    flags.int("connect-type", 0),
+		Bound:          flags.string("bound", "true") != "false",
+		AllowWriteDev:  true,
+		VerifyAttempts: 5,
+		VerifyInterval: time.Second,
+		Credentials:    credentials,
+	})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "dev seed-device: %v\n", err)
 		return exitInternalError
 	}
 	return writeJSON(stdout, stderr, result)

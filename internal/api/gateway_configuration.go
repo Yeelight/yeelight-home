@@ -54,7 +54,7 @@ func (client GatewayConfigurationClient) Run(ctx context.Context, request Gatewa
 	if gatewayID == "" {
 		return GatewayConfigurationResult{}, fmt.Errorf("gateway id is required")
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return GatewayConfigurationResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}

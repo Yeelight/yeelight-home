@@ -56,7 +56,7 @@ func (client DeviceUnbindClient) Run(ctx context.Context, request DeviceUnbindRe
 	if deviceID == "" {
 		return DeviceUnbindResult{}, fmt.Errorf("device id is required")
 	}
-	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID}
+	credentials := requestCredentials{Authorization: request.Credentials.Authorization, ClientID: request.Credentials.ClientID, HouseID: houseID}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return DeviceUnbindResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
@@ -79,7 +79,7 @@ func (client DeviceUnbindClient) Run(ctx context.Context, request DeviceUnbindRe
 	if !isBusinessOK(response) {
 		return DeviceUnbindResult{}, fmt.Errorf("device.unbind returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
-	ok, calls, err := client.verifyDeviceMissing(ctx, houseID, deviceID, credentials, request.VerifyAttempts, request.VerifyInterval)
+	ok, verifiedBy, calls, err := client.verifyDeviceUnbound(ctx, houseID, deviceID, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += calls
 	if err != nil {
 		return DeviceUnbindResult{}, err
@@ -95,7 +95,7 @@ func (client DeviceUnbindClient) Run(ctx context.Context, request DeviceUnbindRe
 		ClearMac:         request.ClearMac,
 		UnbindRelDevices: request.UnbindRelDevices,
 		Verified:         true,
-		VerifiedBy:       "entity.list",
+		VerifiedBy:       verifiedBy,
 		APICalls:         apiCalls,
 	}, nil
 }
@@ -119,7 +119,7 @@ func (client DeviceUnbindClient) findDevice(ctx context.Context, houseID string,
 	return EntitySummary{}, result.APICalls, nil
 }
 
-func (client DeviceUnbindClient) verifyDeviceMissing(ctx context.Context, houseID string, deviceID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
+func (client DeviceUnbindClient) verifyDeviceUnbound(ctx context.Context, houseID string, deviceID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, string, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -131,21 +131,24 @@ func (client DeviceUnbindClient) verifyDeviceMissing(ctx context.Context, houseI
 		entity, readCalls, err := client.findDevice(ctx, houseID, deviceID, credentials)
 		calls += readCalls
 		if err != nil {
-			return false, calls, err
+			return false, "", calls, err
 		}
 		if entity.ID == "" {
-			return true, calls, nil
+			return true, "entity.list:missing", calls, nil
+		}
+		if entity.Bind != nil && !*entity.Bind {
+			return true, "entity.list:bind=false", calls, nil
 		}
 		if attempt == attempts-1 {
-			return false, calls, nil
+			return false, "", calls, nil
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return false, calls, ctx.Err()
+			return false, "", calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return false, calls, nil
+	return false, "", calls, nil
 }

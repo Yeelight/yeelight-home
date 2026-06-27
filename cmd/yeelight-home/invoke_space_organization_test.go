@@ -199,9 +199,9 @@ func TestInvokePlanCommitMovesDeviceFromStoredPlan(t *testing.T) {
 				return
 			}
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"50018330","name":"主灯","roomId":"401392"}]}}`))
-		case "/apis/iot/v1/device/50018330/w/update":
+		case "/apis/iot/v2/thing/manage/house/200171/device/room/w/batch-modify":
 			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
-				t.Fatalf("decode device update body: %v", err)
+				t.Fatalf("decode device batch move body: %v", err)
 			}
 			_, _ = writer.Write([]byte(`{"success":true}`))
 		default:
@@ -225,15 +225,16 @@ func TestInvokePlanCommitMovesDeviceFromStoredPlan(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if writeBody["roomId"] != "401392" || writeBody["id"] != "50018330" || writeBody["deviceId"] != nil {
+	items := writeBody["items"].(map[string]any)
+	if writeBody["houseId"] != float64(200171) || items["50018330"] != "401392" || items["ignored"] != nil {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "space-organization-commit" {
+	if response["status"] != "success" || response["traceId"] != "space-batch-organization-commit" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
-	if result["entityType"] != "device" || result["entityId"] != "50018330" || result["roomId"] != "401392" {
+	if result["capability"] != "device.move" || result["itemCount"] != float64(1) || result["verified"] != true {
 		t.Fatalf("result = %#v", result)
 	}
 }

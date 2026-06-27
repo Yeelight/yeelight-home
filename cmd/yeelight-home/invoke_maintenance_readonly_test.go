@@ -151,3 +151,40 @@ func TestInvokeMaintenanceReadNextUsesSemanticAdapters(t *testing.T) {
 		t.Fatalf("unexpected node property query: %s", gotQueries[2])
 	}
 }
+
+func TestInvokeMaintenanceReadonlyAuthBoundaryReturnsPartialJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Error(writer, "unauthorized token-secret-should-not-leak", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-maintenance-auth-secret", "client-maintenance-auth-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-ota-unauthorized","locale":"zh-CN","utterance":"按版本查看固件文件","intent":"ota.version_file.batch_list","parameters":{"firmwareType":"main","version":44,"language":"zh","script":"Hans","region":"CN"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	for _, forbidden := range []string{"token-maintenance-auth-secret", "token-secret-should-not-leak"} {
+		if strings.Contains(stdout.String(), forbidden) || strings.Contains(stderr.String(), forbidden) {
+			t.Fatalf("output leaked %q: stdout=%s stderr=%s", forbidden, stdout.String(), stderr.String())
+		}
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "partial" {
+		t.Fatalf("response = %#v", response)
+	}
+	warnings, ok := response["warnings"].([]any)
+	if !ok || len(warnings) != 1 || warnings[0] != "cloud_authorization_boundary" {
+		t.Fatalf("warnings = %#v", response["warnings"])
+	}
+	result := response["result"].(map[string]any)
+	if result["cloudWrites"] != false || result["rawShape"] != "<http_auth_boundary>" {
+		t.Fatalf("result = %#v", result)
+	}
+}

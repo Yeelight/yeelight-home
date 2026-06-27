@@ -103,7 +103,7 @@ func validateSceneCreatePayload(payload map[string]any, entities api.EntityListR
 		return "scene_action_limit_exceeded"
 	}
 	for _, detail := range details {
-		if reason := normalizeActionParams(detail, "invalid_scene_detail_params"); reason != "" {
+		if reason := normalizeSceneDetail(detail, entities, "invalid_scene_detail_params"); reason != "" {
 			return reason
 		}
 		if reason := validateResourceReference(detail["typeId"], detail["resId"], entities, "invalid_scene_resource_type", "invalid_scene_resource_reference"); reason != "" {
@@ -238,6 +238,50 @@ func normalizeActionParams(item map[string]any, reason string) string {
 	}
 	item["params"] = compact
 	return ""
+}
+
+func normalizeSceneDetail(item map[string]any, entities api.EntityListResult, reason string) string {
+	if reason := normalizeActionParams(item, reason); reason != "" {
+		return reason
+	}
+	if _, ok := valueInt(item["typeId"]); !ok {
+		return reason
+	}
+	if valueIDString(item["resId"]) == "" {
+		return reason
+	}
+	if _, ok := valueInt(item["action"]); !ok {
+		item["action"] = 0
+	}
+	if _, ok := valueInt(item["rank"]); !ok {
+		item["rank"] = 0
+	}
+	if strings.TrimSpace(requestString(item["resName"])) == "" {
+		if entity, ok := findEntityForSceneDetail(entities, item["typeId"], item["resId"]); ok && strings.TrimSpace(entity.Name) != "" {
+			item["resName"] = entity.Name
+		} else {
+			item["resName"] = valueIDString(item["resId"])
+		}
+	}
+	return ""
+}
+
+func findEntityForSceneDetail(entities api.EntityListResult, typeValue any, idValue any) (api.EntitySummary, bool) {
+	typeID, ok := valueInt(typeValue)
+	if !ok {
+		return api.EntitySummary{}, false
+	}
+	entityType, ok := entityTypeForGroupType(typeID)
+	if !ok {
+		return api.EntitySummary{}, false
+	}
+	id := valueIDString(idValue)
+	for _, entity := range entities.Entities {
+		if entity.Type == entityType && entity.ID == id {
+			return entity, true
+		}
+	}
+	return api.EntitySummary{}, false
 }
 
 func hasResourceReference(item map[string]any) bool {

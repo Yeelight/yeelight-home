@@ -80,7 +80,7 @@ func pendingPlanPayloadPreview(record plan.Record) map[string]any {
 	} else {
 		preview["houseId"] = record.HouseID
 	}
-	for _, key := range []string{"name", "typeId", "resId", "rank", "favoriteId", "type", "target", "roomId", "deviceId", "sceneId", "automationId"} {
+	for _, key := range []string{"name", "typeId", "resId", "rank", "favoriteId", "type", "target", "roomId", "deviceId", "sceneId", "automationId", "buttonEventId", "index"} {
 		if value, ok := record.Payload[key]; ok {
 			preview[key] = value
 		}
@@ -90,6 +90,9 @@ func pendingPlanPayloadPreview(record plan.Record) map[string]any {
 	}
 	if buttons, ok := record.Payload["buttons"]; ok {
 		preview["buttons"] = previewList(buttons, 20)
+	}
+	if buttonEvents, ok := record.Payload["buttonEvents"]; ok {
+		preview["buttonEvents"] = previewList(buttonEvents, 20)
 	}
 	if details, ok := record.Payload["details"]; ok {
 		preview["details"] = previewList(details, 20)
@@ -112,11 +115,19 @@ func previewList(value any, limit int) any {
 }
 
 func homeOrganizationCommitResponse(request contract.Request, record plan.Record, result api.HomeOrganizationResult) contract.Response {
+	userMessage := "已提交并验证首页组织配置。"
+	warnings := []string{}
+	if !result.Verified {
+		userMessage = "已提交首页组织配置，但云端排序读接口当前不可用，未完成读后验证。"
+		if result.Warning != "" {
+			warnings = append(warnings, result.Warning)
+		}
+	}
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     "已提交并验证首页组织配置。",
+		UserMessage:     userMessage,
 		Result: map[string]any{
 			"region":     result.Region,
 			"houseId":    result.HouseID,
@@ -131,7 +142,7 @@ func homeOrganizationCommitResponse(request contract.Request, record plan.Record
 			"intent":   record.Intent,
 			"status":   "committed",
 		},
-		Warnings: []string{},
+		Warnings: warnings,
 		TraceID:  "home-organization-commit",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
@@ -372,6 +383,7 @@ func automationStatusCommitResponse(request contract.Request, record plan.Record
 			"automationId": result.AutomationID,
 			"name":         result.Name,
 			"status":       result.Status,
+			"statusLabel":  automationStatusLabel(result.Status),
 			"capability":   result.Capability,
 			"verified":     result.Verified,
 			"verifiedBy":   result.VerifiedBy,
@@ -388,6 +400,17 @@ func automationStatusCommitResponse(request contract.Request, record plan.Record
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
+	}
+}
+
+func automationStatusLabel(status string) string {
+	switch status {
+	case "1":
+		return "enabled"
+	case "0":
+		return "disabled"
+	default:
+		return "unknown"
 	}
 }
 

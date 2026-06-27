@@ -74,6 +74,7 @@ func (client SpaceOrganizationClient) Run(ctx context.Context, request SpaceOrga
 	credentials := requestCredentials{
 		Authorization: request.Credentials.Authorization,
 		ClientID:      request.Credentials.ClientID,
+		HouseID:       houseID,
 	}
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return SpaceOrganizationResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
@@ -208,7 +209,7 @@ func (client SpaceOrganizationClient) verifyAfterWrite(ctx context.Context, spec
 	}
 	calls := 0
 	for attempt := 0; attempt < attempts; attempt++ {
-		entity, readCalls, err := client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
+		entity, readCalls, err := client.findEntityAfterSpaceWrite(ctx, spec, houseID, entityID, credentials)
 		calls += readCalls
 		if err != nil {
 			return EntitySummary{}, calls, err
@@ -228,6 +229,56 @@ func (client SpaceOrganizationClient) verifyAfterWrite(ctx context.Context, spec
 		}
 	}
 	return EntitySummary{}, calls, nil
+}
+
+func (client SpaceOrganizationClient) findEntityAfterSpaceWrite(ctx context.Context, spec spaceOrganizationSpec, houseID string, entityID string, credentials requestCredentials) (EntitySummary, int, error) {
+	if spec.kind == SpaceOrganizationGroupUpdate {
+		entity, calls, err := client.findGroupDetailEntity(ctx, houseID, entityID, credentials)
+		if err == nil && entity.ID != "" {
+			return entity, calls, nil
+		}
+		if err != nil {
+			fallback, fallbackCalls, fallbackErr := client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
+			if fallbackErr != nil {
+				return EntitySummary{}, calls + fallbackCalls, err
+			}
+			return fallback, calls + fallbackCalls, nil
+		}
+	}
+	return client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
+}
+
+func (client SpaceOrganizationClient) findGroupDetailEntity(ctx context.Context, houseID string, groupID string, credentials requestCredentials) (EntitySummary, int, error) {
+	response, err := callJSON(ctx, client.client, http.MethodGet, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/group/"+pathSegment(groupID)+"/r/info", nil, credentials)
+	if err != nil {
+		return EntitySummary{}, 1, err
+	}
+	if !isBusinessOK(response) {
+		return EntitySummary{}, 1, metadataReadonlyBusinessError("group detail", response)
+	}
+	item := groupDetailItem(response["data"])
+	if len(item) == 0 {
+		return EntitySummary{}, 1, nil
+	}
+	return EntitySummary{
+		Type:    "group",
+		ID:      firstAnyString(item, "id", "groupId", "meshGroupId", "meshgroupId"),
+		Name:    firstAnyString(item, "name", "groupName"),
+		HouseID: firstNonEmpty(firstAnyString(item, "houseId"), houseID),
+		RoomID:  firstAnyString(item, "roomId"),
+	}, 1, nil
+}
+
+func groupDetailItem(data any) map[string]any {
+	switch typed := data.(type) {
+	case map[string]any:
+		if detail, ok := typed["detail"].(map[string]any); ok {
+			return detail
+		}
+		return typed
+	default:
+		return nil
+	}
 }
 
 func (client SpaceOrganizationClient) findEntity(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials) (EntitySummary, int, error) {

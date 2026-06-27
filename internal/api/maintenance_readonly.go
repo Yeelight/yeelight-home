@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -128,6 +129,17 @@ func (client MetadataReadonlyClient) RunNodePropertyConfigGet(ctx context.Contex
 		"nodeType": nodeType,
 	})
 	result, err := client.readPath(ctx, request, "node.property_config.get", path, http.MethodPost, nil, map[string]any{"properties": nil})
+	if err != nil {
+		var statusErr HTTPStatusError
+		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest {
+			result := metadataReadonlyMissingContext(client.endpoint.Region, "node.property_config.get", "cloud_read_endpoint_unavailable")
+			result.HouseID = strings.TrimSpace(request.HouseID)
+			result.DeviceID = nodeID
+			result.APICalls = 1
+			result.RawShape = "<http_400>"
+			return result, nil
+		}
+	}
 	result.DeviceID = nodeID
 	return result, err
 }

@@ -190,7 +190,7 @@ func (app *app) invokePlanCommit(ctx context.Context, request contract.Request, 
 	case "device.rename":
 		return app.commitSpaceOrganizationPlan(ctx, request, endpoint, record, authorization, clientID, api.SpaceOrganizationDeviceRename)
 	case "device.move":
-		return app.commitSpaceOrganizationPlan(ctx, request, endpoint, record, authorization, clientID, api.SpaceOrganizationDeviceMove)
+		return app.commitDeviceMovePlan(ctx, request, endpoint, record, authorization, clientID)
 	case "device.move_room.batch":
 		return app.commitSpaceBatchOrganizationPlan(ctx, request, endpoint, record, authorization, clientID, api.SpaceBatchDeviceMoveRoom)
 	case "device.remove":
@@ -240,7 +240,7 @@ func (app *app) invokePlanCommit(ctx context.Context, request contract.Request, 
 	case "knob.reset":
 		return app.commitPanelConfigurationPlan(ctx, request, endpoint, record, authorization, clientID, api.KnobReset)
 	case "automation.create":
-		return planCommitBlockedResponse(request, planID, "automation_commit_disabled", "自动化计划已生成，但真实创建执行器仍需 owner-reviewed 条件/动作校验后才能启用。"), nil
+		return app.commitMetadataCreatePlan(ctx, request, endpoint, record, authorization, clientID, api.MetadataKindAutomation, "自动化")
 	case "automation.update":
 		return app.commitAutomationUpdatePlan(ctx, request, endpoint, record, authorization, clientID)
 	case "automation.enable":
