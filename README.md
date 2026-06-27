@@ -1,19 +1,38 @@
 # yeelight-home
 
+Default language: English. Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md).
+
 `yeelight-home` is the standalone local Runtime CLI for Yeelight smart-home Skills and automation scripts. It runs on the user's machine, keeps credentials local, resolves semantic smart-home requests, calls Yeelight cloud APIs directly, and returns redacted structured results.
 
 The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-home` through `YEELIGHT_HOME_BIN` or `PATH` and sends one JSON request to `yeelight-home invoke --stdin`.
 
 ## Features
 
-- Direct Yeelight cloud API access for homes, rooms, areas, devices, groups, gateways, scenes, automations, diagnostics, lighting design, memory, and personalization.
+- Direct Yeelight cloud API access for homes, rooms, areas, devices, groups, gateways, scenes, automations, diagnostics, lighting design, product knowledge, memory, and personalization.
+- Product pedia search for fuzzy product lookup, material codes, product metadata, attachment records, and candidate manual or FAQ resource URLs.
 - Guarded write model for persistent changes: risky changes create a local pending plan first, and `plan.commit` executes only a stored `planId`.
 - Local credential handling: access tokens are stored in the system credential store when available, with a protected local fallback.
 - Multiple profiles for different accounts, regions, or homes.
 - Region-aware cloud endpoints with default region `cn`.
 - Redacted JSON output for Skill hosts and diagnostics.
+- Local preference memory and recommendation feedback stored under the Runtime data directory, not in Skill prompts.
+- Human-friendly resource commands plus a stable `invoke --stdin` contract for Skills and generated apps.
 - Cross-platform distribution through the GoReleaser-backed GitHub Releases pipeline, with Homebrew, Scoop, npm, Linux packages, and optional container/package-manager channels.
 - Optional Docker/GHCR and Docker Hub images for NAS, server, and scheduled automation use.
+
+## Capability Map
+
+| Area | Examples |
+| --- | --- |
+| Home topology | homes, rooms, areas, groups, gateways, panels, knobs, sensors, unified entities |
+| Device control | light power, brightness, color temperature, color, behavior execution, state query |
+| Organization writes | room/device naming, room movement, favorites, home sorting, panel/knob configuration |
+| Scenes and automations | list, detail, execute, create/update/delete plans, enable/disable, guarded commits |
+| Product knowledge | `product.pedia.search`, manuals and FAQ candidates, thing-model schema and product definitions |
+| Diagnostics | gateway/device diagnostics, upgrade files, operation progress, install and credential checks |
+| Local intelligence | local preference memory, recommendation list, recommendation feedback and cooldown |
+
+Reads execute immediately. Persistent writes and deletes use confirmation-required pending plans unless a command is explicitly documented as read-only or diagnostic-only.
 
 ## Install
 
@@ -62,6 +81,7 @@ yeelight-home home list --json
 # Optional: choose a default home before house-scoped device, room, scene, or automation operations.
 yeelight-home home select --house-id <house-id>
 yeelight-home device list --json
+yeelight-home product search --multi-field 青空灯 --json
 yeelight-home scene execute --scene-id <scene-id> --json
 yeelight-home light on --device-id <device-id> --json
 yeelight-home automation enable --automation-id <automation-id> --json
@@ -150,10 +170,33 @@ For uncommon fields, pass advanced parameters without dropping to raw stdin:
 yeelight-home room search --name 客厅 --json
 yeelight-home scene create --params-json '{"name":"回家灯光","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}' --json
 yeelight-home favorite add --set typeId=2,resId=50018330,rank=1 --json
+yeelight-home product search --multi-field 青空灯 --json
+yeelight-home product search --product-model YP-0117 --json
 yeelight-home thing schema-get --schema-id <schema-id> --json
 yeelight-home upgrade files --json
 yeelight-home panel button-configure --device-id <panel-id> --params-json '<json>' --json
 ```
+
+### Product Knowledge
+
+```sh
+yeelight-home product search --multi-field 青空灯 --json
+yeelight-home product search --material-code 1-000003268 --json
+yeelight-home product search --product-model YP-0117 --json
+```
+
+`product search` calls the product pedia search adapter. Results include redacted product metadata such as product name, brand, model, SKU/SPU, category/class fields, material code, support markers, status, attachments, and candidate manual or FAQ resource URLs when they can be derived safely. Product knowledge explains what a product is; it does not prove that a matching device is installed in a user's home. Use `entity capabilities`, `device detail`, or `state query` for installed-device truth.
+
+### Local Memory And Recommendations
+
+```sh
+yeelight-home memory remember --house-id <house-id> --set scopeType=room,scopeRef=客厅,preferenceType=brightness,preferenceValue=45 --json
+yeelight-home plan commit --plan-id <plan-id> --json
+yeelight-home recommendation list --house-id <house-id> --json
+yeelight-home recommendation feedback --params-json '{"recommendationId":"<id>","feedback":"cooldown","cooldownHours":24}' --json
+```
+
+`memory remember` creates a local confirmation plan. After `plan commit`, the Runtime stores the preference locally and may materialize one preference-based pending recommendation. `recommendation list` returns only Runtime-backed recommendations. Feedback such as `accepted`, `dismissed`, `rejected`, or `cooldown` is stored locally and respected by later recommendation reads.
 
 ### `doctor`
 
