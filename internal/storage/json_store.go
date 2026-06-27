@@ -157,6 +157,19 @@ func (store JSONStore) ListPreferences(profile string, houseID string) ([]Prefer
 	return result, nil
 }
 
+func (store JSONStore) Recommendation(profile string, houseID string, recommendationID string) (RecommendationRecord, bool, error) {
+	document, err := store.load()
+	if err != nil {
+		return RecommendationRecord{}, false, err
+	}
+	for _, record := range document.Recommendations {
+		if record.Profile == profile && record.HouseID == houseID && record.ID == recommendationID {
+			return record, true, nil
+		}
+	}
+	return RecommendationRecord{}, false, nil
+}
+
 func (store JSONStore) DeleteProfileHouse(profile string, houseID string) error {
 	document, err := store.load()
 	if err != nil {

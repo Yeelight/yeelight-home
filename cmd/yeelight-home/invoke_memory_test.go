@@ -57,6 +57,13 @@ func TestInvokeMemoryRememberUsesPendingPlanAndCommit(t *testing.T) {
 	if len(list) != 1 || list[0].PreferenceValue != "45" {
 		t.Fatalf("list = %#v", list)
 	}
+	recommendations, err := app.memoryStore.ListRecommendations("default", "house-1", time.Now().Unix(), 1)
+	if err != nil {
+		t.Fatalf("ListRecommendations error: %v", err)
+	}
+	if len(recommendations) != 1 || recommendations[0].Type != "preference_based" {
+		t.Fatalf("recommendations = %#v", recommendations)
+	}
 }
 
 func TestInvokeMemoryListPauseAndForget(t *testing.T) {
@@ -144,6 +151,90 @@ func TestInvokeRecommendationListReturnsAtMostOneItem(t *testing.T) {
 	items := recommendation["items"].([]any)
 	if len(items) != 1 || recommendation["sessionLimit"] != float64(1) {
 		t.Fatalf("recommendation = %#v", recommendation)
+	}
+}
+
+func TestInvokeRecommendationListGeneratesFromSavedPreference(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
+	if err := app.memoryStore.SavePreference(storage.PreferenceRecord{
+		ID:              "pref-brightness-living",
+		Profile:         "default",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "客厅",
+		PreferenceType:  "brightness",
+		PreferenceValue: "45",
+		Kind:            "explicit",
+		Evidence:        "用户明确说明",
+		CreatedAt:       123,
+		UpdatedAt:       123,
+	}); err != nil {
+		t.Fatalf("SavePreference error: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-rec-generated","locale":"zh-CN","utterance":"有什么建议","intent":"recommendation.list","parameters":{"houseId":"house-1"}}`), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("recommendation exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid recommendation response: %v", err)
+	}
+	items := response["recommendation"].(map[string]any)["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("recommendation response = %#v", response)
+	}
+	item := items[0].(map[string]any)
+	if item["id"] != "pref-pref-brightness-living" || item["type"] != "preference_based" || !strings.Contains(item["explanation"].(string), "brightness=45") {
+		t.Fatalf("recommendation item = %#v", item)
+	}
+}
+
+func TestInvokeRecommendationListDoesNotReviveRejectedPreferenceRecommendation(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
+	now := time.Now().Unix()
+	if err := app.memoryStore.SavePreference(storage.PreferenceRecord{
+		ID:              "pref-brightness-living",
+		Profile:         "default",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "客厅",
+		PreferenceType:  "brightness",
+		PreferenceValue: "45",
+		Kind:            "explicit",
+		UpdatedAt:       now,
+	}); err != nil {
+		t.Fatalf("SavePreference error: %v", err)
+	}
+	if err := app.memoryStore.SaveRecommendation(storage.RecommendationRecord{
+		ID:          "pref-pref-brightness-living",
+		Profile:     "default",
+		HouseID:     "house-1",
+		Type:        "preference_based",
+		Explanation: "旧推荐",
+		Evidence:    "用户已拒绝",
+		Status:      "rejected",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("SaveRecommendation error: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-rec-not-revived","locale":"zh-CN","utterance":"有什么建议","intent":"recommendation.list","parameters":{"houseId":"house-1"}}`), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("recommendation exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid recommendation response: %v", err)
+	}
+	items := response["recommendation"].(map[string]any)["items"].([]any)
+	if len(items) != 0 {
+		t.Fatalf("recommendation response = %#v", response)
 	}
 }
 

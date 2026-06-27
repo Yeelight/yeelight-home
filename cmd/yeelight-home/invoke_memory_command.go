@@ -84,6 +84,9 @@ func (app *app) commitMemoryRememberPlan(_ context.Context, request contract.Req
 	if err := app.memoryStore.SavePreference(memoryRecord); err != nil {
 		return contract.Response{}, err
 	}
+	if err := app.ensurePreferenceRecommendation(memoryRecord, now); err != nil {
+		return contract.Response{}, err
+	}
 	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
 		return contract.Response{}, err
 	}
@@ -154,9 +157,19 @@ func (app *app) invokeRecommendationList(request contract.Request, profile strin
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
-	recommendations, err := app.memoryStore.ListRecommendations(profile, houseID, time.Now().Unix(), 1)
+	now := time.Now().Unix()
+	recommendations, err := app.memoryStore.ListRecommendations(profile, houseID, now, 1)
 	if err != nil {
 		return contract.Response{}, err
+	}
+	if len(recommendations) == 0 {
+		if err := app.ensurePreferenceRecommendations(profile, houseID, now); err != nil {
+			return contract.Response{}, err
+		}
+		recommendations, err = app.memoryStore.ListRecommendations(profile, houseID, now, 1)
+		if err != nil {
+			return contract.Response{}, err
+		}
 	}
 	return recommendationListResponse(request, houseID, recommendations), nil
 }
@@ -210,4 +223,61 @@ func recommendationCooldownSeconds(request contract.Request) int64 {
 		return int64(7 * 24 * 60 * 60)
 	}
 	return int64(value * 60 * 60)
+}
+
+func (app *app) ensurePreferenceRecommendations(profile string, houseID string, now int64) error {
+	preferences, err := app.memoryStore.ListPreferences(profile, houseID)
+	if err != nil {
+		return err
+	}
+	for _, preference := range preferences {
+		if err := app.ensurePreferenceRecommendation(preference, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (app *app) ensurePreferenceRecommendation(preference storage.PreferenceRecord, now int64) error {
+	if strings.TrimSpace(preference.ID) == "" || strings.TrimSpace(preference.Profile) == "" || strings.TrimSpace(preference.HouseID) == "" {
+		return nil
+	}
+	recommendationID := preferenceRecommendationID(preference.ID)
+	if _, ok, err := app.memoryStore.Recommendation(preference.Profile, preference.HouseID, recommendationID); err != nil || ok {
+		return err
+	}
+	return app.memoryStore.SaveRecommendation(storage.RecommendationRecord{
+		ID:          recommendationID,
+		Profile:     preference.Profile,
+		HouseID:     preference.HouseID,
+		Type:        "preference_based",
+		Explanation: preferenceRecommendationExplanation(preference),
+		Evidence:    preferenceRecommendationEvidence(preference),
+		Status:      "pending",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+}
+
+func preferenceRecommendationID(preferenceID string) string {
+	return "pref-" + strings.TrimSpace(preferenceID)
+}
+
+func preferenceRecommendationExplanation(preference storage.PreferenceRecord) string {
+	scope := strings.TrimSpace(preference.ScopeRef)
+	if scope == "" {
+		scope = strings.TrimSpace(preference.ScopeType)
+	}
+	if scope == "" {
+		scope = "当前家庭"
+	}
+	return fmt.Sprintf("可以按你保存的偏好调整 %s 的默认建议：%s=%s。", scope, preference.PreferenceType, preference.PreferenceValue)
+}
+
+func preferenceRecommendationEvidence(preference storage.PreferenceRecord) string {
+	evidence := strings.TrimSpace(preference.Evidence)
+	if evidence == "" {
+		evidence = "本地已确认偏好"
+	}
+	return fmt.Sprintf("来源：%s；scope=%s/%s；kind=%s", evidence, preference.ScopeType, preference.ScopeRef, preference.Kind)
 }

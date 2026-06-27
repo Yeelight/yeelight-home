@@ -213,6 +213,26 @@ Keep this repository. It is the shared Yeelight Scoop bucket and should contain 
 Winget publication is review-gated through `microsoft/winget-pkgs`. The workflow may create a manifest or PR, but Microsoft review still controls final availability.
 Do not create a permanent Yeelight organization repository for Winget. A fork is only a temporary PR workspace if needed.
 
+The GitHub account that opens the Winget PR must have accepted the Microsoft CLA. If Microsoft comments with `msftbot/needsCLA` or adds the `Needs-CLA` label, the PR author must comment on that PR:
+
+```text
+@microsoft-github-policy-service agree
+```
+
+When contributing on behalf of a company, use:
+
+```text
+@microsoft-github-policy-service agree company="<company>"
+```
+
+After accepting, request a re-check if needed:
+
+```text
+@microsoft-github-policy-service rerun
+```
+
+Do this once for the publishing identity used by `WINGET_GITHUB_TOKEN`; otherwise future Winget PRs from that identity may remain blocked even when the manifests are correct.
+
 ### AUR
 
 The planned package name is `yeelight-home-bin`. AUR requires an AUR account, an uploaded SSH public key, and an unencrypted SSH private key available to the release workflow.
