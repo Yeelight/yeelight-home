@@ -44,12 +44,20 @@ type app struct {
 func newAppFromEnv() *app {
 	paths := config.ResolveFromEnv()
 	fileTokenStore := credential.NewFileTokenStore(filepath.Join(paths.ConfigDir, "tokens.json"))
-	return &app{
+	app := &app{
 		tokenStore:    credential.NewFallbackStore(credential.NewSystemStore("yeelight-home"), fileTokenStore),
 		metadataStore: credential.NewFileMetadataStore(filepath.Join(paths.ConfigDir, "profiles.json")),
 		planStore:     plan.NewStore(filepath.Join(paths.DataDir, "pending_plans.json")),
 		memoryStore:   storage.NewJSONStore(filepath.Join(paths.DataDir, "memory.json")),
 	}
+	app.configureMemoryPlanRecovery()
+	return app
+}
+
+func (app *app) configureMemoryPlanRecovery() {
+	app.planStore = app.planStore.WithBeforeCompact(func(records []plan.Record) error {
+		return app.recoverCommittedMemoryPlanRecords(records, time.Now().Unix())
+	})
 }
 
 func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {

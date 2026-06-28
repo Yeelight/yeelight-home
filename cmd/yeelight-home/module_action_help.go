@@ -72,6 +72,15 @@ func moduleActionFlagHelp(resource string, action string, spec moduleCommandSpec
 		lines = append(lines, "  --property <name>")
 	case "room.create", "area.create", "group.create", "scene.create", "automation.create", "home.create":
 		lines = append(lines, "  --name <name>")
+	case "device.slot.create":
+		lines = append(lines, "  --name <slot-name>")
+		lines = append(lines, "  --room-id <id>")
+		lines = append(lines, "  --room-name <name>")
+		lines = append(lines, "  --params-json <json>   Supports rooms[].items[] with name, quantity, category, color, installStyle, beamAngle, series, materialCode, pid.")
+	case "lighting.design.import":
+		lines = append(lines, "  --params-json <json>   Supports rooms, items/slots/devices, autoGroup, scenes, automations, clearAll/overwrite. Design slots are enriched with built-in product candidates when possible.")
+	case "operation.batch.configure":
+		lines = append(lines, "  --params-json <json>   Requires operations[].intent and operations[].parameters. Only allowlisted add/update/configure steps are accepted; delete/unbind/member/approval/reset actions stay separate.")
 	case "device.move":
 		lines = append(lines, "  --room-id <id>")
 	case "room.search", "group.search", "scene.search", "geo_area.search":
@@ -113,6 +122,12 @@ func moduleActionExamples(resource string, action string, spec moduleCommandSpec
 		return "  yeelight-home room rename --room-id <id> --name <new-name> --json\n"
 	case "device.rename":
 		return "  yeelight-home device rename --device-id <id> --name <new-name> --json\n"
+	case "device.slot.create":
+		return "  yeelight-home device slot-create --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"黑色格栅灯\",\"quantity\":2,\"category\":\"格栅灯\",\"color\":\"黑色\"}]}]}' --json\n"
+	case "lighting.design.import":
+		return "  yeelight-home lighting import --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"吸顶灯\"},{\"name\":\"黑色格栅灯\",\"quantity\":2},{\"name\":\"36°射灯\",\"quantity\":4}]}],\"autoGroup\":true}' --json\n"
+	case "operation.batch.configure":
+		return "  yeelight-home operation batch-configure --house-id <id> --params-json '{\"operations\":[{\"intent\":\"room.create\",\"parameters\":{\"name\":\"书房\"}},{\"intent\":\"device.rename\",\"parameters\":{\"deviceId\":\"50018330\",\"name\":\"书房主灯\"}}]}' --json\n"
 	default:
 		return fmt.Sprintf("  yeelight-home %s %s --json\n", resource, action)
 	}

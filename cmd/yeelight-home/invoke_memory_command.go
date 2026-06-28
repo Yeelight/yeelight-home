@@ -20,20 +20,19 @@ func (app *app) invokeMemoryRememberPlan(request contract.Request, profile strin
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
-	preferenceType := firstRequestString(request.Parameters, "preferenceType", "type")
-	preferenceValue := firstRequestString(request.Parameters, "preferenceValue", "value")
-	if preferenceType == "" || preferenceValue == "" {
+	candidate := memoryPreferenceFromRequest(request)
+	if candidate.preferenceType == "" || candidate.preferenceValue == "" {
 		return memoryClarificationResponse(request, "missing_preference"), nil
 	}
 	payload := map[string]any{
-		"preferenceType":  preferenceType,
-		"preferenceValue": preferenceValue,
-		"scopeType":       firstNonEmptyString(firstRequestString(request.Parameters, "scopeType"), "home"),
-		"scopeRef":        firstRequestString(request.Parameters, "scopeRef"),
-		"kind":            firstNonEmptyString(firstRequestString(request.Parameters, "kind"), "explicit"),
-		"evidence":        firstRequestString(request.Parameters, "evidence"),
+		"preferenceType":  candidate.preferenceType,
+		"preferenceValue": candidate.preferenceValue,
+		"scopeType":       candidate.scopeType,
+		"scopeRef":        candidate.scopeRef,
+		"kind":            candidate.kind,
+		"evidence":        candidate.evidence,
 	}
-	record, err := plan.NewRecord(profile, region, houseID, "memory.remember", request.RequestID, fmt.Sprintf("记住偏好 %s=%s", preferenceType, preferenceValue), payload, []string{
+	record, err := plan.NewRecord(profile, region, houseID, "memory.remember", request.RequestID, fmt.Sprintf("记住偏好 %s=%s", candidate.preferenceType, candidate.preferenceValue), payload, []string{
 		"仅写入本地 JSON 记忆",
 		"不会创建情景、自动化或设备配置",
 		"token-like 字段会被拒绝",
@@ -49,21 +48,9 @@ func (app *app) invokeMemoryRememberPlan(request contract.Request, profile strin
 
 func (app *app) commitMemoryRememberPlan(_ context.Context, request contract.Request, record plan.Record) (contract.Response, error) {
 	now := time.Now().Unix()
-	consent, ok, err := app.memoryStore.Consent(record.Profile, record.HouseID)
+	consent, err := app.ensureMemoryConsent(record.Profile, record.HouseID, now)
 	if err != nil {
 		return contract.Response{}, err
-	}
-	if !ok {
-		consent = storage.ConsentRecord{
-			Profile:         record.Profile,
-			HouseID:         record.HouseID,
-			ConsentVersion:  memoryConsentVersion,
-			LearningEnabled: true,
-			UpdatedAt:       now,
-		}
-		if err := app.memoryStore.SetConsent(consent); err != nil {
-			return contract.Response{}, err
-		}
 	}
 	if consent.Paused {
 		return memoryBlockedResponse(request, "memory_paused", "本地学习已暂停，未写入新记忆。"), nil
@@ -100,11 +87,15 @@ func (app *app) invokeMemoryList(request contract.Request, profile string, house
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
+	now := time.Now().Unix()
+	if err := app.recoverCommittedMemoryPlans(profile, houseID, now); err != nil {
+		return contract.Response{}, err
+	}
 	preferences, err := app.memoryStore.ListPreferences(profile, houseID)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	consent, _, err := app.memoryStore.Consent(profile, houseID)
+	consent, err := app.ensureMemoryConsent(profile, houseID, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -125,6 +116,7 @@ func (app *app) invokeMemoryPauseResume(request contract.Request, profile string
 	if !ok {
 		consent = storage.ConsentRecord{Profile: profile, HouseID: houseID, ConsentVersion: memoryConsentVersion, LearningEnabled: true}
 	}
+	consent.LearningEnabled = true
 	consent.Paused = paused
 	consent.UpdatedAt = time.Now().Unix()
 	if err := app.memoryStore.SetConsent(consent); err != nil {
@@ -158,6 +150,12 @@ func (app *app) invokeRecommendationList(request contract.Request, profile strin
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
 	now := time.Now().Unix()
+	if err := app.recoverCommittedMemoryPlans(profile, houseID, now); err != nil {
+		return contract.Response{}, err
+	}
+	if _, err := app.ensureMemoryConsent(profile, houseID, now); err != nil {
+		return contract.Response{}, err
+	}
 	recommendations, err := app.memoryStore.ListRecommendations(profile, houseID, now, 1)
 	if err != nil {
 		return contract.Response{}, err
@@ -200,6 +198,42 @@ func (app *app) invokeRecommendationFeedback(request contract.Request, profile s
 		return recommendationFeedbackBlockedResponse(request, recommendationID, "recommendation_not_found", "未找到要更新的本地推荐。"), nil
 	}
 	return recommendationFeedbackResponse(request, houseID, record), nil
+}
+
+func (app *app) ensureMemoryConsent(profile string, houseID string, now int64) (storage.ConsentRecord, error) {
+	consent, ok, err := app.memoryStore.Consent(profile, houseID)
+	if err != nil {
+		return storage.ConsentRecord{}, err
+	}
+	if !ok {
+		consent = storage.ConsentRecord{
+			Profile:         profile,
+			HouseID:         houseID,
+			ConsentVersion:  memoryConsentVersion,
+			LearningEnabled: true,
+			UpdatedAt:       now,
+		}
+		if err := app.memoryStore.SetConsent(consent); err != nil {
+			return storage.ConsentRecord{}, err
+		}
+		return consent, nil
+	}
+	changed := false
+	if strings.TrimSpace(consent.ConsentVersion) == "" {
+		consent.ConsentVersion = memoryConsentVersion
+		changed = true
+	}
+	if !consent.LearningEnabled {
+		consent.LearningEnabled = true
+		changed = true
+	}
+	if changed {
+		consent.UpdatedAt = now
+		if err := app.memoryStore.SetConsent(consent); err != nil {
+			return storage.ConsentRecord{}, err
+		}
+	}
+	return consent, nil
 }
 
 func normalizeRecommendationFeedback(value string) string {

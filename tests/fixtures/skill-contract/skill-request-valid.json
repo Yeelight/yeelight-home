@@ -1377,5 +1377,45 @@
       "pageNo": 1,
       "pageSize": 20
     }
+  },
+  {
+    "contractVersion": "1.0",
+    "requestId": "fixture-operation-batch-configure-1",
+    "locale": "zh-CN",
+    "utterance": "帮我创建书房，调整首页排序，并把主灯加入收藏",
+    "intent": "operation.batch.configure",
+    "parameters": {
+      "houseId": "200171",
+      "operations": [
+        {
+          "intent": "room.create",
+          "parameters": {
+            "name": "书房"
+          }
+        },
+        {
+          "intent": "home.sort.configure",
+          "parameters": {
+            "sortType": "device_room",
+            "roomId": "401398",
+            "items": [
+              {
+                "entityType": "device",
+                "resId": "50018330",
+                "rank": 1
+              }
+            ]
+          }
+        },
+        {
+          "intent": "favorite.add",
+          "parameters": {
+            "entityType": "device",
+            "resId": "50018330",
+            "rank": 1
+          }
+        }
+      ]
+    }
   }
 ]

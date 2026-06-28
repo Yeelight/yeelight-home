@@ -126,6 +126,10 @@ func (app *app) invokePlanCommit(ctx context.Context, request contract.Request, 
 	if record.ApprovalRequired && record.ApprovedAt <= 0 {
 		return planCommitBlockedResponse(request, planID, "local_approval_required", "该计划属于 R3 高影响操作，必须先在本机终端运行确认计划返回的 approveCommand。"), nil
 	}
+	return app.commitStoredPlan(ctx, request, endpoint, record, authorization, clientID)
+}
+
+func (app *app) commitStoredPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
 	switch record.Intent {
 	case "home.create":
 		return app.commitHomeCreatePlan(ctx, request, endpoint, record, authorization, clientID)
@@ -141,6 +145,8 @@ func (app *app) invokePlanCommit(ctx context.Context, request contract.Request, 
 		return app.commitSceneUpdatePlan(ctx, request, endpoint, record, authorization, clientID)
 	case "lighting.design.apply":
 		return app.commitLightingDesignApplyPlan(ctx, request, endpoint, record, authorization, clientID)
+	case "lighting.design.import", "device.slot.create":
+		return app.commitLightingDesignImportPlan(ctx, request, endpoint, record, authorization, clientID)
 	case "memory.remember":
 		return app.commitMemoryRememberPlan(ctx, request, record)
 	case "home.sort.configure":
@@ -247,8 +253,10 @@ func (app *app) invokePlanCommit(ctx context.Context, request contract.Request, 
 		return app.commitAutomationStatusPlan(ctx, request, endpoint, record, authorization, clientID, api.AutomationStatusEnable)
 	case "automation.disable":
 		return app.commitAutomationStatusPlan(ctx, request, endpoint, record, authorization, clientID, api.AutomationStatusDisable)
+	case "operation.batch.configure":
+		return app.commitOperationBatchConfigurePlan(ctx, request, endpoint, record, authorization, clientID)
 	default:
-		return planCommitBlockedResponse(request, planID, "unsupported_plan_intent", "当前 Runtime 尚未支持提交该计划类型。"), nil
+		return planCommitBlockedResponse(request, record.ID, "unsupported_plan_intent", "当前 Runtime 尚未支持提交该计划类型。"), nil
 	}
 }
 

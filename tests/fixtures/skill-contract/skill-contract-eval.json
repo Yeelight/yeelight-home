@@ -2,6 +2,27 @@
   "version": "0.1.0",
   "cases": [
     {
+      "id": "mixed-safe-configuration-single-batch-plan",
+      "utterance": "帮我创建书房，把主灯改名为书房主灯，再把它加入首页收藏",
+      "expectedIntent": "operation.batch.configure",
+      "mustUse": [
+        "confirmation_required",
+        "single_confirmation_batch",
+        "plan.commit",
+        "scripts/invoke"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token",
+        "multiple pending plans",
+        "direct_url",
+        "direct_header"
+      ]
+    },
+    {
       "id": "room-update-pending-plan",
       "utterance": "把客厅改成会客厅并设置默认网关",
       "expectedIntent": "room.update",
@@ -1653,6 +1674,66 @@
         "operationId",
         "Authorization",
         "Token"
+      ]
+    },
+    {
+      "id": "device-slot-create-pending-plan",
+      "utterance": "还没装灯，先给客厅预留两个黑色格栅灯槽位",
+      "expectedIntent": "device.slot.create",
+      "mustUse": [
+        "confirmation_required",
+        "plan.commit",
+        "scripts/invoke"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token",
+        "unsupported",
+        "不能凭空"
+      ]
+    },
+    {
+      "id": "lighting-design-import-slots-and-topology",
+      "utterance": "帮这个新家庭做完整照明设计：客厅一个吸顶灯两个格栅灯，卧室四个筒灯，相同类型自动成组，并先创建槽位",
+      "expectedIntent": "lighting.design.import",
+      "mustUse": [
+        "confirmation_required",
+        "plan.commit",
+        "scripts/invoke"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token",
+        "unsupported",
+        "不能凭空"
+      ]
+    },
+    {
+      "id": "lighting-design-import-product-selection",
+      "utterance": "帮我创建和设计一个家庭，客厅一个吸顶灯、2个黑色格栅灯、2个白色嵌入式射灯，主卧4个36°射灯和3个爱思系列筒射灯，卫生间一个夙夜版青空灯，先添加槽位并自动成组",
+      "expectedIntent": "lighting.design.import",
+      "mustUse": [
+        "scripts/product-select.mjs",
+        "materialCode",
+        "lighting.design.import",
+        "confirmation_required",
+        "scripts/invoke"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token",
+        "unsupported",
+        "不能凭空",
+        "无法创建槽位"
       ]
     }
   ]

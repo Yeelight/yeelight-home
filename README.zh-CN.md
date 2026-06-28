@@ -195,7 +195,11 @@ yeelight-home recommendation list --house-id <house-id> --json
 yeelight-home recommendation feedback --house-id <house-id> --params-json '{"recommendationId":"<id>","feedback":"cooldown","cooldownHours":24}' --json
 ```
 
-`memory remember` 会先生成本地待确认计划。确认提交后，Runtime 会把偏好写入本地数据文件，并可能生成一条基于偏好的待处理推荐。`recommendation list` 只返回 Runtime 本地生成或保存的推荐，不由模型临时编造。`accepted`、`dismissed`、`rejected` 和 `cooldown` 等反馈会被本地保存，并影响后续推荐展示。
+本地记忆和推荐默认对每个 profile + 家庭范围开启。`memory pause` 是明确的退出开关，`memory resume` 会重新开启本地学习。`memory remember` 会先生成本地待确认计划。确认提交后，Runtime 会把偏好写入本地数据文件，并可能生成一条基于偏好的待处理推荐。`recommendation list` 只返回 Runtime 本地生成或保存的推荐，不由模型临时编造。`accepted`、`dismissed`、`rejected` 和 `cooldown` 等反馈会被本地保存，并影响后续推荐展示。
+
+Runtime 不会把完整对话日志当作记忆保存。它只在用户明确要求保存偏好时，通过 `memory.remember` 生成待确认计划；确认提交后才写入本地偏好。对于“记住以后卧室默认柔和暖光”这类明确自然语言，Runtime 会保守提取偏好候选，但仍然必须走 `plan commit`。
+
+`pending_plans.json` 是短期安全确认和审计队列，不是永久会话历史库。Runtime 会自动压缩该文件：保留未过期可提交计划，短期保留已过期 pending 计划，近期保留已提交/已取消计划，默认最多保留 200 条记录。这样可以保持 `plan.commit` 和 `plan.cancel` 的查找规模可控，同时不破坏确认流程。
 
 默认本地数据目录是：
 

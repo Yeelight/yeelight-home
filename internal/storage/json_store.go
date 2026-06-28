@@ -65,10 +65,11 @@ type JSONStore struct {
 }
 
 type jsonDocument struct {
-	Version         int                    `json:"version"`
-	Consents        []ConsentRecord        `json:"consents"`
-	Preferences     []PreferenceRecord     `json:"preferences"`
-	Recommendations []RecommendationRecord `json:"recommendations"`
+	Version         int                       `json:"version"`
+	Consents        []ConsentRecord           `json:"consents"`
+	Preferences     []PreferenceRecord        `json:"preferences"`
+	Recommendations []RecommendationRecord    `json:"recommendations"`
+	Signals         []InteractionSignalRecord `json:"signals,omitempty"`
 }
 
 func NewJSONStore(path string) JSONStore {
@@ -157,19 +158,6 @@ func (store JSONStore) ListPreferences(profile string, houseID string) ([]Prefer
 	return result, nil
 }
 
-func (store JSONStore) Recommendation(profile string, houseID string, recommendationID string) (RecommendationRecord, bool, error) {
-	document, err := store.load()
-	if err != nil {
-		return RecommendationRecord{}, false, err
-	}
-	for _, record := range document.Recommendations {
-		if record.Profile == profile && record.HouseID == houseID && record.ID == recommendationID {
-			return record, true, nil
-		}
-	}
-	return RecommendationRecord{}, false, nil
-}
-
 func (store JSONStore) DeleteProfileHouse(profile string, houseID string) error {
 	document, err := store.load()
 	if err != nil {
@@ -178,90 +166,8 @@ func (store JSONStore) DeleteProfileHouse(profile string, houseID string) error 
 	document.Consents = filterConsents(document.Consents, profile, houseID)
 	document.Preferences = filterPreferences(document.Preferences, profile, houseID)
 	document.Recommendations = filterRecommendations(document.Recommendations, profile, houseID)
+	document.Signals = filterSignals(document.Signals, profile, houseID)
 	return store.save(document)
-}
-
-func (store JSONStore) SaveRecommendation(record RecommendationRecord) error {
-	if containsSensitiveKey(record.Type) || containsSensitiveKey(record.Explanation) || containsSensitiveKey(record.Evidence) {
-		return errors.New("recommendation must not contain token-like data")
-	}
-	if strings.TrimSpace(record.ID) == "" || strings.TrimSpace(record.Profile) == "" || strings.TrimSpace(record.HouseID) == "" {
-		return errors.New("recommendation id, profile and houseId are required")
-	}
-	if strings.TrimSpace(record.Status) == "" {
-		record.Status = "pending"
-	}
-	document, err := store.load()
-	if err != nil {
-		return err
-	}
-	replaced := false
-	for index, existing := range document.Recommendations {
-		if existing.ID == record.ID {
-			document.Recommendations[index] = record
-			replaced = true
-			break
-		}
-	}
-	if !replaced {
-		document.Recommendations = append(document.Recommendations, record)
-	}
-	return store.save(document)
-}
-
-func (store JSONStore) ListRecommendations(profile string, houseID string, now int64, limit int) ([]RecommendationRecord, error) {
-	document, err := store.load()
-	if err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
-		limit = 1
-	}
-	result := []RecommendationRecord{}
-	for _, record := range document.Recommendations {
-		if record.Profile != profile || record.HouseID != houseID || record.Status != "pending" {
-			continue
-		}
-		if record.CooldownUntil > now {
-			continue
-		}
-		result = append(result, record)
-		if len(result) >= limit {
-			break
-		}
-	}
-	return result, nil
-}
-
-func (store JSONStore) ApplyRecommendationFeedback(profile string, houseID string, recommendationID string, feedback RecommendationFeedback) (RecommendationRecord, error) {
-	if strings.TrimSpace(profile) == "" || strings.TrimSpace(houseID) == "" || strings.TrimSpace(recommendationID) == "" {
-		return RecommendationRecord{}, errors.New("profile, houseId and recommendation id are required")
-	}
-	if containsSensitiveKey(feedback.Status) {
-		return RecommendationRecord{}, errors.New("recommendation feedback must not contain token-like data")
-	}
-	document, err := store.load()
-	if err != nil {
-		return RecommendationRecord{}, err
-	}
-	for index, record := range document.Recommendations {
-		if record.Profile != profile || record.HouseID != houseID || record.ID != recommendationID {
-			continue
-		}
-		if strings.TrimSpace(feedback.Status) != "" {
-			record.Status = strings.TrimSpace(feedback.Status)
-		}
-		record.CooldownUntil = feedback.CooldownUntil
-		if feedback.UpdatedAt > 0 {
-			record.UpdatedAt = feedback.UpdatedAt
-		}
-		document.Recommendations[index] = record
-		if err := store.save(document); err != nil {
-			return RecommendationRecord{}, err
-		}
-		return record, nil
-	}
-	return RecommendationRecord{}, errors.New("recommendation not found")
 }
 
 func (store JSONStore) Export(profile string, houseID string) (map[string]any, error) {
@@ -281,6 +187,12 @@ func (store JSONStore) Export(profile string, houseID string) (map[string]any, e
 			recommendations = append(recommendations, record)
 		}
 	}
+	signals := []InteractionSignalRecord{}
+	for _, record := range document.Signals {
+		if record.Profile == profile && record.HouseID == houseID {
+			signals = append(signals, record)
+		}
+	}
 	consents := []ConsentRecord{}
 	for _, record := range document.Consents {
 		if record.Profile == profile && record.HouseID == houseID {
@@ -298,6 +210,7 @@ func (store JSONStore) Export(profile string, houseID string) (map[string]any, e
 		"consents":        consents,
 		"preferences":     preferences,
 		"recommendations": recommendations,
+		"signals":         signals,
 	}, nil
 }
 
@@ -331,6 +244,9 @@ func (store JSONStore) load() (jsonDocument, error) {
 	if document.Recommendations == nil {
 		document.Recommendations = []RecommendationRecord{}
 	}
+	if document.Signals == nil {
+		document.Signals = []InteractionSignalRecord{}
+	}
 	return document, nil
 }
 
@@ -355,6 +271,7 @@ func emptyDocument() jsonDocument {
 		Consents:        []ConsentRecord{},
 		Preferences:     []PreferenceRecord{},
 		Recommendations: []RecommendationRecord{},
+		Signals:         []InteractionSignalRecord{},
 	}
 }
 
@@ -399,17 +316,6 @@ func filterConsents(records []ConsentRecord, profile string, houseID string) []C
 
 func filterPreferences(records []PreferenceRecord, profile string, houseID string) []PreferenceRecord {
 	result := []PreferenceRecord{}
-	for _, record := range records {
-		if record.Profile == profile && record.HouseID == houseID {
-			continue
-		}
-		result = append(result, record)
-	}
-	return result
-}
-
-func filterRecommendations(records []RecommendationRecord, profile string, houseID string) []RecommendationRecord {
-	result := []RecommendationRecord{}
 	for _, record := range records {
 		if record.Profile == profile && record.HouseID == houseID {
 			continue

@@ -1200,13 +1200,15 @@ func TestMutatingConfigCommandsUseActiveProfileUnlessOverridden(t *testing.T) {
 func newTestApp(t *testing.T) *app {
 	t.Helper()
 	tokenStore := credential.NewMemoryStore()
-	return &app{
+	app := &app{
 		tokenStore:    tokenStore,
 		metadataStore: credential.NewFileMetadataStore(t.TempDir() + "/profiles.json"),
 		planStore:     plan.NewStore(t.TempDir() + "/pending_plans.json"),
 		memoryStore:   storage.NewJSONStore(t.TempDir() + "/memory.json"),
 		sleep:         func(context.Context, time.Duration) error { return nil },
 	}
+	app.configureMemoryPlanRecovery()
+	return app
 }
 
 type testQRClient struct {

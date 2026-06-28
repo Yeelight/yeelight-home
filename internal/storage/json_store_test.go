@@ -132,6 +132,48 @@ func TestJSONStoreListsRecommendationsWithCooldown(t *testing.T) {
 	}
 }
 
+func TestJSONStoreAggregatesInteractionSignals(t *testing.T) {
+	store := NewJSONStore(filepath.Join(t.TempDir(), "memory.json"))
+	record := InteractionSignalRecord{
+		ID:              "sig-1",
+		Profile:         "p",
+		HouseID:         "h",
+		SignalType:      "preference_hint",
+		SignalKey:       "light.brightness.adjust|room|客厅|brightness|prefer_dimmer",
+		ScopeType:       "room",
+		ScopeRef:        "客厅",
+		PreferenceType:  "brightness",
+		PreferenceValue: "prefer_dimmer",
+		Evidence:        "用户交互信号：客厅太亮了",
+		Count:           1,
+		FirstSeenAt:     10,
+		LastSeenAt:      10,
+	}
+	saved, err := store.SaveInteractionSignal(record)
+	if err != nil {
+		t.Fatalf("SaveInteractionSignal first error: %v", err)
+	}
+	if saved.Count != 1 || saved.FirstSeenAt != 10 {
+		t.Fatalf("first saved = %#v", saved)
+	}
+	record.LastSeenAt = 20
+	record.Evidence = "用户交互信号：客厅还是太亮"
+	saved, err = store.SaveInteractionSignal(record)
+	if err != nil {
+		t.Fatalf("SaveInteractionSignal second error: %v", err)
+	}
+	if saved.Count != 2 || saved.FirstSeenAt != 10 || saved.LastSeenAt != 20 {
+		t.Fatalf("second saved = %#v", saved)
+	}
+	signals, err := store.ListInteractionSignals("p", "h")
+	if err != nil {
+		t.Fatalf("ListInteractionSignals error: %v", err)
+	}
+	if len(signals) != 1 || signals[0].Count != 2 {
+		t.Fatalf("signals = %#v", signals)
+	}
+}
+
 func TestJSONStoreAppliesRecommendationFeedback(t *testing.T) {
 	store := NewJSONStore(filepath.Join(t.TempDir(), "memory.json"))
 	record := RecommendationRecord{ID: "rec-1", Profile: "p", HouseID: "h", Type: "scene", Explanation: "可用", Evidence: "e1", Status: "pending", CreatedAt: 1, UpdatedAt: 1}

@@ -196,7 +196,11 @@ yeelight-home recommendation list --house-id <house-id> --json
 yeelight-home recommendation feedback --params-json '{"recommendationId":"<id>","feedback":"cooldown","cooldownHours":24}' --json
 ```
 
-`memory remember` creates a local confirmation plan. After `plan commit`, the Runtime stores the preference locally and may materialize one preference-based pending recommendation. `recommendation list` returns only Runtime-backed recommendations. Feedback such as `accepted`, `dismissed`, `rejected`, or `cooldown` is stored locally and respected by later recommendation reads.
+Local memory and recommendations are enabled by default for every profile and home scope. `memory pause` is the explicit opt-out switch, and `memory resume` turns local learning back on. `memory remember` creates a local confirmation plan. After `plan commit`, the Runtime stores the preference locally and may materialize one preference-based pending recommendation. `recommendation list` returns only Runtime-backed recommendations. Feedback such as `accepted`, `dismissed`, `rejected`, or `cooldown` is stored locally and respected by later recommendation reads.
+
+The Runtime does not store full conversation logs as memory. It stores only explicit local preferences after confirmation, and it can extract conservative preference candidates from utterances such as "remember that I prefer warm dim light in the bedroom" when the Skill sends `memory.remember`.
+
+Pending plans are a short-lived safety and audit queue, not a permanent history database. The Runtime automatically compacts `pending_plans.json`: active unexpired plans are kept, expired pending plans are kept briefly, terminal committed/canceled plans are kept for recent audit, and the default stored-plan cap is 200 records. This keeps `plan.commit`/`plan.cancel` lookups bounded while preserving the current confirmation flow.
 
 ### `doctor`
 

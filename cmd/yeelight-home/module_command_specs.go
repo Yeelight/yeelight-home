@@ -48,6 +48,7 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 		"move-room-batch": {Intent: "device.move_room.batch", Utterance: "批量移动设备到房间"},
 		"remove":          {Intent: "device.remove", Utterance: "移除设备", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
 		"rename":          {Intent: "device.rename", Utterance: "重命名设备", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
+		"slot-create":     {Intent: "device.slot.create", Utterance: "创建设备预留槽位"},
 		"state":           {Intent: "state.query", Utterance: "查询设备状态", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
 		"storage":         {Intent: "device.storage.get", Utterance: "查看设备素材存储", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
 		"unbind":          {Intent: "device.unbind", Utterance: "解绑设备", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
@@ -128,6 +129,7 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 	"lighting": {
 		"apply":      {Intent: "lighting.design.apply", Utterance: "应用灯光设计方案", TargetIDKeys: []string{"plan-id", "planId", "id"}},
 		"experience": {Intent: "lighting.experience.apply", Utterance: "应用灯光体验", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
+		"import":     {Intent: "lighting.design.import", Utterance: "导入照明设计并预建设备槽位"},
 		"plan":       {Intent: "lighting.design.plan", Utterance: "规划灯光设计"},
 	},
 	"memory": {
@@ -146,6 +148,9 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 	"node": {
 		"property-config": {Intent: "node.property_config.get", Utterance: "查看节点属性配置", TargetIDKeys: []string{"node-id", "nodeId", "id"}},
 		"sorted-devices":  {Intent: "node.sorted_device.list", Utterance: "查看节点排序设备"},
+	},
+	"operation": {
+		"batch-configure": {Intent: "operation.batch.configure", Utterance: "批量配置添加或修改操作"},
 	},
 	"knob": {
 		"configure": {Intent: "knob.configure", Utterance: "配置旋钮", EntityType: "device", TargetIDKeys: []string{"knob-id", "knobId", "device-id", "deviceId", "id"}, TargetName: true},

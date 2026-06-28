@@ -1,7 +1,6 @@
 package plan
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -22,6 +21,10 @@ const (
 
 	RiskR2 = "R2"
 	RiskR3 = "R3"
+
+	DefaultTerminalRetention       = 7 * 24 * time.Hour
+	DefaultExpiredPendingRetention = 24 * time.Hour
+	DefaultMaxStoredPlans          = 200
 )
 
 type Record struct {
@@ -47,8 +50,12 @@ type Record struct {
 }
 
 type Store struct {
-	path string
-	now  func() time.Time
+	path                    string
+	now                     func() time.Time
+	terminalRetention       time.Duration
+	expiredPendingRetention time.Duration
+	maxStoredPlans          int
+	beforeCompact           func([]Record) error
 }
 
 type document struct {
@@ -57,11 +64,29 @@ type document struct {
 }
 
 func NewStore(path string) Store {
-	return Store{path: path, now: time.Now}
+	return Store{
+		path:                    path,
+		now:                     time.Now,
+		terminalRetention:       DefaultTerminalRetention,
+		expiredPendingRetention: DefaultExpiredPendingRetention,
+		maxStoredPlans:          DefaultMaxStoredPlans,
+	}
 }
 
 func (store Store) WithClock(now func() time.Time) Store {
 	store.now = now
+	return store
+}
+
+func (store Store) WithRetention(terminalRetention time.Duration, expiredPendingRetention time.Duration, maxStoredPlans int) Store {
+	store.terminalRetention = terminalRetention
+	store.expiredPendingRetention = expiredPendingRetention
+	store.maxStoredPlans = maxStoredPlans
+	return store
+}
+
+func (store Store) WithBeforeCompact(hook func([]Record) error) Store {
+	store.beforeCompact = hook
 	return store
 }
 
@@ -158,6 +183,10 @@ func (store Store) Save(record Record) error {
 	if !replaced {
 		doc.Plans = append(doc.Plans, record)
 	}
+	if err := store.runBeforeCompact(doc.Plans); err != nil {
+		return err
+	}
+	doc.Plans = store.compact(doc.Plans)
 	return store.save(doc)
 }
 
@@ -170,12 +199,22 @@ func (store Store) Load(id string) (Record, bool, error) {
 	if err != nil {
 		return Record{}, false, err
 	}
-	for _, record := range doc.Plans {
-		if record.ID == trimmed {
-			return record, true, nil
+	for index := len(doc.Plans) - 1; index >= 0; index-- {
+		if doc.Plans[index].ID == trimmed {
+			return doc.Plans[index], true, nil
 		}
 	}
 	return Record{}, false, nil
+}
+
+func (store Store) List() ([]Record, error) {
+	doc, err := store.load()
+	if err != nil {
+		return nil, err
+	}
+	records := make([]Record, len(doc.Plans))
+	copy(records, doc.Plans)
+	return records, nil
 }
 
 func (store Store) MarkCommitted(id string) (Record, error) {
@@ -323,51 +362,4 @@ func (store Store) clock() time.Time {
 		return time.Now()
 	}
 	return store.now()
-}
-
-func randomID() (string, error) {
-	bytes := make([]byte, 12)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("generate plan id: %w", err)
-	}
-	return "plan_" + hex.EncodeToString(bytes), nil
-}
-
-func compactStrings(values []string) []string {
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
-}
-
-func containsSensitive(value any) bool {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, nested := range typed {
-			if tokenLike(key) || containsSensitive(nested) {
-				return true
-			}
-		}
-	case []any:
-		for _, nested := range typed {
-			if containsSensitive(nested) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func tokenLike(value string) bool {
-	normalized := strings.ToLower(value)
-	for _, forbidden := range []string{"token", "secret", "authorization", "cookie"} {
-		if strings.Contains(normalized, forbidden) {
-			return true
-		}
-	}
-	return false
 }

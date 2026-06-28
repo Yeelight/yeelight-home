@@ -248,6 +248,8 @@ func isKnownIntent(intent string) bool {
 		"diagnose.automation",
 		"lighting.design.plan",
 		"lighting.design.apply",
+		"lighting.design.import",
+		"device.slot.create",
 		"memory.remember",
 		"memory.list",
 		"memory.forget",
@@ -255,6 +257,7 @@ func isKnownIntent(intent string) bool {
 		"memory.resume",
 		"recommendation.list",
 		"recommendation.feedback",
+		"operation.batch.configure",
 		"plan.commit",
 		"plan.cancel",
 		"execution.undo":

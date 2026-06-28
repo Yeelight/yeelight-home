@@ -60,7 +60,7 @@ func (app *app) invoke(ctx context.Context, request contract.Request) (contract.
 	return app.invokeWithFlags(ctx, request, flags)
 }
 
-func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, flags cliFlags) (contract.Response, error) {
+func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, flags cliFlags) (response contract.Response, err error) {
 	if flags.values == nil {
 		flags.values = map[string]string{}
 	}
@@ -90,6 +90,14 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 	houseID := context.HouseID
 	endpoint := context.Endpoint
 	accessToken := context.AccessToken
+	defer func() {
+		if err != nil {
+			return
+		}
+		if observeErr := app.observeMemorySignal(request, profile, houseID, response); observeErr != nil {
+			err = observeErr
+		}
+	}()
 	switch request.Intent {
 	case "account.info":
 		return app.invokeAccountInfo(ctx, request, endpoint, accessToken, clientID)
@@ -524,6 +532,8 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 		return app.invokeLightingDesignPlan(ctx, request, endpoint, houseID, accessToken, clientID)
 	case "lighting.design.apply":
 		return app.invokeLightingDesignApplyPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "lighting.design.import", "device.slot.create":
+		return app.invokeLightingDesignImportPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "room.create":
 		return app.invokeRoomCreatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "area.create":
@@ -554,6 +564,8 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 		return app.invokeRecommendationList(request, profile, houseID)
 	case "recommendation.feedback":
 		return app.invokeRecommendationFeedback(request, profile, houseID)
+	case "operation.batch.configure":
+		return app.invokeOperationBatchConfigurePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "plan.commit":
 		return app.invokePlanCommit(ctx, request, endpoint, profile, region, accessToken, clientID)
 	case "plan.cancel":
