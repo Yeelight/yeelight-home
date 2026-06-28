@@ -147,7 +147,7 @@ func routeExperienceLightAction(app *app, ctx context.Context, request contract.
 	case "light.color.set":
 		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, authorization, clientID, lightColorSpec())
 	default:
-		return experienceBlockedResponse(request, "experience_action_not_reviewed", "该体验动作尚未通过 Runtime 安全包装审核。"), nil
+		return experienceBlockedResponse(request, "experience_action_not_supported", "该体验动作尚未纳入当前 Runtime 语义能力。"), nil
 	}
 }
 

@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
 func operationBatchStepResult(index int, step operationBatchStep, response contract.Response) map[string]any {
@@ -21,12 +21,12 @@ func operationBatchStepResult(index int, step operationBatchStep, response contr
 	return result
 }
 
-func operationBatchCommitResponse(request contract.Request, record plan.Record, results []any, apiCalls int) contract.Response {
+func operationBatchExecuteResponse(request contract.Request, record operation.Prepared, results []any, apiCalls int) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     "已按一次授权提交并验证批量配置计划。",
+		UserMessage:     "已直接执行并验证批量配置。",
 		Result: map[string]any{
 			"region":           record.Region,
 			"houseId":          record.HouseID,
@@ -36,13 +36,11 @@ func operationBatchCommitResponse(request contract.Request, record plan.Record, 
 			"persistentWrites": true,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "operation-batch-configure-commit",
+		TraceID:  "operation-batch-configure-execute",
 		Metrics: map[string]any{
 			"apiCalls":  apiCalls,
 			"cacheHits": 0,
@@ -50,12 +48,12 @@ func operationBatchCommitResponse(request contract.Request, record plan.Record, 
 	}
 }
 
-func operationBatchPartialResponse(request contract.Request, record plan.Record, completed []any, failed operationBatchStep, response contract.Response, apiCalls int) contract.Response {
+func operationBatchPartialResponse(request contract.Request, record operation.Prepared, completed []any, failed operationBatchStep, response contract.Response, apiCalls int) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "partial",
-		UserMessage:     "批量配置计划已部分执行；其中一个步骤未成功，后续步骤未继续执行。",
+		UserMessage:     "批量配置已部分执行；其中一个步骤未成功，后续步骤未继续执行。",
 		Result: map[string]any{
 			"region":         record.Region,
 			"houseId":        record.HouseID,
@@ -72,12 +70,10 @@ func operationBatchPartialResponse(request contract.Request, record plan.Record,
 			"persistentWrites": true,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "partial",
+			"intent": record.Intent,
+			"status": "partial",
 		},
-		Warnings: []string{"operation_batch_partial_commit"},
+		Warnings: []string{"operation_batch_partial_execute"},
 		TraceID:  "operation-batch-configure-partial",
 		Metrics: map[string]any{
 			"apiCalls":  apiCalls + responseMetricInt(response, "apiCalls"),

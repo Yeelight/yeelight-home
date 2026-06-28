@@ -32,7 +32,7 @@ Description:
 
 Execution model:
   This shortcut builds the same Runtime request as invoke --stdin.
-  Reads execute immediately. Risky writes/deletes return confirmation_required with a planId.
+  Reads and semantic writes execute directly. Use --dry-run or --preview-only when a caller wants a no-write preview before asking for its own confirmation.
 
 Common flags:
   --json                 Print the full Runtime JSON response.
@@ -80,7 +80,7 @@ func moduleActionFlagHelp(resource string, action string, spec moduleCommandSpec
 	case "lighting.design.import":
 		lines = append(lines, "  --params-json <json>   Supports rooms, items/slots/devices, autoGroup, scenes, automations, clearAll/overwrite. Design slots are enriched with built-in product candidates when possible.")
 	case "operation.batch.configure":
-		lines = append(lines, "  --params-json <json>   Requires operations[].intent and operations[].parameters. Only allowlisted add/update/configure steps are accepted; delete/unbind/member/approval/reset actions stay separate.")
+		lines = append(lines, "  --params-json <json>   Requires operations[].intent and operations[].parameters. Only allowlisted add/update/configure steps are accepted; delete/unbind/member/reset actions stay separate.")
 	case "device.move":
 		lines = append(lines, "  --room-id <id>")
 	case "room.search", "group.search", "scene.search", "geo_area.search":
@@ -104,8 +104,6 @@ func moduleActionExamples(resource string, action string, spec moduleCommandSpec
 		return "  yeelight-home scene execute --scene-id <id> --json\n"
 	case "automation.enable":
 		return "  yeelight-home automation enable --automation-id <id> --json\n"
-	case "plan.commit":
-		return "  yeelight-home plan commit --plan-id <id> --json\n"
 	case "device.detail.get":
 		return "  yeelight-home device detail --device-id <id> --json\n"
 	case "room.detail.get":

@@ -35,7 +35,7 @@ yeelight-home auth login --qr
 
 The default region is `cn`. Use `--region sg`, `--region us`, or `--region eu` when needed.
 
-If QR login is not possible but you have an approved token, import it locally without putting it in shell history:
+If QR login is not possible but you have an authorized token, import it locally without putting it in shell history:
 
 ```sh
 printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn

@@ -5,7 +5,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
 func configureClarificationResponse(request contract.Request, reason string, acceptedFields []string) contract.Response {
@@ -27,45 +27,37 @@ func configureClarificationResponse(request contract.Request, reason string, acc
 	}
 }
 
-func pendingPlanResponse(request contract.Request, record plan.Record, entities api.EntityListResult) contract.Response {
-	return pendingPlanResponseWithPreview(request, record, entities, nil, 0)
+func executionPreviewResponse(request contract.Request, record operation.Prepared, entities api.EntityListResult) contract.Response {
+	return executionPreviewResponseWithDetails(request, record, entities, nil, 0)
 }
 
-func pendingPlanResponseWithPreview(request contract.Request, record plan.Record, entities api.EntityListResult, preview map[string]any, extraAPICalls int) contract.Response {
-	payloadPreview := pendingPlanPayloadPreview(record)
+func executionPreviewResponseWithDetails(request contract.Request, record operation.Prepared, entities api.EntityListResult, preview map[string]any, extraAPICalls int) contract.Response {
+	payloadPreview := executionPayloadPreview(record)
 	if len(preview) > 0 {
 		payloadPreview["semanticPreview"] = preview
 	}
-	confirmation := map[string]any{
-		"planId":       record.ID,
-		"planHash":     record.Hash,
-		"risk":         record.Risk,
-		"intent":       record.Intent,
-		"summary":      record.Summary,
-		"expiresAt":    record.ExpiresAt,
-		"commitIntent": "plan.commit",
-		"commitShape": map[string]any{
-			"parameters": map[string]any{
-				"planId": record.ID,
-			},
-		},
+	previewPayload := map[string]any{
+		"risk":           record.Risk,
+		"intent":         record.Intent,
+		"summary":        record.Summary,
+		"executionModel": "ordinary_invoke_executes_directly",
 		"preconditions":  record.Preconditions,
 		"payloadPreview": payloadPreview,
 	}
-	if record.ApprovalRequired {
-		confirmation["approvalRequired"] = true
-		confirmation["approvalMode"] = "local_terminal_approve"
-		confirmation["approvalChallenge"] = record.ApprovalChallenge
-		confirmation["approveCommand"] = fmt.Sprintf("yeelight-home approve --json --plan-id %s --challenge %q", record.ID, record.ApprovalChallenge)
+	if record.Risk == operation.RiskR3 {
+		previewPayload["destructive"] = true
 	}
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
-		Status:          "confirmation_required",
-		UserMessage:     "已生成待确认计划。确认后我会只提交 planId，由本地 Runtime 重新校验后执行。",
-		Confirmation:    confirmation,
-		Warnings:        []string{},
-		TraceID:         "pending-plan-created",
+		Status:          "success",
+		UserMessage:     "已完成语义校验。dry-run 只返回预览；普通 invoke 会直接执行。",
+		Result: map[string]any{
+			"preparedForDirectExecution": true,
+			"preview":                    previewPayload,
+		},
+		Warnings: []string{},
+		TraceID:  "invoke-preview",
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(entities) + extraAPICalls,
 			"cacheHits": 0,
@@ -73,9 +65,9 @@ func pendingPlanResponseWithPreview(request contract.Request, record plan.Record
 	}
 }
 
-func pendingPlanPayloadPreview(record plan.Record) map[string]any {
+func executionPayloadPreview(record operation.Prepared) map[string]any {
 	preview := map[string]any{}
-	if plan.IsAccountScope(record.HouseID) {
+	if operation.IsAccountScope(record.HouseID) {
 		preview["scope"] = "account"
 	} else {
 		preview["houseId"] = record.HouseID
@@ -114,7 +106,7 @@ func previewList(value any, limit int) any {
 	}
 }
 
-func homeOrganizationCommitResponse(request contract.Request, record plan.Record, result api.HomeOrganizationResult) contract.Response {
+func homeOrganizationExecuteResponse(request contract.Request, record operation.Prepared, result api.HomeOrganizationResult) contract.Response {
 	userMessage := "已提交并验证首页组织配置。"
 	warnings := []string{}
 	if !result.Verified {
@@ -137,13 +129,11 @@ func homeOrganizationCommitResponse(request contract.Request, record plan.Record
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: warnings,
-		TraceID:  "home-organization-commit",
+		TraceID:  "home-organization-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -174,12 +164,12 @@ func homeCreateAlreadyExistsResponse(request contract.Request, house api.HouseSu
 	}
 }
 
-func homeCreateCommitResponse(request contract.Request, record plan.Record, result api.HomeCreateResult) contract.Response {
+func homeCreateExecuteResponse(request contract.Request, record operation.Prepared, result api.HomeCreateResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     "已提交并验证家庭创建计划。",
+		UserMessage:     "已提交并验证家庭创建操作。",
 		Result: map[string]any{
 			"region":     result.Region,
 			"houseId":    result.HouseID,
@@ -189,13 +179,11 @@ func homeCreateCommitResponse(request contract.Request, record plan.Record, resu
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "home-create-commit",
+		TraceID:  "home-create-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -203,17 +191,15 @@ func homeCreateCommitResponse(request contract.Request, record plan.Record, resu
 	}
 }
 
-func homeMemberCommitResponse(request contract.Request, record plan.Record, result api.HomeMemberResult) contract.Response {
+func homeMemberExecuteResponse(request contract.Request, record operation.Prepared, result api.HomeMemberResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
 		UserMessage:     "已完成家庭成员操作，并通过成员列表回读验证。",
 		Result: map[string]any{
-			"planId":           record.ID,
 			"intent":           record.Intent,
 			"risk":             record.Risk,
-			"localApproval":    record.ApprovalRequired,
 			"region":           result.Region,
 			"houseId":          result.HouseID,
 			"capability":       result.Capability,
@@ -223,7 +209,7 @@ func homeMemberCommitResponse(request contract.Request, record plan.Record, resu
 			"persistentWrites": true,
 		},
 		Warnings: []string{},
-		TraceID:  "home-member-commit",
+		TraceID:  "home-member-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -231,7 +217,7 @@ func homeMemberCommitResponse(request contract.Request, record plan.Record, resu
 	}
 }
 
-func homeLockCommitResponse(request contract.Request, record plan.Record, result api.HomeLockResult) contract.Response {
+func homeLockExecuteResponse(request contract.Request, record operation.Prepared, result api.HomeLockResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -246,13 +232,11 @@ func homeLockCommitResponse(request contract.Request, record plan.Record, result
 			"verifiedBy":  result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "home-lock-commit",
+		TraceID:  "home-lock-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -260,7 +244,7 @@ func homeLockCommitResponse(request contract.Request, record plan.Record, result
 	}
 }
 
-func entityBatchRenameCommitResponse(request contract.Request, record plan.Record, result api.EntityBatchRenameResult) contract.Response {
+func entityBatchRenameExecuteResponse(request contract.Request, record operation.Prepared, result api.EntityBatchRenameResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -275,13 +259,11 @@ func entityBatchRenameCommitResponse(request contract.Request, record plan.Recor
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "entity-batch-rename-commit",
+		TraceID:  "entity-batch-rename-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -289,7 +271,7 @@ func entityBatchRenameCommitResponse(request contract.Request, record plan.Recor
 	}
 }
 
-func homeSpaceConfigurationCommitResponse(request contract.Request, record plan.Record, result api.HomeSpaceConfigurationResult) contract.Response {
+func homeSpaceConfigurationExecuteResponse(request contract.Request, record operation.Prepared, result api.HomeSpaceConfigurationResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -304,13 +286,11 @@ func homeSpaceConfigurationCommitResponse(request contract.Request, record plan.
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "home-space-configuration-commit",
+		TraceID:  "home-space-configuration-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -318,7 +298,7 @@ func homeSpaceConfigurationCommitResponse(request contract.Request, record plan.
 	}
 }
 
-func lightingDesignApplyCommitResponse(request contract.Request, record plan.Record, entities api.EntityListResult, results []any, apiCalls int) contract.Response {
+func lightingDesignApplyExecuteResponse(request contract.Request, record operation.Prepared, entities api.EntityListResult, results []any, apiCalls int) contract.Response {
 	allVerified := true
 	for _, item := range results {
 		row, ok := item.(map[string]any)
@@ -328,7 +308,7 @@ func lightingDesignApplyCommitResponse(request contract.Request, record plan.Rec
 		}
 	}
 	status := "success"
-	traceID := "lighting-design-apply-commit"
+	traceID := "lighting-design-apply-execute"
 	warnings := append([]string{}, entities.Warnings...)
 	var responseError *contract.Error
 	if !allVerified {
@@ -344,7 +324,7 @@ func lightingDesignApplyCommitResponse(request contract.Request, record plan.Rec
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          status,
-		UserMessage:     "已提交受限照明设计应用计划，并完成设备状态验证。",
+		UserMessage:     "已提交受限照明设计应用操作，并完成设备状态验证。",
 		Result: map[string]any{
 			"region":           entities.Region,
 			"houseId":          record.HouseID,
@@ -356,10 +336,8 @@ func lightingDesignApplyCommitResponse(request contract.Request, record plan.Rec
 			"verified":         allVerified,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: warnings,
 		TraceID:  traceID,
@@ -371,7 +349,7 @@ func lightingDesignApplyCommitResponse(request contract.Request, record plan.Rec
 	}
 }
 
-func automationStatusCommitResponse(request contract.Request, record plan.Record, result api.AutomationStatusResult) contract.Response {
+func automationStatusExecuteResponse(request contract.Request, record operation.Prepared, result api.AutomationStatusResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -389,13 +367,11 @@ func automationStatusCommitResponse(request contract.Request, record plan.Record
 			"verifiedBy":   result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "automation-status-commit",
+		TraceID:  "automation-status-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -414,7 +390,7 @@ func automationStatusLabel(status string) string {
 	}
 }
 
-func automationUpdateCommitResponse(request contract.Request, record plan.Record, result api.AutomationUpdateResult) contract.Response {
+func automationUpdateExecuteResponse(request contract.Request, record operation.Prepared, result api.AutomationUpdateResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -430,13 +406,11 @@ func automationUpdateCommitResponse(request contract.Request, record plan.Record
 			"verifiedBy":   result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "automation-update-commit",
+		TraceID:  "automation-update-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -444,7 +418,7 @@ func automationUpdateCommitResponse(request contract.Request, record plan.Record
 	}
 }
 
-func sceneUpdateCommitResponse(request contract.Request, record plan.Record, result api.SceneUpdateResult) contract.Response {
+func sceneUpdateExecuteResponse(request contract.Request, record operation.Prepared, result api.SceneUpdateResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -459,13 +433,11 @@ func sceneUpdateCommitResponse(request contract.Request, record plan.Record, res
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "scene-update-commit",
+		TraceID:  "scene-update-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -473,7 +445,7 @@ func sceneUpdateCommitResponse(request contract.Request, record plan.Record, res
 	}
 }
 
-func metadataDeleteCommitResponse(request contract.Request, record plan.Record, result api.MetadataDeleteResult) contract.Response {
+func metadataDeleteExecuteResponse(request contract.Request, record operation.Prepared, result api.MetadataDeleteResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -490,13 +462,11 @@ func metadataDeleteCommitResponse(request contract.Request, record plan.Record, 
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "metadata-delete-commit",
+		TraceID:  "metadata-delete-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -504,7 +474,7 @@ func metadataDeleteCommitResponse(request contract.Request, record plan.Record, 
 	}
 }
 
-func metadataBatchDeleteCommitResponse(request contract.Request, record plan.Record, result api.MetadataBatchDeleteResult) contract.Response {
+func metadataBatchDeleteExecuteResponse(request contract.Request, record operation.Prepared, result api.MetadataBatchDeleteResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -521,13 +491,11 @@ func metadataBatchDeleteCommitResponse(request contract.Request, record plan.Rec
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "metadata-batch-delete-commit",
+		TraceID:  "metadata-batch-delete-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -535,33 +503,29 @@ func metadataBatchDeleteCommitResponse(request contract.Request, record plan.Rec
 	}
 }
 
-func destructiveDeleteCommitResponse(request contract.Request, record plan.Record, result api.DestructiveDeleteResult) contract.Response {
+func destructiveDeleteExecuteResponse(request contract.Request, record operation.Prepared, result api.DestructiveDeleteResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
 		UserMessage:     "已提交并验证高影响删除操作。",
 		Result: map[string]any{
-			"region":        result.Region,
-			"houseId":       result.HouseID,
-			"capability":    result.Capability,
-			"entityType":    result.EntityType,
-			"entityId":      result.EntityID,
-			"name":          result.Name,
-			"risk":          record.Risk,
-			"localApproval": true,
-			"verified":      result.Verified,
-			"verifiedBy":    result.VerifiedBy,
+			"region":     result.Region,
+			"houseId":    result.HouseID,
+			"capability": result.Capability,
+			"entityType": result.EntityType,
+			"entityId":   result.EntityID,
+			"name":       result.Name,
+			"risk":       record.Risk,
+			"verified":   result.Verified,
+			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":     record.ID,
-			"planHash":   record.Hash,
-			"intent":     record.Intent,
-			"status":     "committed",
-			"approvedAt": record.ApprovedAt,
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "destructive-delete-commit",
+		TraceID:  "destructive-delete-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -569,17 +533,15 @@ func destructiveDeleteCommitResponse(request contract.Request, record plan.Recor
 	}
 }
 
-func deviceUnbindCommitResponse(request contract.Request, record plan.Record, result api.DeviceUnbindResult) contract.Response {
+func deviceUnbindExecuteResponse(request contract.Request, record operation.Prepared, result api.DeviceUnbindResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
 		UserMessage:     "已完成设备解绑，并通过实体列表回读验证。",
 		Result: map[string]any{
-			"planId":           record.ID,
 			"intent":           record.Intent,
 			"risk":             record.Risk,
-			"localApproval":    record.ApprovalRequired,
 			"region":           result.Region,
 			"houseId":          result.HouseID,
 			"deviceId":         result.DeviceID,
@@ -591,7 +553,7 @@ func deviceUnbindCommitResponse(request contract.Request, record plan.Record, re
 			"persistentWrites": true,
 		},
 		Warnings: []string{},
-		TraceID:  "device-unbind-commit",
+		TraceID:  "device-unbind-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -599,7 +561,7 @@ func deviceUnbindCommitResponse(request contract.Request, record plan.Record, re
 	}
 }
 
-func spaceOrganizationCommitResponse(request contract.Request, record plan.Record, result api.SpaceOrganizationResult) contract.Response {
+func spaceOrganizationExecuteResponse(request contract.Request, record operation.Prepared, result api.SpaceOrganizationResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -617,13 +579,11 @@ func spaceOrganizationCommitResponse(request contract.Request, record plan.Recor
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "space-organization-commit",
+		TraceID:  "space-organization-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -631,14 +591,13 @@ func spaceOrganizationCommitResponse(request contract.Request, record plan.Recor
 	}
 }
 
-func gatewayConfigurationCommitResponse(request contract.Request, record plan.Record, result api.GatewayConfigurationResult) contract.Response {
+func gatewayConfigurationExecuteResponse(request contract.Request, record operation.Prepared, result api.GatewayConfigurationResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
 		UserMessage:     "已更新网关配置，并通过网关详情回读验证。",
 		Result: map[string]any{
-			"planId":           record.ID,
 			"intent":           record.Intent,
 			"risk":             record.Risk,
 			"region":           result.Region,
@@ -651,7 +610,7 @@ func gatewayConfigurationCommitResponse(request contract.Request, record plan.Re
 			"persistentWrites": true,
 		},
 		Warnings: []string{},
-		TraceID:  "gateway-configuration-commit",
+		TraceID:  "gateway-configuration-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -659,7 +618,7 @@ func gatewayConfigurationCommitResponse(request contract.Request, record plan.Re
 	}
 }
 
-func spaceBatchOrganizationCommitResponse(request contract.Request, record plan.Record, result api.SpaceBatchOrganizationResult) contract.Response {
+func spaceBatchOrganizationExecuteResponse(request contract.Request, record operation.Prepared, result api.SpaceBatchOrganizationResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -674,13 +633,11 @@ func spaceBatchOrganizationCommitResponse(request contract.Request, record plan.
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "space-batch-organization-commit",
+		TraceID:  "space-batch-organization-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -688,7 +645,7 @@ func spaceBatchOrganizationCommitResponse(request contract.Request, record plan.
 	}
 }
 
-func panelConfigurationCommitResponse(request contract.Request, record plan.Record, result api.PanelConfigurationResult) contract.Response {
+func panelConfigurationExecuteResponse(request contract.Request, record operation.Prepared, result api.PanelConfigurationResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -703,13 +660,11 @@ func panelConfigurationCommitResponse(request contract.Request, record plan.Reco
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "panel-configuration-commit",
+		TraceID:  "panel-configuration-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -761,7 +716,7 @@ func metadataCreateAlreadyExistsResponse(request contract.Request, entities api.
 	}
 }
 
-func roomCreateCommitResponse(request contract.Request, record plan.Record, result api.RoomCreateResult) contract.Response {
+func roomCreateExecuteResponse(request contract.Request, record operation.Prepared, result api.RoomCreateResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -777,13 +732,11 @@ func roomCreateCommitResponse(request contract.Request, record plan.Record, resu
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "room-create-commit",
+		TraceID:  "room-create-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -791,7 +744,7 @@ func roomCreateCommitResponse(request contract.Request, record plan.Record, resu
 	}
 }
 
-func metadataCreateCommitResponse(request contract.Request, record plan.Record, result api.MetadataCreateResult, label string) contract.Response {
+func metadataCreateExecuteResponse(request contract.Request, record operation.Prepared, result api.MetadataCreateResult, label string) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
@@ -808,13 +761,11 @@ func metadataCreateCommitResponse(request contract.Request, record plan.Record, 
 			"verifiedBy": result.VerifiedBy,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: []string{},
-		TraceID:  "metadata-create-commit",
+		TraceID:  "metadata-create-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
@@ -822,60 +773,37 @@ func metadataCreateCommitResponse(request contract.Request, record plan.Record, 
 	}
 }
 
-func planCommitBlockedResponse(request contract.Request, planID string, code string, message string) contract.Response {
+func executionBlockedResponse(request contract.Request, code string, message string) contract.Response {
+	return executionBlockedResponseWithResult(request, code, message, nil)
+}
+
+func executionVerifyBlockedResponse(request contract.Request, record operation.Prepared, verifyErr error) contract.Response {
+	code, safeNextStep := executionVerifyCode(verifyErr)
+	result := map[string]any{
+		"intent": record.Intent,
+		"recovery": map[string]any{
+			"suggestedIntent": record.Intent,
+			"safeNextStep":    safeNextStep,
+			"canRegenerate":   true,
+			"safeToRetry":     false,
+		},
+	}
+	return executionBlockedResponseWithResult(request, code, verifyErr.Error(), result)
+}
+
+func executionBlockedResponseWithResult(request contract.Request, code string, message string, extra map[string]any) contract.Response {
+	result := map[string]any{}
+	for key, value := range extra {
+		result[key] = value
+	}
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "blocked",
 		UserMessage:     message,
-		Result: map[string]any{
-			"planId": planID,
-		},
-		Warnings: []string{code},
-		TraceID:  "plan-commit-blocked",
-		Metrics: map[string]any{
-			"apiCalls":  0,
-			"cacheHits": 0,
-		},
-		Error: &contract.Error{
-			Code:    code,
-			Message: message,
-		},
-	}
-}
-
-func planCancelResponse(request contract.Request, record plan.Record) contract.Response {
-	return contract.Response{
-		ContractVersion: contract.Version,
-		RequestID:       request.RequestID,
-		Status:          "success",
-		UserMessage:     "已取消本地待确认计划。",
-		Result: map[string]any{
-			"planId":     record.ID,
-			"intent":     record.Intent,
-			"status":     record.Status,
-			"canceledAt": record.CanceledAt,
-		},
-		Warnings: []string{},
-		TraceID:  "plan-cancel-local",
-		Metrics: map[string]any{
-			"apiCalls":  0,
-			"cacheHits": 0,
-		},
-	}
-}
-
-func planCancelBlockedResponse(request contract.Request, planID string, code string, message string) contract.Response {
-	return contract.Response{
-		ContractVersion: contract.Version,
-		RequestID:       request.RequestID,
-		Status:          "blocked",
-		UserMessage:     message,
-		Result: map[string]any{
-			"planId": planID,
-		},
-		Warnings: []string{code},
-		TraceID:  "plan-cancel-blocked",
+		Result:          result,
+		Warnings:        []string{code},
+		TraceID:         "execution-blocked",
 		Metrics: map[string]any{
 			"apiCalls":  0,
 			"cacheHits": 0,

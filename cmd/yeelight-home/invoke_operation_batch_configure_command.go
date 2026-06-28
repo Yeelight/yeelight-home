@@ -3,14 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
 const maxOperationBatchConfigureSteps = 20
@@ -25,7 +23,7 @@ type operationBatchStep struct {
 	StepNumber int
 }
 
-func (app *app) invokeOperationBatchConfigurePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareOperationBatchConfigure(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -63,27 +61,25 @@ func (app *app) invokeOperationBatchConfigurePlan(ctx context.Context, request c
 		"houseId": requestNumberOrString(houseID),
 		"steps":   operationBatchStepsPayload(steps),
 	}
-	record, err := plan.NewRecord(profile, region, houseID, "operation.batch.configure", request.RequestID, fmt.Sprintf("批量配置%d个添加或修改操作", len(steps)), payload, []string{
-		"提交前重新校验整批计划哈希、profile、region、家庭和有效期",
-		"批量计划只允许 Runtime 白名单内的新增、更新、排序、收藏、面板、旋钮、自动化状态和照明设计导入操作",
-		"删除、解绑、成员移除/转移、家庭删除、网关删除、全屋锁定/解锁等高影响动作必须使用独立计划或本机审批",
-		"plan.commit 只接受 planId；提交时附带的 operations、steps 或参数字段都会被忽略",
-		"提交时按步骤顺序执行，并复用每个单项能力自己的云端写入和读后验证逻辑",
-	}, time.Now(), pendingPlanTTL)
+	record, err := operation.NewPrepared(profile, region, houseID, "operation.batch.configure", request.RequestID, fmt.Sprintf("批量配置%d个添加或修改操作", len(steps)), payload, []string{
+		"执行前重新校验 profile、region、家庭和请求载荷",
+		"批量配置只允许 Runtime 白名单内的新增、更新、排序、收藏、面板、旋钮、自动化状态和照明设计导入操作",
+		"删除、解绑、成员移除/转移、家庭删除、网关删除、全屋锁定/解锁等高影响动作必须使用独立语义请求",
+		"Runtime 根据 operations 构建受控批量 payload",
+		"执行时按步骤顺序运行，并复用每个单项能力自己的云端写入和读后验证逻辑",
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
+	app.preparedOperation = &record
 	preview := map[string]any{
-		"mode":        "single_confirmation_batch",
+		"mode":        "direct_batch_configure",
 		"stepCount":   len(steps),
 		"steps":       operationBatchStepsPreview(steps),
 		"exclusions":  operationBatchConfigureExclusions(),
-		"writePolicy": "one_plan_commit_for_allowlisted_add_update_configure_steps",
+		"writePolicy": "direct_execute_allowlisted_add_update_configure_steps",
 	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, extraAPICalls), nil
+	return executionPreviewResponseWithDetails(request, record, entities, preview, extraAPICalls), nil
 }
 
 func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent contract.Request, endpoint api.Endpoint, profile string, region string, defaultHouseID string, authorization string, clientID string, entities api.EntityListResult, raw map[string]any, stepNumber int) (operationBatchStep, string, error) {
@@ -146,36 +142,24 @@ func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent con
 	}, "", nil
 }
 
-func (app *app) commitOperationBatchConfigurePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeOperationBatchConfigure(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	steps, reason := operationBatchStepsFromPlan(record.Payload)
 	if reason != "" {
-		return planCommitBlockedResponse(request, record.ID, reason, "批量计划的保存内容无效，未执行。"), nil
+		return executionBlockedResponse(request, reason, "批量配置载荷无效，未执行。"), nil
 	}
-	tempDir, err := os.MkdirTemp("", "yeelight-home-batch-plan-*")
-	if err != nil {
-		return contract.Response{}, err
-	}
-	defer os.RemoveAll(tempDir)
-	batchApp := *app
-	batchApp.planStore = plan.NewStore(filepath.Join(tempDir, "pending_plans.json"))
 	results := make([]any, 0, len(steps))
 	totalAPICalls := 0
 	for index, step := range steps {
 		stepRecord := record
-		stepRecord.ID = fmt.Sprintf("%s#%02d", record.ID, index+1)
 		stepRecord.Intent = step.Intent
 		stepRecord.HouseID = step.HouseID
 		stepRecord.Summary = step.Summary
 		stepRecord.Payload = step.Payload
 		stepRecord.Preconditions = nil
-		stepRecord.Hash = plan.ComputeHash(stepRecord)
-		if err := batchApp.planStore.Save(stepRecord); err != nil {
-			return contract.Response{}, err
-		}
 		stepRequest := request
 		stepRequest.Intent = step.Intent
 		stepRequest.RequestID = fmt.Sprintf("%s-step-%02d", request.RequestID, index+1)
-		response, err := batchApp.commitStoredPlan(ctx, stepRequest, endpoint, stepRecord, authorization, clientID)
+		response, err := app.executePreparedExecution(ctx, stepRequest, endpoint, stepRecord, authorization, clientID)
 		if err != nil {
 			return contract.Response{}, err
 		}
@@ -185,10 +169,7 @@ func (app *app) commitOperationBatchConfigurePlan(ctx context.Context, request c
 		results = append(results, operationBatchStepResult(index+1, step, response))
 		totalAPICalls += responseMetricInt(response, "apiCalls")
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return operationBatchCommitResponse(request, record, results, totalAPICalls), nil
+	return operationBatchExecuteResponse(request, record, results, totalAPICalls), nil
 }
 
 func operationBatchStepsPayload(steps []operationBatchStep) []any {

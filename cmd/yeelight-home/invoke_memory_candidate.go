@@ -16,6 +16,14 @@ type memoryPreferenceCandidate struct {
 }
 
 func memoryPreferenceFromRequest(request contract.Request) memoryPreferenceCandidate {
+	candidates := memoryPreferencesFromRequest(request)
+	if len(candidates) == 0 {
+		return memoryPreferenceCandidate{}
+	}
+	return candidates[0]
+}
+
+func memoryPreferencesFromRequest(request contract.Request) []memoryPreferenceCandidate {
 	candidate := memoryPreferenceCandidate{
 		scopeType:       firstNonEmptyString(firstRequestString(request.Parameters, "scopeType"), "home"),
 		scopeRef:        firstRequestString(request.Parameters, "scopeRef"),
@@ -25,18 +33,26 @@ func memoryPreferenceFromRequest(request contract.Request) memoryPreferenceCandi
 		evidence:        firstRequestString(request.Parameters, "evidence"),
 	}
 	if candidate.preferenceType != "" && candidate.preferenceValue != "" {
-		return candidate
+		return []memoryPreferenceCandidate{candidate}
 	}
-	return memoryPreferenceFromUtterance(request, candidate)
+	return memoryPreferencesFromUtterance(request, candidate)
 }
 
 func memoryPreferenceFromUtterance(request contract.Request, candidate memoryPreferenceCandidate) memoryPreferenceCandidate {
-	utterance := strings.TrimSpace(request.Utterance)
-	if utterance == "" || !memoryUtteranceAllowsExtraction(utterance) {
+	candidates := memoryPreferencesFromUtterance(request, candidate)
+	if len(candidates) == 0 {
 		return candidate
 	}
-	if candidate.preferenceType == "" {
-		candidate.preferenceType = inferMemoryPreferenceType(utterance)
+	return candidates[0]
+}
+
+func memoryPreferencesFromUtterance(request contract.Request, candidate memoryPreferenceCandidate) []memoryPreferenceCandidate {
+	utterance := strings.TrimSpace(request.Utterance)
+	if utterance == "" || !memoryUtteranceAllowsExtraction(utterance) {
+		if candidate.preferenceType != "" || candidate.preferenceValue != "" {
+			return []memoryPreferenceCandidate{candidate}
+		}
+		return nil
 	}
 	if candidate.scopeRef == "" {
 		candidate.scopeRef = inferMemoryScopeRef(utterance)
@@ -44,13 +60,71 @@ func memoryPreferenceFromUtterance(request contract.Request, candidate memoryPre
 	if candidate.scopeType == "" || candidate.scopeType == "home" {
 		candidate.scopeType = inferMemoryScopeType(candidate.scopeRef)
 	}
-	if candidate.preferenceValue == "" {
-		candidate.preferenceValue = inferMemoryPreferenceValue(utterance)
-	}
-	if candidate.evidence == "" && candidate.preferenceValue != "" {
+	if candidate.evidence == "" {
 		candidate.evidence = "用户明确要求记住：" + utterance
 	}
-	return candidate
+	if candidate.preferenceType != "" && candidate.preferenceValue == "" {
+		candidate.preferenceValue = inferMemoryPreferenceValue(utterance)
+	}
+	if candidate.preferenceType != "" && candidate.preferenceValue != "" {
+		return []memoryPreferenceCandidate{candidate}
+	}
+	candidates := explicitPreferenceCandidatesFromUtterance(utterance, candidate)
+	if len(candidates) > 0 {
+		return candidates
+	}
+	candidate.preferenceType = inferMemoryPreferenceType(utterance)
+	candidate.preferenceValue = inferMemoryPreferenceValue(utterance)
+	if candidate.preferenceType == "" || candidate.preferenceValue == "" {
+		return nil
+	}
+	return []memoryPreferenceCandidate{candidate}
+}
+
+func explicitPreferenceCandidatesFromUtterance(utterance string, base memoryPreferenceCandidate) []memoryPreferenceCandidate {
+	candidates := []memoryPreferenceCandidate{}
+	add := func(preferenceType string, preferenceValue string) {
+		for _, existing := range candidates {
+			if existing.preferenceType == preferenceType && existing.preferenceValue == preferenceValue {
+				return
+			}
+		}
+		candidate := base
+		candidate.preferenceType = preferenceType
+		candidate.preferenceValue = preferenceValue
+		candidates = append(candidates, candidate)
+	}
+	for _, marker := range []string{"柔和暖光", "暖光", "暖白", "偏暖", "暖一点", "温暖"} {
+		if strings.Contains(utterance, marker) {
+			add("color_temperature", marker)
+			break
+		}
+	}
+	for _, marker := range []string{"冷光", "冷白", "偏冷", "冷一点"} {
+		if strings.Contains(utterance, marker) {
+			add("color_temperature", marker)
+			break
+		}
+	}
+	for _, marker := range []string{"不要太亮", "别太亮", "不要刺眼", "别刺眼", "暗一点", "调暗", "太亮"} {
+		if strings.Contains(utterance, marker) {
+			add("brightness", marker)
+			break
+		}
+	}
+	for _, marker := range []string{"亮一点", "太暗"} {
+		if strings.Contains(utterance, marker) {
+			add("brightness", marker)
+			break
+		}
+	}
+	for _, marker := range []string{"不要彩光", "不喜欢彩色", "别用彩光"} {
+		if strings.Contains(utterance, marker) {
+			add("color", marker)
+			break
+		}
+	}
+	return candidates
 }
 
 func memoryUtteranceAllowsExtraction(value string) bool {

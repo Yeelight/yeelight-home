@@ -8,12 +8,12 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
 const metadataBatchDeleteLimit = 20
 
-func (app *app) invokeMetadataBatchDeletePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareMetadataBatchDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -56,20 +56,18 @@ func (app *app) invokeMetadataBatchDeletePlan(ctx context.Context, request contr
 			"fanOut":    "single_target_delete_adapter",
 		},
 	}
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("批量删除%d个%s", len(items), metadataDeleteLabel(targetType)), payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("批量删除%d个%s", len(items), metadataDeleteLabel(targetType)), payload, []string{
 		"提交前重新读取家庭实体列表并确认全部目标仍存在",
 		"单次计划最多删除 20 个目标",
 		"执行时逐个调用已验证的单目标删除 adapter",
-		"plan.commit 只接受 planId，忽略提交时附带的删除字段",
+		"Runtime 根据当前请求构建受控删除 payload",
 		"提交后通过 entity.list 逐项验证目标对象已不存在",
-	}, time.Now(), pendingPlanTTL)
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, 0), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
 }
 
 func metadataBatchDeleteIntentSpec(intent string) (string, string, api.MetadataBatchDeleteKind, bool) {
@@ -163,7 +161,7 @@ func metadataBatchDeleteAcceptedFields(intent string) []string {
 	}
 }
 
-func (app *app) commitMetadataBatchDeletePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.MetadataBatchDeleteKind) (contract.Response, error) {
+func (app *app) executeMetadataBatchDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.MetadataBatchDeleteKind) (contract.Response, error) {
 	items, err := metadataBatchDeleteItemsFromPlan(record.Payload)
 	if err != nil {
 		return contract.Response{}, err
@@ -182,10 +180,7 @@ func (app *app) commitMetadataBatchDeletePlan(ctx context.Context, request contr
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return metadataBatchDeleteCommitResponse(request, record, result), nil
+	return metadataBatchDeleteExecuteResponse(request, record, result), nil
 }
 
 func metadataBatchDeleteItemsFromPlan(payload map[string]any) ([]api.MetadataBatchDeleteItem, error) {

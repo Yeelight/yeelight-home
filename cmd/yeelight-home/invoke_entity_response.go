@@ -102,7 +102,7 @@ func entityCapabilitiesResponse(request contract.Request, result api.EntityListR
 			"limitations": []string{
 				"当前 Runtime 尚未接入设备实例级 product schema adapter。",
 				"不会根据静态物模型推断设备控制能力。",
-				"写操作保持禁用，直到 pending-plan、确认和写后验证链路完成。",
+				"写操作只通过对应语义 intent 执行，不接受由模型拼接的原始 payload。",
 			},
 		},
 		Warnings: []string{"设备实例级能力需要后续接入 getProductSchema(pid, houseId, deviceId) 等价只读接口后才能返回。"},
@@ -133,7 +133,7 @@ func entityDeviceCapabilitiesResponse(request contract.Request, result api.Entit
 			},
 			"limitations": []string{
 				"当前仅返回设备实例级 schema 的安全摘要。",
-				"写操作保持禁用，直到 pending-plan、确认和写后验证链路完成。",
+				"写操作只通过对应语义 intent 执行，不接受由模型拼接的原始 payload。",
 				"不会根据静态物模型或设备名称推断额外控制能力。",
 			},
 		},

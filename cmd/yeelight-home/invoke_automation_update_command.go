@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeAutomationUpdatePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareAutomationUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -44,19 +44,17 @@ func (app *app) invokeAutomationUpdatePlan(ctx context.Context, request contract
 		summaryName = automation.Name
 	}
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新自动化 %s", summaryName), payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新自动化 %s", summaryName), payload, []string{
 		"提交前重新读取家庭自动化列表",
 		"目标自动化必须属于当前家庭",
 		"更新必须携带完整条件和动作 payload",
 		"提交后通过 automation.list 验证目标自动化摘要",
-	}, now, pendingPlanTTL)
+	}, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponse(request, record, entities), nil
+	app.preparedOperation = &record
+	return executionPreviewResponse(request, record, entities), nil
 }
 
 func buildAutomationUpdatePayload(request contract.Request, houseID string, automationID string) (map[string]any, error) {
@@ -124,7 +122,7 @@ func automationUpdateAcceptedFields() []string {
 	}
 }
 
-func (app *app) commitAutomationUpdatePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeAutomationUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewAutomationUpdateClient(endpoint, nil).Run(ctx, api.AutomationUpdateRequest{
 		HouseID:        record.HouseID,
 		AutomationID:   planPayloadString(record.Payload, "automationId"),
@@ -139,8 +137,5 @@ func (app *app) commitAutomationUpdatePlan(ctx context.Context, request contract
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return automationUpdateCommitResponse(request, record, result), nil
+	return automationUpdateExecuteResponse(request, record, result), nil
 }

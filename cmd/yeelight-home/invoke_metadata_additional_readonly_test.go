@@ -11,8 +11,12 @@ import (
 
 func TestInvokeAdditionalReadonlyAdapters(t *testing.T) {
 	var gotCalls []string
+	var gotHouseHeaderCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		if request.Header.Get("houseId") != "" || request.Header.Get("house-id") != "" {
+			gotHouseHeaderCalls = append(gotHouseHeaderCalls, request.Method+" "+request.URL.Path)
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/apis/iot/v1/scene/r/list":
@@ -73,6 +77,19 @@ func TestInvokeAdditionalReadonlyAdapters(t *testing.T) {
 		if response["status"] != "success" {
 			t.Fatalf("response = %#v", response)
 		}
+		requestID := response["requestId"].(string)
+		if strings.HasPrefix(requestID, "req-message") ||
+			strings.HasPrefix(requestID, "req-product") ||
+			strings.HasPrefix(requestID, "req-faq") ||
+			strings.HasPrefix(requestID, "req-property") {
+			result := response["result"].(map[string]any)
+			if _, ok := result["houseId"]; ok {
+				t.Fatalf("house-independent readonly response exposed houseId: %#v", response)
+			}
+		}
+	}
+	if len(gotHouseHeaderCalls) != 0 {
+		t.Fatalf("house headers should not be sent by these readonly adapters: %#v", gotHouseHeaderCalls)
 	}
 	wantCalls := []string{
 		"POST /apis/iot/v1/scene/r/list",

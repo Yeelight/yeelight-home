@@ -14,7 +14,6 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/credential"
-	"github.com/yeelight/yeelight-home/internal/plan"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -819,7 +818,62 @@ func TestHomeListJSONFallsBackWhenStatsHomeListIsEmpty(t *testing.T) {
 	}
 }
 
-func TestHomeListJSONFallsBackToSelectedHouseDetailWhenAccountListsAreEmpty(t *testing.T) {
+func TestHomeListJSONReturnsAllAccountHomesWithSelectedHouse(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var calls []string
+	var houseHeaderCalls []string
+	var gotBizTypes []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls = append(calls, request.Method+" "+request.URL.Path)
+		if request.Header.Get("houseId") != "" || request.Header.Get("house-id") != "" {
+			houseHeaderCalls = append(houseHeaderCalls, request.Method+" "+request.URL.Path)
+		}
+		gotBizTypes = append(gotBizTypes, request.Header.Get("bizType"))
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/house/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"houseId":"house-selected","houseName":"当前家庭"},{"houseId":"house-other","houseName":"另一个家"}]}}`))
+		case "/apis/iot/v1/house/r/list", "/apis/iot/v1/house/house-selected/r/info":
+			t.Fatalf("home list should use account all-list without selected house fallback: %s", request.URL.Path)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	t.Setenv("YEELIGHT_HOME_ACCESS_TOKEN", "token-home-list-secret")
+	app := newTestApp(t)
+	if err := app.metadataStore.Save(credential.ProfileMetadata{Profile: "default", Region: "dev", HouseID: "house-selected"}); err != nil {
+		t.Fatalf("Save metadata error: %v", err)
+	}
+
+	code := app.run([]string{"home", "list", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Join(calls, "\n") != "POST /apis/iot/v1/house/r/all" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if len(houseHeaderCalls) != 0 {
+		t.Fatalf("home list must not send selected house headers: %#v", houseHeaderCalls)
+	}
+	for index, bizType := range gotBizTypes {
+		if bizType != "" {
+			t.Fatalf("bizType[%d] = %q, want backend default PRO", index, bizType)
+		}
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	houses := response["houses"].([]any)
+	if response["houseId"] != "" || response["selectedHouseId"] != "house-selected" || response["houseCount"] != float64(2) || len(houses) != 2 {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
+func TestHomeListJSONIgnoresSelectedHouseWhenAccountListsAreEmpty(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	var calls []string
@@ -830,7 +884,7 @@ func TestHomeListJSONFallsBackToSelectedHouseDetailWhenAccountListsAreEmpty(t *t
 		case "/apis/iot/v1/house/r/all", "/apis/iot/v1/house/r/list":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[]}}`))
 		case "/apis/iot/v1/house/house-selected/r/info":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"houseId":"house-selected","name":"已选家庭","description":"来自详情回退","areaCode":"CN-440000","areaName":"广东"}}`))
+			t.Fatalf("home list must not fall back to selected house detail")
 		default:
 			http.NotFound(writer, request)
 		}
@@ -850,7 +904,7 @@ func TestHomeListJSONFallsBackToSelectedHouseDetailWhenAccountListsAreEmpty(t *t
 	if strings.Contains(stdout.String(), "token-home-list-secret") || strings.Contains(stderr.String(), "token-home-list-secret") {
 		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	if strings.Join(calls, "\n") != "POST /apis/iot/v1/house/r/all\nPOST /apis/iot/v1/house/r/list\nGET /apis/iot/v1/house/house-selected/r/info" {
+	if strings.Join(calls, "\n") != "POST /apis/iot/v1/house/r/all\nPOST /apis/iot/v1/house/r/list" {
 		t.Fatalf("calls = %#v", calls)
 	}
 	var response map[string]any
@@ -858,14 +912,14 @@ func TestHomeListJSONFallsBackToSelectedHouseDetailWhenAccountListsAreEmpty(t *t
 		t.Fatalf("invalid json response: %v", err)
 	}
 	houses := response["houses"].([]any)
-	first := houses[0].(map[string]any)
-	if response["houseCount"] != float64(1) || response["apiCalls"] != float64(3) || response["source"] != "selected_house_detail_fallback" || response["houseId"] != "house-selected" {
+	if len(houses) != 0 || response["houseCount"] != float64(0) || response["apiCalls"] != float64(2) || response["source"] != "/v1/house/r/all+/v1/house/r/list" || response["houseId"] != "" || response["selectedHouseId"] != "house-selected" {
 		t.Fatalf("response = %#v", response)
 	}
-	if first["id"] != "house-selected" || first["name"] != "已选家庭" || first["desc"] != "来自详情回退" || first["areaName"] != "广东" {
-		t.Fatalf("houses = %#v", houses)
+	warnings, ok := response["warnings"].([]any)
+	if !ok || len(warnings) != 1 || warnings[0] != "empty_account_home_list" {
+		t.Fatalf("warnings = %#v", response["warnings"])
 	}
-	if !strings.Contains(response["rawShape"].(string), "/v1/house/r/all:") || !strings.Contains(response["rawShape"].(string), "home.detail.get:") {
+	if !strings.Contains(response["rawShape"].(string), "/v1/house/r/all:") || strings.Contains(response["rawShape"].(string), "home.detail.get:") {
 		t.Fatalf("rawShape = %s", response["rawShape"])
 	}
 }
@@ -1203,11 +1257,9 @@ func newTestApp(t *testing.T) *app {
 	app := &app{
 		tokenStore:    tokenStore,
 		metadataStore: credential.NewFileMetadataStore(t.TempDir() + "/profiles.json"),
-		planStore:     plan.NewStore(t.TempDir() + "/pending_plans.json"),
 		memoryStore:   storage.NewJSONStore(t.TempDir() + "/memory.json"),
 		sleep:         func(context.Context, time.Duration) error { return nil },
 	}
-	app.configureMemoryPlanRecovery()
 	return app
 }
 

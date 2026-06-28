@@ -14,8 +14,12 @@ import (
 func TestInvokeProductPediaSearchUsesPediaEndpoint(t *testing.T) {
 	var gotCall string
 	var gotBody map[string]any
+	var gotHouseIDHeader string
+	var gotHouseDashIDHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCall = request.Method + " " + request.URL.Path
+		gotHouseIDHeader = request.Header.Get("houseId")
+		gotHouseDashIDHeader = request.Header.Get("house-id")
 		if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
@@ -24,7 +28,7 @@ func TestInvokeProductPediaSearchUsesPediaEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
-	app := newInvokeTestApp(t, "Bearer token-pedia-secret", "client-pedia-1", "")
+	app := newInvokeTestApp(t, "Bearer token-pedia-secret", "client-pedia-1", "house-selected")
 
 	input := `{"contractVersion":"1.0","requestId":"req-pedia","locale":"zh-CN","utterance":"查一下青空灯产品资料和说明书","intent":"product.pedia.search","parameters":{"multiField":"青空灯"}}`
 	var stdout bytes.Buffer
@@ -35,6 +39,9 @@ func TestInvokeProductPediaSearchUsesPediaEndpoint(t *testing.T) {
 	}
 	if gotCall != "POST /apis/c/v1/pedia/product/r/search" || gotBody["multiField"] != "青空灯" {
 		t.Fatalf("gotCall=%q gotBody=%#v", gotCall, gotBody)
+	}
+	if gotHouseIDHeader != "" || gotHouseDashIDHeader != "" {
+		t.Fatalf("product pedia search must not send house headers: houseId=%q house-id=%q", gotHouseIDHeader, gotHouseDashIDHeader)
 	}
 	if strings.Contains(stdout.String(), "token-pedia-secret") || strings.Contains(stderr.String(), "token-pedia-secret") {
 		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
@@ -47,6 +54,9 @@ func TestInvokeProductPediaSearchUsesPediaEndpoint(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
+	if _, ok := result["houseId"]; ok {
+		t.Fatalf("product pedia response exposed houseId: %#v", result)
+	}
 	data := result["data"].(map[string]any)
 	products := data["products"].([]any)
 	product := products[0].(map[string]any)

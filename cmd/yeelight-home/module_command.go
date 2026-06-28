@@ -124,7 +124,6 @@ func moduleParameterFlags() map[string]string {
 		"entity-id":          "entityId",
 		"entity-ids":         "entityIds",
 		"entity-name":        "entityName",
-		"execution-id":       "executionId",
 		"faq-id":             "faqId",
 		"favorite-id":        "favoriteId",
 		"favorite-ids":       "favoriteIds",
@@ -149,7 +148,6 @@ func moduleParameterFlags() map[string]string {
 		"page-no":            "pageNo",
 		"page-size":          "pageSize",
 		"parent-id":          "parentId",
-		"plan-id":            "planId",
 		"property":           "propertyName",
 		"product-id":         "productId",
 		"product-ids":        "productIds",
@@ -266,14 +264,14 @@ func moduleResourceNames() []string {
 
 func writeModuleText(stdout io.Writer, stderr io.Writer, response contract.Response) int {
 	_, _ = fmt.Fprintf(stdout, "%s: %s\n", response.Status, response.UserMessage)
-	if response.Confirmation != nil {
-		if planID := requestString(response.Confirmation["planId"]); planID != "" {
-			_, _ = fmt.Fprintf(stdout, "planId: %s\n", planID)
+	if response.Result != nil {
+		if preview := requestMap(response.Result["preview"]); preview != nil {
+			if summary := requestString(preview["summary"]); summary != "" {
+				_, _ = fmt.Fprintf(stdout, "preview: %s\n", summary)
+			}
+		} else if summary := requestString(response.Result["summary"]); summary != "" {
+			_, _ = fmt.Fprintf(stdout, "preview: %s\n", summary)
 		}
-		if command := requestString(response.Confirmation["approveCommand"]); command != "" {
-			_, _ = fmt.Fprintf(stdout, "approve: %s\n", command)
-		}
-		_, _ = fmt.Fprintln(stdout, "commit: yeelight-home plan commit --plan-id <planId>")
 	}
 	if response.Clarification != nil {
 		if reason := requestString(response.Clarification["reason"]); reason != "" {

@@ -18,7 +18,6 @@ Commands:
   config     Read and update non-secret profile configuration
   completion Generate shell completion scripts
   invoke     Execute one Skill Runtime request from stdin
-  approve    Commit a guarded pending plan
   api        Run account-scoped API smoke checks
   doctor     Print local installation and auth diagnostics
   version    Print CLI version
@@ -33,8 +32,8 @@ Global flags:
 Command model:
   Human-friendly operations use: yeelight-home <resource> <action> [flags]
   Skill and automation integrations use: yeelight-home invoke --stdin
-  Resource commands and invoke share the same Runtime adapters, validation, redaction, and pending-plan gates.
-  Read commands execute immediately. Risky write/delete commands create pending plans and require plan commit or approve.
+  Resource commands and invoke share the same Runtime adapters, validation, redaction, and write verification.
+  Reads and semantic writes execute directly by default. Use --dry-run, --preview-only, or request options.dryRun=true when the caller wants a no-write preview before asking its own user confirmation.
 
 Configuration precedence:
   command flags > environment variables > active profile metadata/credential store > defaults
@@ -66,7 +65,6 @@ var moduleCommandDescriptions = map[string]string{
 	"behavior":       "Execute source-backed device behaviors",
 	"device":         "List, inspect, diagnose, move, rename, remove, unbind devices, or create design slots",
 	"entity":         "List and inspect unified home entities",
-	"execution":      "Undo supported pending-plan executions",
 	"favorite":       "List, plan, add, update, or delete home favorites",
 	"gateway":        "List, inspect, diagnose, configure, or delete gateways",
 	"group":          "List, search, create, update, or delete device groups",
@@ -79,7 +77,6 @@ var moduleCommandDescriptions = map[string]string{
 	"message":        "List home messages",
 	"node":           "Inspect node sorting and property configuration",
 	"panel":          "List, inspect, and configure panels, screens, and buttons",
-	"plan":           "Commit or cancel pending Runtime plans",
 	"product":        "Search Yeelight product pedia records, manuals, FAQ candidates, and attachments",
 	"progress":       "Inspect async operation progress",
 	"recommendation": "List and provide feedback on recommendations",
@@ -100,20 +97,18 @@ var moduleCommandExamples = map[string][]string{
 	"behavior":       {"yeelight-home behavior execute --device-id <id> --params-json '<json>' --json"},
 	"device":         {"yeelight-home device list --json", "yeelight-home device detail --device-id <id> --json", "yeelight-home device slot-create --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"黑色格栅灯\",\"quantity\":2}]}]}' --json"},
 	"entity":         {"yeelight-home entity list --json", "yeelight-home entity get --entity-id <id> --json"},
-	"execution":      {"yeelight-home execution undo --execution-id <id> --json"},
 	"favorite":       {"yeelight-home favorite list --json", "yeelight-home favorite add --set typeId=2,resId=<id>,rank=1 --json"},
 	"gateway":        {"yeelight-home gateway list --json", "yeelight-home gateway detail --gateway-id <id> --json", "yeelight-home gateway diagnose --gateway-id <id> --json"},
 	"group":          {"yeelight-home group list --json", "yeelight-home group detail --group-id <id> --json"},
 	"home":           {"yeelight-home home list --json", "yeelight-home home summary --house-id <id> --json", "yeelight-home home sort --house-id <id> --json"},
 	"knob":           {"yeelight-home knob detail --knob-id <id> --json", "yeelight-home knob configure --knob-id <id> --params-json '<json>' --json"},
 	"light":          {"yeelight-home light on --device-id <id> --json", "yeelight-home light brightness --device-id <id> --brightness 60 --json", "yeelight-home light ct --device-id <id> --ct 4000 --json"},
-	"lighting":       {"yeelight-home lighting plan --house-id <id> --params-json '<json>' --json", "yeelight-home lighting import --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"黑色格栅灯\",\"quantity\":2}]}]}' --json", "yeelight-home lighting apply --plan-id <id> --json"},
+	"lighting":       {"yeelight-home lighting plan --house-id <id> --params-json '<json>' --json", "yeelight-home lighting import --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"黑色格栅灯\",\"quantity\":2}]}]}' --json", "yeelight-home lighting apply --params-json '{\"actions\":[{\"deviceId\":\"<id>\",\"propertyName\":\"power\",\"value\":true}]}' --json"},
 	"memory":         {"yeelight-home memory list --json", "yeelight-home memory remember --set key=value --json"},
 	"meshgroup":      {"yeelight-home meshgroup detail --meshgroup-id <id> --json"},
 	"message":        {"yeelight-home message list --json"},
 	"node":           {"yeelight-home node sorted-devices --node-id <id> --json", "yeelight-home node property-config --node-id <id> --json"},
 	"panel":          {"yeelight-home panel list --json", "yeelight-home panel detail --panel-id <id> --json", "yeelight-home panel button-configure --panel-id <id> --params-json '<json>' --json"},
-	"plan":           {"yeelight-home plan commit --plan-id <id> --json", "yeelight-home plan cancel --plan-id <id> --json"},
 	"product":        {"yeelight-home product search --keyword 青空灯 --json", "yeelight-home product search --product-model YP-0117 --json", "yeelight-home product pedia --material-code 1-000003268 --json"},
 	"progress":       {"yeelight-home progress get --progress-id <id> --json"},
 	"recommendation": {"yeelight-home recommendation list --json", "yeelight-home recommendation feedback --params-json '<json>' --json"},
@@ -136,11 +131,6 @@ Runs account and home-list smoke checks with the active local token.
   yeelight-home api smoke [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 
 Runs account, home-list, and optional house-context smoke checks with the active local token.
-`,
-	"approve": `Usage:
-  yeelight-home approve --json --plan-id <id> --challenge <text>
-
-Commits a guarded pending plan created by yeelight-home invoke.
 `,
 	"auth": `Usage:
   yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--house-id <id>]
@@ -264,7 +254,6 @@ Use yeelight-home help home <action> for resource action flags.
 	"light":          moduleHelpText("light"),
 	"memory":         moduleHelpText("memory"),
 	"panel":          moduleHelpText("panel"),
-	"plan":           moduleHelpText("plan"),
 	"product":        moduleHelpText("product"),
 	"recommendation": moduleHelpText("recommendation"),
 	"room":           moduleHelpText("room"),
@@ -313,8 +302,8 @@ func moduleHelpText(resource string) string {
 	return fmt.Sprintf(`Usage:
   yeelight-home %s <%s> [--json] [--profile <name>] [--region <region>] [--house-id <id>] [resource flags]
 
-Human-friendly shortcut commands for Runtime intents. They use the same guarded execution model as invoke:
-read commands call Yeelight cloud APIs directly, risky writes create pending plans, and plan commit still revalidates locally.
+Human-friendly shortcut commands for Runtime intents. They use the same direct adapter model as invoke:
+reads call Yeelight cloud APIs directly, and semantic writes validate, execute, and verify immediately by default. Use --dry-run or --preview-only for a no-write preview when a caller wants to handle confirmation itself.
 
 Actions:
   %s

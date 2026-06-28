@@ -29,7 +29,6 @@ type Response struct {
 	UserMessage     string         `json:"userMessage"`
 	Result          map[string]any `json:"result,omitempty"`
 	Clarification   map[string]any `json:"clarification,omitempty"`
-	Confirmation    map[string]any `json:"confirmation,omitempty"`
 	Execution       map[string]any `json:"execution,omitempty"`
 	Memory          map[string]any `json:"memory,omitempty"`
 	Recommendation  map[string]any `json:"recommendation,omitempty"`
@@ -257,10 +256,7 @@ func isKnownIntent(intent string) bool {
 		"memory.resume",
 		"recommendation.list",
 		"recommendation.feedback",
-		"operation.batch.configure",
-		"plan.commit",
-		"plan.cancel",
-		"execution.undo":
+		"operation.batch.configure":
 		return true
 	default:
 		return false

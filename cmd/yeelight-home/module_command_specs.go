@@ -61,9 +61,6 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 		"list":         {Intent: "entity.list", Utterance: "列出家庭实体"},
 		"rename-batch": {Intent: "entity.rename.batch", Utterance: "批量重命名实体"},
 	},
-	"execution": {
-		"undo": {Intent: "execution.undo", Utterance: "撤销执行", TargetIDKeys: []string{"execution-id", "executionId", "id"}},
-	},
 	"favorite": {
 		"add":          {Intent: "favorite.add", Utterance: "新增收藏"},
 		"batch-add":    {Intent: "favorite.batch_add", Utterance: "批量新增收藏"},
@@ -127,7 +124,7 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 		"on":                {Intent: "light.power.set", Utterance: "打开灯光", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
 	},
 	"lighting": {
-		"apply":      {Intent: "lighting.design.apply", Utterance: "应用灯光设计方案", TargetIDKeys: []string{"plan-id", "planId", "id"}},
+		"apply":      {Intent: "lighting.design.apply", Utterance: "应用灯光设计方案", TargetIDKeys: []string{"id"}},
 		"experience": {Intent: "lighting.experience.apply", Utterance: "应用灯光体验", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
 		"import":     {Intent: "lighting.design.import", Utterance: "导入照明设计并预建设备槽位"},
 		"plan":       {Intent: "lighting.design.plan", Utterance: "规划灯光设计"},
@@ -166,10 +163,6 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 		"detail":               {Intent: "panel.get", Utterance: "查看面板详情", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
 		"list":                 {Intent: "panel.list", Utterance: "列出面板"},
 		"screen-controls":      {Intent: "screen.control.list", Utterance: "查看屏幕控制列表", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
-	},
-	"plan": {
-		"cancel": {Intent: "plan.cancel", Utterance: "取消待确认计划", TargetIDKeys: []string{"plan-id", "planId", "id"}},
-		"commit": {Intent: "plan.commit", Utterance: "提交待确认计划", TargetIDKeys: []string{"plan-id", "planId", "id"}},
 	},
 	"product": {
 		"pedia":  {Intent: "product.pedia.search", Utterance: "搜索产品百科资料"},

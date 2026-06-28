@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeHomeCreatePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareHomeCreate(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, authorization string, clientID string) (contract.Response, error) {
 	payload, err := buildHomeCreatePayload(request)
 	if err != nil {
 		return configureClarificationResponse(request, err.Error(), homeCreateAcceptedFields()), nil
@@ -28,19 +28,17 @@ func (app *app) invokeHomeCreatePlan(ctx context.Context, request contract.Reque
 		response.Result["region"] = endpoint.Region
 		return response, nil
 	}
-	record, err := plan.NewAccountRecord(profile, region, request.Intent, request.RequestID, fmt.Sprintf("创建家庭 %s", homeName), payload, []string{
+	record, err := operation.NewAccountPrepared(profile, region, request.Intent, request.RequestID, fmt.Sprintf("创建家庭 %s", homeName), payload, []string{
 		"提交前重新读取当前账号家庭列表",
 		"家庭名称不存在时才创建",
-		"plan.commit 只接受 planId，忽略提交时附带的创建字段",
+		"Runtime 根据当前请求构建受控创建 payload",
 		"提交后优先通过家庭列表按名称验证；如果列表延迟但创建返回 houseId，则通过该家庭的实体列表验证可访问性",
-	}, time.Now(), pendingPlanTTL)
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, api.EntityListResult{Region: endpoint.Region, APICalls: apiCalls}, map[string]any{
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, api.EntityListResult{Region: endpoint.Region, APICalls: apiCalls}, map[string]any{
 		"scope": "account",
 		"planned": map[string]any{
 			"name":     homeName,
@@ -71,7 +69,7 @@ func homeCreateAcceptedFields() []string {
 	return []string{"parameters.name", "parameters.description", "parameters.desc", "parameters.icon", "parameters.areaCode", "parameters.areaName"}
 }
 
-func (app *app) commitHomeCreatePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeHomeCreate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewHomeCreateClient(endpoint, nil).Run(ctx, api.HomeCreateRequest{
 		Name:           planPayloadString(record.Payload, "name"),
 		Description:    planPayloadString(record.Payload, "desc"),
@@ -88,8 +86,5 @@ func (app *app) commitHomeCreatePlan(ctx context.Context, request contract.Reque
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return homeCreateCommitResponse(request, record, result), nil
+	return homeCreateExecuteResponse(request, record, result), nil
 }

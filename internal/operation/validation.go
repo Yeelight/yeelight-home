@@ -1,19 +1,6 @@
-package plan
+package operation
 
-import (
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
-	"strings"
-)
-
-func randomID() (string, error) {
-	bytes := make([]byte, 12)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", fmt.Errorf("generate plan id: %w", err)
-	}
-	return "plan_" + hex.EncodeToString(bytes), nil
-}
+import "strings"
 
 func compactStrings(values []string) []string {
 	result := make([]string, 0, len(values))

@@ -10,7 +10,7 @@ The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-
 
 - Direct Yeelight cloud API access for homes, rooms, areas, devices, groups, gateways, scenes, automations, diagnostics, lighting design, product knowledge, memory, and personalization.
 - Product pedia search for fuzzy product lookup, material codes, product metadata, attachment records, and candidate manual or FAQ resource URLs.
-- Guarded write model for persistent changes: risky changes create a local pending plan first, and `plan.commit` executes only a stored `planId`.
+- Thin execution model for persistent changes: semantic writes execute directly after Runtime validation; callers own any user confirmation and can use dry-run previews when needed.
 - Local credential handling: access tokens are stored in the system credential store when available, with a protected local fallback.
 - Multiple profiles for different accounts, regions, or homes.
 - Region-aware cloud endpoints with default region `cn`.
@@ -27,12 +27,12 @@ The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-
 | Home topology | homes, rooms, areas, groups, gateways, panels, knobs, sensors, unified entities |
 | Device control | light power, brightness, color temperature, color, behavior execution, state query |
 | Organization writes | room/device naming, room movement, favorites, home sorting, panel/knob configuration |
-| Scenes and automations | list, detail, execute, create/update/delete plans, enable/disable, guarded commits |
+| Scenes and automations | list, detail, execute, create/update/delete, enable/disable, verification |
 | Product knowledge | `product.pedia.search`, manuals and FAQ candidates, thing-model schema and product definitions |
 | Diagnostics | gateway/device diagnostics, upgrade files, operation progress, install and credential checks |
 | Local intelligence | local preference memory, recommendation list, recommendation feedback and cooldown |
 
-Reads execute immediately. Persistent writes and deletes use confirmation-required pending plans unless a command is explicitly documented as read-only or diagnostic-only.
+Reads execute immediately. Persistent writes and deletes also execute through semantic Runtime adapters after validation; use `--dry-run`, `--preview-only`, or `options.dryRun=true` only when the caller wants a no-write preview before its own user confirmation.
 
 ## Install
 
@@ -143,10 +143,9 @@ yeelight-home room list --json
 yeelight-home scene execute --scene-id <scene-id> --json
 yeelight-home light brightness --device-id <device-id> --brightness 60 --json
 yeelight-home automation enable --automation-id <automation-id> --json
-yeelight-home plan commit --plan-id <plan-id> --json
 ```
 
-The resource commands are thin wrappers around Runtime intents. They keep the same profile, region, credential, redaction, preflight, pending-plan, and verification rules as `invoke`.
+The resource commands are thin wrappers around Runtime intents. They keep the same profile, region, credential, redaction, preflight, direct execution, dry-run preview, and verification rules as `invoke`.
 
 The command shape is intentionally conventional:
 
@@ -154,7 +153,7 @@ The command shape is intentionally conventional:
 yeelight-home <resource> <action> [--json] [--profile <name>] [--region <region>] [--house-id <id>] [resource flags]
 ```
 
-Common resources include `home`, `room`, `area`, `device`, `entity`, `gateway`, `group`, `scene`, `automation`, `light`, `lighting`, `favorite`, `panel`, `knob`, `sensor`, `thing`, `upgrade`, `memory`, `recommendation`, `account`, and `plan`. Run `yeelight-home --help` for the full resource list.
+Common resources include `home`, `room`, `area`, `device`, `entity`, `gateway`, `group`, `scene`, `automation`, `light`, `lighting`, `favorite`, `panel`, `knob`, `sensor`, `thing`, `upgrade`, `memory`, `recommendation`, and `account`. Run `yeelight-home --help` for the full resource list.
 
 Use `yeelight-home help <resource>` to list actions, and `yeelight-home help <resource> <action>` for action-specific flags. Examples:
 
@@ -191,16 +190,13 @@ yeelight-home product search --product-model YP-0117 --json
 
 ```sh
 yeelight-home memory remember --house-id <house-id> --set scopeType=room,scopeRef=客厅,preferenceType=brightness,preferenceValue=45 --json
-yeelight-home plan commit --plan-id <plan-id> --json
 yeelight-home recommendation list --house-id <house-id> --json
 yeelight-home recommendation feedback --params-json '{"recommendationId":"<id>","feedback":"cooldown","cooldownHours":24}' --json
 ```
 
-Local memory and recommendations are enabled by default for every profile and home scope. `memory pause` is the explicit opt-out switch, and `memory resume` turns local learning back on. `memory remember` creates a local confirmation plan. After `plan commit`, the Runtime stores the preference locally and may materialize one preference-based pending recommendation. `recommendation list` returns only Runtime-backed recommendations. Feedback such as `accepted`, `dismissed`, `rejected`, or `cooldown` is stored locally and respected by later recommendation reads.
+Local memory and recommendations are enabled by default for every profile and home scope. `memory pause` is the explicit opt-out switch, and `memory resume` turns local learning back on. `memory remember` directly upserts a local preference, merges near-duplicate meanings, and may materialize one preference-based recommendation. `recommendation list` returns only Runtime-backed recommendations. Feedback such as `accepted`, `dismissed`, `rejected`, or `cooldown` is stored locally and respected by later recommendation reads.
 
-The Runtime does not store full conversation logs as memory. It stores only explicit local preferences after confirmation, and it can extract conservative preference candidates from utterances such as "remember that I prefer warm dim light in the bedroom" when the Skill sends `memory.remember`.
-
-Pending plans are a short-lived safety and audit queue, not a permanent history database. The Runtime automatically compacts `pending_plans.json`: active unexpired plans are kept, expired pending plans are kept briefly, terminal committed/canceled plans are kept for recent audit, and the default stored-plan cap is 200 records. This keeps `plan.commit`/`plan.cancel` lookups bounded while preserving the current confirmation flow.
+The Runtime does not store full conversation logs as memory. It stores only explicit local preferences, and it can extract conservative preference candidates from utterances such as "remember that I prefer warm dim light in the bedroom" when the Skill sends `memory.remember`. Near-duplicate preferences such as "warm soft light" and "warmer" are normalized and merged instead of duplicated.
 
 ### `doctor`
 
@@ -304,7 +300,7 @@ yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id 
 Reads a SkillRequest JSON object from stdin and writes a SkillResponse JSON object to stdout. This is the only command Skills should call for smart-home operations.
 Flag overrides are applied before request parameters are resolved; request `parameters.region` and `parameters.houseId` still work when the corresponding flag is omitted.
 
-Interactive users do not need to hand-write SkillRequest JSON for common operations. Prefer resource commands such as `device list`, `scene execute`, `light on`, `room create`, `automation enable`, and `plan commit`.
+Interactive users do not need to hand-write SkillRequest JSON for common operations. Prefer resource commands such as `device list`, `scene execute`, `light on`, `room create`, and `automation enable`.
 
 ### `api smoke`
 
@@ -334,7 +330,7 @@ yeelight-home auth login --qr
 yeelight-home home list --json
 ```
 
-If QR login is unavailable and the user already has an approved token, import it locally outside chat:
+If QR login is unavailable and the user already has an authorized token, import it locally outside chat:
 
 ```sh
 printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn
@@ -368,4 +364,4 @@ See [DISTRIBUTION.md](DISTRIBUTION.md) and [RELEASING.md](RELEASING.md).
 - Do not paste tokens, passwords, or account secrets into AI chat.
 - `auth status`, `doctor`, and `invoke` responses are redacted.
 - Profile metadata contains non-secret values such as profile name, region, selected home, and QR device identity. Tokens stay in credential storage.
-- Persistent writes use the Runtime pending-plan model; the model cannot execute arbitrary raw API payloads.
+- Persistent writes use semantic Runtime adapters; the model cannot execute arbitrary raw API payloads. Callers own user confirmation for high-impact operations.

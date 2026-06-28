@@ -1,83 +1,67 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
 const memoryConsentVersion = "memory-v1"
 
-func (app *app) invokeMemoryRememberPlan(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
+func (app *app) invokeMemoryRemember(request contract.Request, profile string, _ string, houseID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
-	candidate := memoryPreferenceFromRequest(request)
-	if candidate.preferenceType == "" || candidate.preferenceValue == "" {
+	candidates := memoryPreferencesFromRequest(request)
+	if len(candidates) == 0 {
 		return memoryClarificationResponse(request, "missing_preference"), nil
 	}
-	payload := map[string]any{
-		"preferenceType":  candidate.preferenceType,
-		"preferenceValue": candidate.preferenceValue,
-		"scopeType":       candidate.scopeType,
-		"scopeRef":        candidate.scopeRef,
-		"kind":            candidate.kind,
-		"evidence":        candidate.evidence,
-	}
-	record, err := plan.NewRecord(profile, region, houseID, "memory.remember", request.RequestID, fmt.Sprintf("记住偏好 %s=%s", candidate.preferenceType, candidate.preferenceValue), payload, []string{
-		"仅写入本地 JSON 记忆",
-		"不会创建情景、自动化或设备配置",
-		"token-like 字段会被拒绝",
-	}, time.Now(), pendingPlanTTL)
-	if err != nil {
-		return contract.Response{}, err
-	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingMemoryPlanResponse(request, record), nil
-}
-
-func (app *app) commitMemoryRememberPlan(_ context.Context, request contract.Request, record plan.Record) (contract.Response, error) {
 	now := time.Now().Unix()
-	consent, err := app.ensureMemoryConsent(record.Profile, record.HouseID, now)
+	consent, err := app.ensureMemoryConsent(profile, houseID, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
 	if consent.Paused {
 		return memoryBlockedResponse(request, "memory_paused", "本地学习已暂停，未写入新记忆。"), nil
 	}
-	memoryRecord := storage.PreferenceRecord{
-		ID:              record.ID,
-		Profile:         record.Profile,
-		HouseID:         record.HouseID,
-		ScopeType:       planPayloadString(record.Payload, "scopeType"),
-		ScopeRef:        planPayloadString(record.Payload, "scopeRef"),
-		PreferenceType:  planPayloadString(record.Payload, "preferenceType"),
-		PreferenceValue: planPayloadString(record.Payload, "preferenceValue"),
-		Kind:            planPayloadString(record.Payload, "kind"),
-		Evidence:        planPayloadString(record.Payload, "evidence"),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+	var firstUpsert storage.PreferenceUpsertResult
+	for index, candidate := range candidates {
+		if candidate.preferenceType == "" || candidate.preferenceValue == "" {
+			continue
+		}
+		memoryRecord := storage.PreferenceRecord{
+			Profile:         profile,
+			HouseID:         houseID,
+			ScopeType:       candidate.scopeType,
+			ScopeRef:        candidate.scopeRef,
+			PreferenceType:  candidate.preferenceType,
+			PreferenceValue: candidate.preferenceValue,
+			Kind:            candidate.kind,
+			Evidence:        candidate.evidence,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}
+		upsert, err := app.memoryStore.UpsertPreference(memoryRecord)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		if index == 0 {
+			firstUpsert = upsert
+		}
+		if err := app.ensurePreferenceRecommendation(upsert.Record, now); err != nil {
+			return contract.Response{}, err
+		}
 	}
-	if err := app.memoryStore.SavePreference(memoryRecord); err != nil {
-		return contract.Response{}, err
+	if strings.TrimSpace(firstUpsert.Record.ID) == "" {
+		return memoryClarificationResponse(request, "missing_preference"), nil
 	}
-	if err := app.ensurePreferenceRecommendation(memoryRecord, now); err != nil {
-		return contract.Response{}, err
-	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return memoryRememberCommitResponse(request, record, memoryRecord), nil
+	return memoryRememberResponse(request, firstUpsert), nil
 }
 
 func (app *app) invokeMemoryList(request contract.Request, profile string, houseID string) (contract.Response, error) {
@@ -88,9 +72,6 @@ func (app *app) invokeMemoryList(request contract.Request, profile string, house
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
 	now := time.Now().Unix()
-	if err := app.recoverCommittedMemoryPlans(profile, houseID, now); err != nil {
-		return contract.Response{}, err
-	}
 	preferences, err := app.memoryStore.ListPreferences(profile, houseID)
 	if err != nil {
 		return contract.Response{}, err
@@ -150,9 +131,6 @@ func (app *app) invokeRecommendationList(request contract.Request, profile strin
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
 	now := time.Now().Unix()
-	if err := app.recoverCommittedMemoryPlans(profile, houseID, now); err != nil {
-		return contract.Response{}, err
-	}
 	if _, err := app.ensureMemoryConsent(profile, houseID, now); err != nil {
 		return contract.Response{}, err
 	}

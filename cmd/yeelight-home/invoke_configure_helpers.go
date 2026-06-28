@@ -186,6 +186,14 @@ func requestMapList(value any) ([]map[string]any, bool) {
 	return result, true
 }
 
+func requestMap(value any) map[string]any {
+	typed, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return typed
+}
+
 func sceneSingleDetail(request contract.Request) (map[string]any, bool) {
 	resID := firstRequestString(request.Parameters, "resId", "deviceId", "entityId")
 	params := request.Parameters["params"]
@@ -218,6 +226,31 @@ func requestString(value any) string {
 	default:
 		return ""
 	}
+}
+
+func requestBool(values map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case bool:
+			return typed
+		case string:
+			switch strings.ToLower(strings.TrimSpace(typed)) {
+			case "true", "1", "yes", "y", "on":
+				return true
+			case "false", "0", "no", "n", "off":
+				return false
+			}
+		case float64:
+			return typed != 0
+		case int:
+			return typed != 0
+		}
+	}
+	return false
 }
 
 func requestInt(value any) (int, bool) {

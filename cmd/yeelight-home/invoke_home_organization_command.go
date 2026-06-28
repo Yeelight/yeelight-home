@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeHomeOrganizationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -64,14 +64,12 @@ func (app *app) invokeHomeOrganizationPlan(ctx context.Context, request contract
 		previewCalls = calls
 	}
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now, pendingPlanTTL)
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, previewCalls), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, preview, previewCalls), nil
 }
 
 func buildHomeOrganizationPayload(request contract.Request, houseID string) (map[string]any, []string, string, error) {
@@ -123,7 +121,7 @@ func buildHomeOrganizationPayload(request contract.Request, houseID string) (map
 		return payload, []string{
 			"提交前重新读取当前收藏并确认全部目标仍存在",
 			"单次计划最多删除 20 个收藏",
-			"plan.commit 只接受 planId，忽略提交时附带的删除字段",
+			"Runtime 根据当前请求构建受控删除 payload",
 			"提交后通过 favorite.list 验证全部收藏已移除",
 		}, "批量删除首页收藏", err
 	default:

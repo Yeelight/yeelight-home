@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestInvokeAutomationUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeAutomationUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -23,34 +23,27 @@ func TestInvokeAutomationUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-auto-update-plan","locale":"zh-CN","utterance":"把回家开灯自动化改成18点触发","intent":"automation.update","parameters":{"houseId":"200171","automationId":"auto-1","name":"回家开灯更新","startTime":"00:00:00","endTime":"23:59:59","repeatType":2,"repeatValue":"0x7f","params":{"type":"and","conditions":[{"type":"alarm","clock":"18:00:00"}]},"actions":[{"typeId":2,"resId":"50018330","rank":0,"params":{"set":{"power":true}}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/automations/auto-1/w/update") {
-			t.Fatalf("automation.update should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("automation.update dry-run should not write: %#v", gotCalls)
 		}
 	}
 	if strings.Contains(stdout.String(), "token-auto-update-secret") || strings.Contains(stderr.String(), "token-auto-update-secret") {
 		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	preview := confirmation["payloadPreview"].(map[string]any)
+	result := response["result"].(map[string]any)
+	previewContainer := result["preview"].(map[string]any)
+	preview := previewContainer["payloadPreview"].(map[string]any)
 	if preview["automationId"] != "auto-1" || preview["name"] != "回家开灯更新" {
 		t.Fatalf("preview = %#v", preview)
-	}
-	planID := confirmation["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "automation.update" || record.Payload["automationId"] != "auto-1" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
-	}
-	if _, exists := record.Payload["status"]; exists {
-		t.Fatalf("automation.update plan must not carry status: %#v", record.Payload)
 	}
 }
 
@@ -106,7 +99,7 @@ func TestInvokeAutomationUpdateRequiresKnownAutomation(t *testing.T) {
 	}
 }
 
-func TestInvokePlanCommitUpdatesAutomationFromStoredPlan(t *testing.T) {
+func TestInvokeAutomationUpdateExecutesDirectly(t *testing.T) {
 	automationListCalls := 0
 	var gotCalls []string
 	var writeBody map[string]any
@@ -136,22 +129,7 @@ func TestInvokePlanCommitUpdatesAutomationFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-auto-update-secret", "client-auto-update-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "automation.update", map[string]any{
-		"houseId":      float64(200171),
-		"automationId": "auto-1",
-		"id":           "auto-1",
-		"name":         "回家开灯更新",
-		"startTime":    "00:00:00",
-		"endTime":      "23:59:59",
-		"repeatType":   2,
-		"repeatValue":  "0x7f",
-		"params":       `{"type":"and","conditions":[{"type":"alarm","clock":"18:00:00"}]}`,
-		"actions": []any{
-			map[string]any{"typeId": 2, "resId": float64(50018330), "rank": 0, "params": `{"set":{"power":true}}`},
-		},
-	})
-
-	input := `{"contractVersion":"1.0","requestId":"req-auto-update-commit","locale":"zh-CN","utterance":"确认更新自动化","intent":"plan.commit","parameters":{"planId":"` + planID + `","automationId":"ignored","name":"ignored","status":0,"actions":[{"typeId":6,"resId":"ignored"}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-auto-update-execute","locale":"zh-CN","utterance":"把回家开灯自动化改成18点触发","intent":"automation.update","parameters":{"houseId":"200171","automationId":"auto-1","name":"回家开灯更新","startTime":"00:00:00","endTime":"23:59:59","repeatType":2,"repeatValue":"0x7f","params":{"type":"and","conditions":[{"type":"alarm","clock":"18:00:00"}]},"actions":[{"typeId":2,"resId":"50018330","rank":0,"params":{"set":{"power":true}}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -163,9 +141,6 @@ func TestInvokePlanCommitUpdatesAutomationFromStoredPlan(t *testing.T) {
 		if call == "PUT /apis/iot/v1/automations/auto-1/w/update" {
 			updateCalls++
 		}
-		if strings.Contains(call, "ignored") {
-			t.Fatalf("commit request payload leaked into API call: %#v", gotCalls)
-		}
 	}
 	if updateCalls != 1 {
 		t.Fatalf("gotCalls = %#v", gotCalls)
@@ -174,7 +149,7 @@ func TestInvokePlanCommitUpdatesAutomationFromStoredPlan(t *testing.T) {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "automation-update-commit" {
+	if response["status"] != "success" || response["traceId"] != "automation-update-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)

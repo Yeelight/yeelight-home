@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestInvokeSceneUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeSceneUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -23,39 +23,26 @@ func TestInvokeSceneUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-scene-update-plan","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/scene/scene-1/w/modify") {
-			t.Fatalf("scene.update should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("scene.update dry-run should not write: %#v", gotCalls)
 		}
 	}
 	if strings.Contains(stdout.String(), "token-scene-update-secret") || strings.Contains(stderr.String(), "token-scene-update-secret") {
 		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	preview := confirmation["payloadPreview"].(map[string]any)
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)["payloadPreview"].(map[string]any)
 	if preview["sceneId"] != "scene-1" || preview["name"] != "回家灯光更新" {
 		t.Fatalf("preview = %#v", preview)
-	}
-	planID := confirmation["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "scene.update" || record.Payload["sceneId"] != "scene-1" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
-	}
-	details, ok := record.Payload["details"].([]any)
-	if !ok || len(details) != 1 {
-		t.Fatalf("details = %#v", record.Payload["details"])
-	}
-	detail, ok := details[0].(map[string]any)
-	if !ok || detail["resName"] != "主灯" || detail["action"] != float64(0) || detail["rank"] != float64(0) || detail["params"] != `{"set":{"p":true}}` {
-		t.Fatalf("detail = %#v", detail)
 	}
 }
 
@@ -85,7 +72,7 @@ func TestInvokeSceneUpdateRequiresKnownScene(t *testing.T) {
 	}
 }
 
-func TestInvokePlanCommitUpdatesSceneFromStoredPlan(t *testing.T) {
+func TestInvokeSceneUpdateExecutesDirectly(t *testing.T) {
 	detailCalls := 0
 	var gotCalls []string
 	var writeBody map[string]any
@@ -112,17 +99,8 @@ func TestInvokePlanCommitUpdatesSceneFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "scene.update", map[string]any{
-		"houseId": float64(200171),
-		"sceneId": "scene-1",
-		"id":      "scene-1",
-		"name":    "回家灯光更新",
-		"details": []any{
-			map[string]any{"typeId": 2, "resId": float64(50018330), "params": map[string]any{"set": map[string]any{"p": true}}},
-		},
-	})
 
-	input := `{"contractVersion":"1.0","requestId":"req-scene-update-commit","locale":"zh-CN","utterance":"确认更新情景","intent":"plan.commit","parameters":{"planId":"` + planID + `","sceneId":"ignored","name":"ignored","details":[{"typeId":6,"resId":"ignored"}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-execute","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -149,11 +127,11 @@ func TestInvokePlanCommitUpdatesSceneFromStoredPlan(t *testing.T) {
 		t.Fatalf("writeBody details = %#v", writeBody["details"])
 	}
 	detail, ok := details[0].(map[string]any)
-	if !ok || detail["resName"] != "50018330" || detail["action"] != float64(0) || detail["rank"] != float64(0) || detail["params"] != `{"set":{"p":true}}` {
+	if !ok || detail["resName"] != "主灯" || detail["action"] != float64(0) || detail["rank"] != float64(0) || detail["params"] != `{"set":{"p":true}}` {
 		t.Fatalf("writeBody detail = %#v", details[0])
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "scene-update-commit" {
+	if response["status"] != "success" || response["traceId"] != "scene-update-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)

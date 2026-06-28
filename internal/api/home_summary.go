@@ -105,37 +105,6 @@ func (client HomeSummaryClient) RunList(ctx context.Context, credentials HomeSum
 	}, nil
 }
 
-func (client HomeSummaryClient) RunListWithSelectedFallback(ctx context.Context, credentials HomeSummaryCredentials, selectedHouseID string) (HomeSummaryResult, error) {
-	summary, err := client.RunList(ctx, credentials)
-	if err != nil {
-		return HomeSummaryResult{}, err
-	}
-	selectedHouseID = strings.TrimSpace(selectedHouseID)
-	if summary.HouseCount != 0 || selectedHouseID == "" {
-		return summary, nil
-	}
-	detailResponse, err := callJSON(ctx, client.client, http.MethodGet, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/"+pathSegment(selectedHouseID)+"/r/info", nil, requestCredentials{
-		Authorization: credentials.Authorization,
-		ClientID:      credentials.ClientID,
-	})
-	if err != nil {
-		return summary, nil
-	}
-	if !isBusinessOK(detailResponse) {
-		return summary, nil
-	}
-	house := houseSummaryFromDetail(selectedHouseID, detailResponse["data"])
-	if house.ID == "" {
-		return summary, nil
-	}
-	summary.Houses = []HouseSummary{house}
-	summary.HouseCount = 1
-	summary.RawShape = strings.Join([]string{summary.RawShape, "home.detail.get:" + responseDataType(detailResponse)}, ",")
-	summary.APICalls++
-	summary.Source = "selected_house_detail_fallback"
-	return summary, nil
-}
-
 func (client HomeSummaryClient) callHomeList(ctx context.Context, path string, credentials HomeSummaryCredentials) (map[string]any, error) {
 	return callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+path, map[string]any{}, requestCredentials{
 		Authorization: credentials.Authorization,
@@ -218,27 +187,6 @@ func houseRowsFromAny(value any) []any {
 		}
 	}
 	return nil
-}
-
-func houseSummaryFromDetail(selectedHouseID string, value any) HouseSummary {
-	item, ok := value.(map[string]any)
-	if !ok {
-		return HouseSummary{}
-	}
-	house := HouseSummary{
-		ID:       firstNonEmpty(firstString(item, "id", "houseId"), selectedHouseID),
-		Name:     firstString(item, "name", "houseName"),
-		Icon:     firstString(item, "icon", "img"),
-		Desc:     firstString(item, "desc", "description"),
-		AreaCode: firstString(item, "areaCode"),
-		AreaName: firstString(item, "areaName"),
-		Source:   "home.detail.get",
-	}
-	if house.Name == "" {
-		house.Name = house.ID
-	}
-	house.Counts = houseCountProjection(item)
-	return house
 }
 
 func looksLikeHouseRow(value map[string]any) bool {

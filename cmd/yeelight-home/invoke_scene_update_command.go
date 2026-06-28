@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeSceneUpdatePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -40,19 +40,17 @@ func (app *app) invokeSceneUpdatePlan(ctx context.Context, request contract.Requ
 		name = valueIDString(payload["sceneId"])
 	}
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新情景 %s", name), payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新情景 %s", name), payload, []string{
 		"提交前重新读取家庭实体列表",
 		"目标情景必须属于当前家庭",
 		"情景动作资源必须属于当前家庭",
 		"提交后通过 scene.detail.get 验证情景摘要",
-	}, now, pendingPlanTTL)
+	}, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponse(request, record, entities), nil
+	app.preparedOperation = &record
+	return executionPreviewResponse(request, record, entities), nil
 }
 
 func buildSceneUpdatePayload(request contract.Request, houseID string) (map[string]any, error) {
@@ -121,7 +119,7 @@ func sceneUpdateAcceptedFields() []string {
 	}
 }
 
-func (app *app) commitSceneUpdatePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeSceneUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewSceneUpdateClient(endpoint, nil).Run(ctx, api.SceneUpdateRequest{
 		HouseID:        record.HouseID,
 		SceneID:        planPayloadString(record.Payload, "sceneId"),
@@ -136,8 +134,5 @@ func (app *app) commitSceneUpdatePlan(ctx context.Context, request contract.Requ
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return sceneUpdateCommitResponse(request, record, result), nil
+	return sceneUpdateExecuteResponse(request, record, result), nil
 }

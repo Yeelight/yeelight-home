@@ -2,14 +2,12 @@
   "version": "0.1.0",
   "cases": [
     {
-      "id": "mixed-safe-configuration-single-batch-plan",
+      "id": "mixed-safe-configuration-single-batch-direct",
       "utterance": "帮我创建书房，把主灯改名为书房主灯，再把它加入首页收藏",
       "expectedIntent": "operation.batch.configure",
       "mustUse": [
-        "confirmation_required",
-        "single_confirmation_batch",
-        "plan.commit",
-        "scripts/invoke"
+        "scripts/invoke",
+        "operation.batch.configure"
       ],
       "forbidden": [
         "curl",
@@ -17,18 +15,15 @@
         "operationId",
         "Authorization",
         "Token",
-        "multiple pending plans",
         "direct_url",
         "direct_header"
       ]
     },
     {
-      "id": "room-update-pending-plan",
+      "id": "room-update-direct-execute",
       "utterance": "把客厅改成会客厅并设置默认网关",
       "expectedIntent": "room.update",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -42,12 +37,10 @@
       ]
     },
     {
-      "id": "device-move-room-batch-pending-plan",
+      "id": "device-move-room-batch-direct-execute",
       "utterance": "把主灯和筒灯批量移动到卧室",
       "expectedIntent": "device.move_room.batch",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -61,13 +54,10 @@
       ]
     },
     {
-      "id": "device-remove-r3-local-approve",
+      "id": "device-remove-r3-caller-confirm",
       "utterance": "删除废弃的测试灯",
       "expectedIntent": "device.remove",
       "mustUse": [
-        "confirmation_required",
-        "local_terminal_approve",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -98,12 +88,10 @@
       ]
     },
     {
-      "id": "home-create-pending-plan",
+      "id": "home-create-direct-execute",
       "utterance": "创建一个叫新家的家庭",
       "expectedIntent": "home.create",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -348,8 +336,7 @@
       "utterance": "每天晚上十点自动关掉卧室灯",
       "expectedIntent": "automation.create",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit"
+        "scripts/invoke"
       ],
       "forbidden": [
         "--yes",
@@ -403,8 +390,7 @@
         "raw HTTP",
         "operationId",
         "Authorization",
-        "Token",
-        "confirmation_required"
+        "Token"
       ]
     },
     {
@@ -424,12 +410,10 @@
       ]
     },
     {
-      "id": "favorite-add-uses-pending-plan",
+      "id": "favorite-add-uses-direct-execute",
       "utterance": "把主灯加入首页收藏",
       "expectedIntent": "favorite.add",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -441,12 +425,10 @@
       ]
     },
     {
-      "id": "lighting-design-apply-pending-plan",
+      "id": "lighting-design-apply-direct-execute",
       "utterance": "把客厅应用观影灯光设计",
       "expectedIntent": "lighting.design.apply",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -460,12 +442,10 @@
       ]
     },
     {
-      "id": "room-delete-uses-pending-plan",
+      "id": "room-delete-uses-direct-execute",
       "utterance": "删除临时测试房间",
       "expectedIntent": "room.delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -479,12 +459,10 @@
       ]
     },
     {
-      "id": "automation-delete-uses-pending-plan",
+      "id": "automation-delete-uses-direct-execute",
       "utterance": "删除离家关灯自动化",
       "expectedIntent": "automation.delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -498,12 +476,10 @@
       ]
     },
     {
-      "id": "scene-update-pending-plan",
+      "id": "scene-update-direct-execute",
       "utterance": "把回家灯光情景改成打开主灯",
       "expectedIntent": "scene.update",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -517,12 +493,10 @@
       ]
     },
     {
-      "id": "home-sort-configure-uses-pending-plan",
+      "id": "home-sort-configure-uses-direct-execute",
       "utterance": "把客厅主灯排到房间设备第一位",
       "expectedIntent": "home.sort.configure",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -534,12 +508,10 @@
       ]
     },
     {
-      "id": "area-update-pending-plan",
+      "id": "area-update-direct-execute",
       "utterance": "把南区改名为公共区并关联客厅",
       "expectedIntent": "area.update",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -553,12 +525,10 @@
       ]
     },
     {
-      "id": "group-update-pending-plan",
+      "id": "group-update-direct-execute",
       "utterance": "把客厅灯组改名为主灯组并移动到卧室",
       "expectedIntent": "group.update",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -572,12 +542,10 @@
       ]
     },
     {
-      "id": "favorite-batch-add-uses-single-pending-plan",
+      "id": "favorite-batch-add-uses-single-direct-execute",
       "utterance": "把主灯和晚安情景加入首页收藏",
       "expectedIntent": "favorite.batch_add",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -702,12 +670,10 @@
       ]
     },
     {
-      "id": "knob-configure-pending-plan",
+      "id": "knob-configure-direct-execute",
       "utterance": "把客厅旋钮调整为控制回家情景",
       "expectedIntent": "knob.configure",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -721,12 +687,10 @@
       ]
     },
     {
-      "id": "panel-button-configure-pending-plan",
+      "id": "panel-button-configure-direct-execute",
       "utterance": "把客厅面板第一个按键绑定回家情景",
       "expectedIntent": "panel.button.configure",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -740,12 +704,10 @@
       ]
     },
     {
-      "id": "panel-button-event-update-pending-plan",
+      "id": "panel-button-event-update-direct-execute",
       "utterance": "把客厅面板单击动作改成回家情景",
       "expectedIntent": "panel.button_event.update",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -759,12 +721,10 @@
       ]
     },
     {
-      "id": "panel-button-event-batch-update-pending-plan",
+      "id": "panel-button-event-batch-update-direct-execute",
       "utterance": "批量更新客厅面板单击和双击动作",
       "expectedIntent": "panel.button_event.batch_update",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -778,12 +738,10 @@
       ]
     },
     {
-      "id": "panel-button-event-reset-pending-plan",
+      "id": "panel-button-event-reset-direct-execute",
       "utterance": "清空客厅面板单击动作绑定",
       "expectedIntent": "panel.button_event.reset",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -797,12 +755,10 @@
       ]
     },
     {
-      "id": "knob-reset-pending-plan",
+      "id": "knob-reset-direct-execute",
       "utterance": "清空客厅旋钮第一个键位绑定",
       "expectedIntent": "knob.reset",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1120,12 +1076,10 @@
       ]
     },
     {
-      "id": "automation-update-pending-plan",
+      "id": "automation-update-direct-execute",
       "utterance": "把回家开灯自动化改成18点触发",
       "expectedIntent": "automation.update",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1139,12 +1093,10 @@
       ]
     },
     {
-      "id": "automation-enable-pending-plan",
+      "id": "automation-enable-direct-execute",
       "utterance": "启用回家开灯自动化",
       "expectedIntent": "automation.enable",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1158,12 +1110,10 @@
       ]
     },
     {
-      "id": "automation-disable-pending-plan",
+      "id": "automation-disable-direct-execute",
       "utterance": "停用离家关灯自动化",
       "expectedIntent": "automation.disable",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1177,32 +1127,10 @@
       ]
     },
     {
-      "id": "execution-undo-pending-plan-only",
-      "utterance": "撤销刚才那个待确认计划",
-      "expectedIntent": "execution.undo",
-      "mustUse": [
-        "scripts/invoke",
-        "yeelight-home invoke --stdin",
-        "planId"
-      ],
-      "forbidden": [
-        "curl",
-        "raw HTTP",
-        "operationId",
-        "Authorization",
-        "Token",
-        "direct_url",
-        "direct_header",
-        "reverse cloud write"
-      ]
-    },
-    {
-      "id": "favorite-delete-uses-pending-plan",
+      "id": "favorite-delete-uses-direct-execute",
       "utterance": "删除主灯首页收藏",
       "expectedIntent": "favorite.delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1214,12 +1142,10 @@
       ]
     },
     {
-      "id": "favorite-batch-delete-uses-single-pending-plan",
+      "id": "favorite-batch-delete-uses-single-direct-execute",
       "utterance": "批量删除主灯和晚安情景的首页收藏",
       "expectedIntent": "favorite.batch_delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1231,12 +1157,10 @@
       ]
     },
     {
-      "id": "room-batch-delete-uses-single-pending-plan",
+      "id": "room-batch-delete-uses-single-direct-execute",
       "utterance": "删除客厅和卧室两个房间",
       "expectedIntent": "room.batch_delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1248,12 +1172,10 @@
       ]
     },
     {
-      "id": "area-batch-delete-uses-single-pending-plan",
+      "id": "area-batch-delete-uses-single-direct-execute",
       "utterance": "删除一楼和二楼两个区域",
       "expectedIntent": "area.batch_delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1265,12 +1187,10 @@
       ]
     },
     {
-      "id": "group-batch-delete-uses-single-pending-plan",
+      "id": "group-batch-delete-uses-single-direct-execute",
       "utterance": "批量删除客厅灯组和餐厅灯组",
       "expectedIntent": "group.batch_delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1282,12 +1202,10 @@
       ]
     },
     {
-      "id": "scene-batch-delete-uses-single-pending-plan",
+      "id": "scene-batch-delete-uses-single-direct-execute",
       "utterance": "批量删除回家和晚安两个情景",
       "expectedIntent": "scene.batch_delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1299,12 +1217,10 @@
       ]
     },
     {
-      "id": "automation-batch-delete-uses-single-pending-plan",
+      "id": "automation-batch-delete-uses-single-direct-execute",
       "utterance": "批量删除回家开灯和离家关灯两个自动化",
       "expectedIntent": "automation.batch_delete",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1316,12 +1232,10 @@
       ]
     },
     {
-      "id": "home-lock-all-pending-plan",
+      "id": "home-lock-all-direct-execute",
       "utterance": "锁定这个家里所有设备的重置能力",
       "expectedIntent": "home.lock_all",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1335,12 +1249,10 @@
       ]
     },
     {
-      "id": "home-unlock-all-pending-plan",
+      "id": "home-unlock-all-direct-execute",
       "utterance": "解锁这个家里所有设备的重置能力",
       "expectedIntent": "home.unlock_all",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1354,12 +1266,10 @@
       ]
     },
     {
-      "id": "entity-rename-batch-pending-plan",
+      "id": "entity-rename-batch-direct-execute",
       "utterance": "把主灯和晚安情景批量改名",
       "expectedIntent": "entity.rename.batch",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1677,12 +1587,10 @@
       ]
     },
     {
-      "id": "device-slot-create-pending-plan",
+      "id": "device-slot-create-direct-execute",
       "utterance": "还没装灯，先给客厅预留两个黑色格栅灯槽位",
       "expectedIntent": "device.slot.create",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1700,8 +1608,6 @@
       "utterance": "帮这个新家庭做完整照明设计：客厅一个吸顶灯两个格栅灯，卧室四个筒灯，相同类型自动成组，并先创建槽位",
       "expectedIntent": "lighting.design.import",
       "mustUse": [
-        "confirmation_required",
-        "plan.commit",
         "scripts/invoke"
       ],
       "forbidden": [
@@ -1722,7 +1628,6 @@
         "scripts/product-select.mjs",
         "materialCode",
         "lighting.design.import",
-        "confirmation_required",
         "scripts/invoke"
       ],
       "forbidden": [

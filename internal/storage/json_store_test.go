@@ -2,6 +2,7 @@ package storage
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,147 @@ func TestJSONStoreRejectsTokenLikePreferenceType(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected token-like preference type to be rejected")
+	}
+}
+
+func TestJSONStoreUpsertPreferenceMergesNearDuplicateWarmPreference(t *testing.T) {
+	store := NewJSONStore(filepath.Join(t.TempDir(), "memory.json"))
+	first, err := store.UpsertPreference(PreferenceRecord{
+		Profile:         "family-main",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "客厅",
+		PreferenceType:  "color_temperature",
+		PreferenceValue: "柔和暖光",
+		Evidence:        "第一次说喜欢柔和暖光",
+		CreatedAt:       10,
+		UpdatedAt:       10,
+	})
+	if err != nil {
+		t.Fatalf("first UpsertPreference error: %v", err)
+	}
+	if !first.Created || first.Record.PreferenceValue != "prefer_warm" {
+		t.Fatalf("first = %#v", first)
+	}
+	second, err := store.UpsertPreference(PreferenceRecord{
+		Profile:         "family-main",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "客厅",
+		PreferenceType:  "color_temperature",
+		PreferenceValue: "偏暖一点",
+		Evidence:        "第二次说偏暖一点",
+		CreatedAt:       20,
+		UpdatedAt:       20,
+	})
+	if err != nil {
+		t.Fatalf("second UpsertPreference error: %v", err)
+	}
+	if second.Created || !second.Merged || second.Record.ID != first.Record.ID {
+		t.Fatalf("second = %#v first = %#v", second, first)
+	}
+	loaded, err := store.ListPreferences("family-main", "house-1")
+	if err != nil {
+		t.Fatalf("ListPreferences error: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].PreferenceValue != "prefer_warm" {
+		t.Fatalf("loaded = %#v", loaded)
+	}
+	if !strings.Contains(loaded[0].Evidence, "第一次") || !strings.Contains(loaded[0].Evidence, "第二次") {
+		t.Fatalf("merged evidence = %q", loaded[0].Evidence)
+	}
+}
+
+func TestJSONStoreUpsertPreferenceMergesNightDimmerPreference(t *testing.T) {
+	store := NewJSONStore(filepath.Join(t.TempDir(), "memory.json"))
+	first, err := store.UpsertPreference(PreferenceRecord{
+		Profile:         "family-main",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "主卧",
+		PreferenceType:  "brightness",
+		PreferenceValue: "夜里别太亮",
+		Evidence:        "夜间偏好",
+		CreatedAt:       10,
+		UpdatedAt:       10,
+	})
+	if err != nil {
+		t.Fatalf("first UpsertPreference error: %v", err)
+	}
+	second, err := store.UpsertPreference(PreferenceRecord{
+		Profile:         "family-main",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "主卧",
+		PreferenceType:  "brightness",
+		PreferenceValue: "暗一点",
+		Evidence:        "亮度纠正",
+		CreatedAt:       20,
+		UpdatedAt:       20,
+	})
+	if err != nil {
+		t.Fatalf("second UpsertPreference error: %v", err)
+	}
+	if second.Created || !second.Merged || first.Record.PreferenceValue != "prefer_dimmer" || second.Record.PreferenceValue != "prefer_dimmer" {
+		t.Fatalf("first = %#v second = %#v", first, second)
+	}
+	loaded, err := store.ListPreferences("family-main", "house-1")
+	if err != nil {
+		t.Fatalf("ListPreferences error: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].PreferenceValue != "prefer_dimmer" {
+		t.Fatalf("loaded = %#v", loaded)
+	}
+}
+
+func TestJSONStoreUpsertPreferenceDeduplicatesEvidenceParts(t *testing.T) {
+	store := NewJSONStore(filepath.Join(t.TempDir(), "memory.json"))
+	first, err := store.UpsertPreference(PreferenceRecord{
+		Profile:         "family-main",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "客厅",
+		PreferenceType:  "color_temperature",
+		PreferenceValue: "柔和暖光",
+		Evidence:        "用户说客厅喜欢柔和暖光；用户说客厅喜欢柔和暖光",
+		CreatedAt:       10,
+		UpdatedAt:       10,
+	})
+	if err != nil {
+		t.Fatalf("first UpsertPreference error: %v", err)
+	}
+	second, err := store.UpsertPreference(PreferenceRecord{
+		Profile:         "family-main",
+		HouseID:         "house-1",
+		ScopeType:       "room",
+		ScopeRef:        "客厅",
+		PreferenceType:  "color_temperature",
+		PreferenceValue: "偏暖一点",
+		Evidence:        "用户说客厅喜欢柔和暖光；补充为晚上也偏暖",
+		CreatedAt:       20,
+		UpdatedAt:       20,
+	})
+	if err != nil {
+		t.Fatalf("second UpsertPreference error: %v", err)
+	}
+	if second.Created || !second.Merged || second.Record.ID != first.Record.ID {
+		t.Fatalf("second = %#v first = %#v", second, first)
+	}
+	loaded, err := store.ListPreferences("family-main", "house-1")
+	if err != nil {
+		t.Fatalf("ListPreferences error: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded = %#v", loaded)
+	}
+	if strings.Count(loaded[0].Evidence, "用户说客厅喜欢柔和暖光") != 1 {
+		t.Fatalf("duplicate evidence was not removed: %q", loaded[0].Evidence)
+	}
+	if !strings.Contains(loaded[0].Evidence, "补充为晚上也偏暖") {
+		t.Fatalf("new evidence was not preserved: %q", loaded[0].Evidence)
+	}
+	if len([]rune(loaded[0].Evidence)) > maxMergedEvidenceRunes {
+		t.Fatalf("evidence too long: %d", len([]rune(loaded[0].Evidence)))
 	}
 }
 

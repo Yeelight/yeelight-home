@@ -9,10 +9,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeLightingDesignApplyPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareLightingDesignApply(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -40,7 +40,7 @@ func (app *app) invokeLightingDesignApplyPlan(ctx context.Context, request contr
 	recipe := selectLightingRecipe(request, domainCatalog)
 	actions, preview, calls := lightingDesignApplyActions(ctx, endpoint, houseID, selectedDevices, recipe, request, authorization, clientID)
 	if len(actions) == 0 {
-		return planCommitBlockedResponse(request, "", "lighting_design_no_verifiable_actions", "当前设计没有可验证的设备级灯光动作，未生成应用计划。"), nil
+		return executionBlockedResponse(request, "lighting_design_no_verifiable_actions", "当前设计没有可验证的设备级灯光动作，未生成可执行操作。"), nil
 	}
 	payload := map[string]any{
 		"houseId": requestNumberOrString(houseID),
@@ -48,19 +48,17 @@ func (app *app) invokeLightingDesignApplyPlan(ctx context.Context, request contr
 		"recipe":  recipe,
 		"actions": actions,
 	}
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, "应用照明设计到已验证设备属性", payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, "应用照明设计到已验证设备属性", payload, []string{
 		"提交前重新读取家庭实体和目标设备",
 		"按设备能力只应用 Runtime 已验证支持的灯光属性",
-		"本计划只提交已解析的设备属性动作；如需创建情景、自动化或分组，应使用对应独立 intent",
+		"本操作只提交已解析的设备属性动作；如需创建情景、自动化或分组，应使用对应独立 intent",
 		"提交后逐项读取设备状态验证结果",
-	}, time.Now(), pendingPlanTTL)
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, calls), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, preview, calls), nil
 }
 
 func lightingDesignApplyActions(ctx context.Context, endpoint api.Endpoint, houseID string, devices []api.EntitySummary, recipe map[string]any, request contract.Request, authorization string, clientID string) ([]any, map[string]any, int) {
@@ -268,10 +266,10 @@ func hasPropertyID(ids []string, candidates ...string) bool {
 	return false
 }
 
-func (app *app) commitLightingDesignApplyPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeLightingDesignApply(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	actions, ok := requestMapList(record.Payload["actions"])
 	if !ok || len(actions) == 0 {
-		return planCommitBlockedResponse(request, record.ID, "lighting_design_no_verifiable_actions", "照明设计应用计划没有可执行动作。"), nil
+		return executionBlockedResponse(request, "lighting_design_no_verifiable_actions", "照明设计应用操作没有可执行动作。"), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: record.HouseID,
@@ -293,10 +291,7 @@ func (app *app) commitLightingDesignApplyPlan(ctx context.Context, request contr
 		}
 		results = append(results, result)
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return lightingDesignApplyCommitResponse(request, record, entities, results, apiCalls), nil
+	return lightingDesignApplyExecuteResponse(request, record, entities, results, apiCalls), nil
 }
 
 func (app *app) commitLightingDesignAction(ctx context.Context, endpoint api.Endpoint, houseID string, entities api.EntityListResult, action map[string]any, authorization string, clientID string) (map[string]any, int, error) {

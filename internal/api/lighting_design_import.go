@@ -117,6 +117,9 @@ func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any
 	if _, err := parseID(houseID, "house id"); err != nil {
 		return nil, err
 	}
+	if normalized, ok, err := normalizedLightingDesignImportPayload(houseID, payload); ok || err != nil {
+		return normalized, err
+	}
 	clearAll := boolFromMap(payload, "clearAll") || boolFromMap(payload, "overwrite")
 	rooms, err := normalizeLightingDesignRooms(payload)
 	if err != nil {
@@ -257,6 +260,75 @@ func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any
 		result["automations"] = automations
 	}
 	return result, nil
+}
+
+func normalizedLightingDesignImportPayload(houseID string, payload map[string]any) (map[string]any, bool, error) {
+	rooms, hasRooms := mapListFromAny(payload["rooms"])
+	devices, hasDevices := mapListFromAny(payload["devices"])
+	gateways, hasGateways := mapListFromAny(payload["gateways"])
+	if !hasRooms || (!hasDevices && !hasGateways && !lightingDesignRoomsLookNormalized(rooms)) {
+		return nil, false, nil
+	}
+	if len(rooms) == 0 {
+		return nil, true, fmt.Errorf("at least one room is required")
+	}
+	if len(rooms) > lightingDesignMaxRooms {
+		return nil, true, fmt.Errorf("room count exceeds limit %d", lightingDesignMaxRooms)
+	}
+	if len(devices) > lightingDesignMaxDevices {
+		return nil, true, fmt.Errorf("device slot count exceeds limit %d", lightingDesignMaxDevices)
+	}
+	groups, _ := mapListFromAny(payload["deviceGroups"])
+	if len(groups) > lightingDesignMaxGroups {
+		return nil, true, fmt.Errorf("device group count exceeds limit %d", lightingDesignMaxGroups)
+	}
+	scenes, err := normalizeLightingDesignMetadataList(payload["scenes"], lightingDesignMaxScenes, "scene")
+	if err != nil {
+		return nil, true, err
+	}
+	automations, err := normalizeLightingDesignMetadataList(payload["automations"], lightingDesignMaxAutomations, "automation")
+	if err != nil {
+		return nil, true, err
+	}
+	gatewayID := int64FromMap(payload, "gatewayLocalId", lightingDesignDefaultGatewayLocalID)
+	if gatewayID <= 0 {
+		gatewayID = lightingDesignDefaultGatewayLocalID
+	}
+	if !hasGateways {
+		gateways = []map[string]any{{
+			"localId":   gatewayID,
+			"localName": firstNonEmpty(stringFromMap(payload, "gatewayName"), "AI照明设计网关槽位"),
+			"pid":       int64FromMap(payload, "gatewayPid", 17000001),
+			"pcId":      int64FromMap(payload, "gatewayPcId", 2),
+		}}
+	}
+	result := map[string]any{
+		"houseId":  requestNumberOrStringForAPI(houseID),
+		"clearAll": boolFromMap(payload, "clearAll") || boolFromMap(payload, "overwrite"),
+		"gateways": mapsToAny(gateways),
+		"rooms":    mapsToAny(rooms),
+		"devices":  mapsToAny(devices),
+		"async":    boolFromMap(payload, "async"),
+	}
+	if len(groups) > 0 {
+		result["deviceGroups"] = mapsToAny(groups)
+	}
+	if len(scenes) > 0 {
+		result["scenes"] = scenes
+	}
+	if len(automations) > 0 {
+		result["automations"] = automations
+	}
+	return result, true, nil
+}
+
+func lightingDesignRoomsLookNormalized(rooms []map[string]any) bool {
+	for _, room := range rooms {
+		if strings.TrimSpace(stringFromMap(room, "localName")) != "" || int64FromMap(room, "localId", 0) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func (client LightingDesignImportClient) verify(ctx context.Context, houseID string, credentials requestCredentials, counts map[string]int, attempts int, interval time.Duration) (bool, int, error) {

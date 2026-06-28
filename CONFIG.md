@@ -124,7 +124,7 @@ yeelight-home scene execute --scene-id <scene-id> --json
 yeelight-home light on --device-id <device-id> --json
 yeelight-home light brightness --device-id <device-id> --brightness 60 --json
 yeelight-home automation enable --automation-id <automation-id> --json
-yeelight-home plan commit --plan-id <plan-id> --json
+yeelight-home invoke --stdin --dry-run
 ```
 
 Resource groups exposed by the CLI:
@@ -240,7 +240,7 @@ yeelight-home auth status --json
 yeelight-home auth login --qr
 ```
 
-If QR login is unavailable and you already have an approved token, import it locally outside chat:
+If QR login is unavailable and you already have an authorized token, import it locally outside chat:
 
 ```sh
 printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn

@@ -11,7 +11,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/config"
 	"github.com/yeelight/yeelight-home/internal/credential"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -33,12 +33,12 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 }
 
 type app struct {
-	qrClient      auth.QRClient
-	tokenStore    credential.Store
-	metadataStore credential.FileMetadataStore
-	planStore     plan.Store
-	memoryStore   storage.JSONStore
-	sleep         func(context.Context, time.Duration) error
+	qrClient          auth.QRClient
+	tokenStore        credential.Store
+	metadataStore     credential.FileMetadataStore
+	preparedOperation *operation.Prepared
+	memoryStore       storage.JSONStore
+	sleep             func(context.Context, time.Duration) error
 }
 
 func newAppFromEnv() *app {
@@ -47,17 +47,9 @@ func newAppFromEnv() *app {
 	app := &app{
 		tokenStore:    credential.NewFallbackStore(credential.NewSystemStore("yeelight-home"), fileTokenStore),
 		metadataStore: credential.NewFileMetadataStore(filepath.Join(paths.ConfigDir, "profiles.json")),
-		planStore:     plan.NewStore(filepath.Join(paths.DataDir, "pending_plans.json")),
 		memoryStore:   storage.NewJSONStore(filepath.Join(paths.DataDir, "memory.json")),
 	}
-	app.configureMemoryPlanRecovery()
 	return app
-}
-
-func (app *app) configureMemoryPlanRecovery() {
-	app.planStore = app.planStore.WithBeforeCompact(func(records []plan.Record) error {
-		return app.recoverCommittedMemoryPlanRecords(records, time.Now().Unix())
-	})
 }
 
 func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
@@ -76,11 +68,6 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 			return printCommandHelp(stdout, stderr, "api")
 		}
 		return app.runAPI(args[1:], stdout, stderr)
-	case "approve":
-		if hasSubcommandHelp(args[1:]) {
-			return printCommandHelp(stdout, stderr, "approve")
-		}
-		return app.runApprove(args[1:], stdout, stderr)
 	case "auth":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "auth")

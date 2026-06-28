@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestInvokeRoomRenameCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeRoomRenameDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -23,26 +23,26 @@ func TestInvokeRoomRenameCreatesPendingPlanWithoutWriting(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-room-rename-plan","locale":"zh-CN","utterance":"把客厅改成影音室","intent":"room.rename","parameters":{"houseId":"200171","roomId":"401398","name":"影音室"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/room/401391/w/update") {
-			t.Fatalf("room.rename should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("room.rename dry-run should not write: %#v", gotCalls)
 		}
 	}
 	if strings.Contains(stdout.String(), "token-space-write-secret") || strings.Contains(stderr.String(), "token-space-write-secret") {
 		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	planID := response["confirmation"].(map[string]any)["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "room.rename" || record.Payload["name"] != "影音室" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)
+	if preview["intent"] != "room.rename" || result["dryRun"] != true {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -72,7 +72,7 @@ func TestInvokeDeviceMoveRequiresKnownTargetRoom(t *testing.T) {
 	}
 }
 
-func TestInvokeAreaUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeAreaUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -86,31 +86,27 @@ func TestInvokeAreaUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-area-update-plan","locale":"zh-CN","utterance":"把南区改名为公共区并关联客厅","intent":"area.update","parameters":{"houseId":"200171","areaId":"300001","name":"公共区","roomIds":["401398"]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/area/300001/w/modify") {
-			t.Fatalf("area.update should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("area.update dry-run should not write: %#v", gotCalls)
 		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	planID := response["confirmation"].(map[string]any)["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "area.update" || record.Payload["name"] != "公共区" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
-	}
-	preview := response["confirmation"].(map[string]any)["payloadPreview"].(map[string]any)["semanticPreview"].(map[string]any)
-	if _, ok := preview["current"]; !ok {
-		t.Fatalf("missing current preview: %#v", preview)
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)["payloadPreview"].(map[string]any)["semanticPreview"].(map[string]any)
+	if _, ok := preview["current"]; !ok || result["dryRun"] != true {
+		t.Fatalf("preview = %#v result=%#v", preview, result)
 	}
 }
 
-func TestInvokeRoomUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeRoomUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -124,27 +120,27 @@ func TestInvokeRoomUpdateCreatesPendingPlanWithoutWriting(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-room-update-plan","locale":"zh-CN","utterance":"把客厅改成会客厅并设置网关","intent":"room.update","parameters":{"houseId":"200171","roomId":"401398","name":"会客厅","gatewayDeviceId":"50018330","seq":2}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/room/401398/w/update") {
-			t.Fatalf("room.update should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("room.update dry-run should not write: %#v", gotCalls)
 		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	planID := response["confirmation"].(map[string]any)["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "room.update" || record.Payload["name"] != "会客厅" || record.Payload["gatewayDeviceId"] != "50018330" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)
+	if preview["intent"] != "room.update" || result["dryRun"] != true {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestInvokeDeviceMoveRoomBatchCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeDeviceMoveRoomBatchDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -158,28 +154,27 @@ func TestInvokeDeviceMoveRoomBatchCreatesPendingPlanWithoutWriting(t *testing.T)
 	input := `{"contractVersion":"1.0","requestId":"req-device-batch-move-plan","locale":"zh-CN","utterance":"把两盏灯批量移动到客厅","intent":"device.move_room.batch","parameters":{"houseId":"200171","items":[{"deviceId":"50018330","roomId":"401398"},{"deviceId":"50018430","roomId":"401398"}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/device/room/w/batch-modify") {
-			t.Fatalf("device.move_room.batch should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("device.move_room.batch dry-run should not write: %#v", gotCalls)
 		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	planID := response["confirmation"].(map[string]any)["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	items, _ := record.Payload["items"].(map[string]any)
-	if err != nil || !ok || record.Intent != "device.move_room.batch" || items["50018330"] != "401398" || items["50018430"] != "401398" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)
+	if preview["intent"] != "device.move_room.batch" || result["dryRun"] != true {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestInvokePlanCommitMovesDeviceFromStoredPlan(t *testing.T) {
+func TestInvokeDeviceMoveExecutesDirectly(t *testing.T) {
 	var writeBody map[string]any
 	deviceListCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -211,14 +206,8 @@ func TestInvokePlanCommitMovesDeviceFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-space-write-secret", "client-space-write-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "device.move", map[string]any{
-		"houseId":  float64(200171),
-		"deviceId": "50018330",
-		"id":       "50018330",
-		"roomId":   "401392",
-	})
 
-	input := `{"contractVersion":"1.0","requestId":"req-device-move-commit","locale":"zh-CN","utterance":"确认移动","intent":"plan.commit","parameters":{"planId":"` + planID + `","roomId":"ignored"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-device-move-execute","locale":"zh-CN","utterance":"把主灯移动到卧室","intent":"device.move","parameters":{"houseId":"200171","deviceId":"50018330","roomId":"401392"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -230,7 +219,7 @@ func TestInvokePlanCommitMovesDeviceFromStoredPlan(t *testing.T) {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "space-batch-organization-commit" {
+	if response["status"] != "success" || response["traceId"] != "space-batch-organization-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
@@ -239,7 +228,7 @@ func TestInvokePlanCommitMovesDeviceFromStoredPlan(t *testing.T) {
 	}
 }
 
-func TestInvokePlanCommitUpdatesRoomFromStoredPlan(t *testing.T) {
+func TestInvokeRoomUpdateExecutesDirectly(t *testing.T) {
 	var writeBody map[string]any
 	roomListCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -271,15 +260,8 @@ func TestInvokePlanCommitUpdatesRoomFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-space-write-secret", "client-space-write-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "room.update", map[string]any{
-		"houseId":         float64(200171),
-		"roomId":          "401391",
-		"id":              "401391",
-		"name":            "会客厅",
-		"gatewayDeviceId": "gw-1",
-	})
 
-	input := `{"contractVersion":"1.0","requestId":"req-room-update-commit","locale":"zh-CN","utterance":"确认更新房间","intent":"plan.commit","parameters":{"planId":"` + planID + `","name":"ignored","gatewayDeviceId":"ignored"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-room-update-execute","locale":"zh-CN","utterance":"把客厅改成会客厅并设置网关","intent":"room.update","parameters":{"houseId":"200171","roomId":"401391","name":"会客厅","gatewayDeviceId":"gw-1"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -290,12 +272,12 @@ func TestInvokePlanCommitUpdatesRoomFromStoredPlan(t *testing.T) {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "space-organization-commit" {
+	if response["status"] != "success" || response["traceId"] != "space-organization-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 }
 
-func TestInvokePlanCommitMovesDeviceRoomBatchFromStoredPlan(t *testing.T) {
+func TestInvokeDeviceMoveRoomBatchExecutesDirectly(t *testing.T) {
 	var writeBody map[string]any
 	deviceListCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -327,15 +309,8 @@ func TestInvokePlanCommitMovesDeviceRoomBatchFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-space-write-secret", "client-space-write-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "device.move_room.batch", map[string]any{
-		"houseId": float64(200171),
-		"items": map[string]any{
-			"50018330": "401392",
-			"50018430": "401392",
-		},
-	})
 
-	input := `{"contractVersion":"1.0","requestId":"req-device-batch-move-commit","locale":"zh-CN","utterance":"确认批量移动","intent":"plan.commit","parameters":{"planId":"` + planID + `","items":[{"deviceId":"ignored","roomId":"ignored"}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-device-batch-move-execute","locale":"zh-CN","utterance":"把两盏灯批量移动到卧室","intent":"device.move_room.batch","parameters":{"houseId":"200171","items":[{"deviceId":"50018330","roomId":"401392"},{"deviceId":"50018430","roomId":"401392"}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -347,7 +322,7 @@ func TestInvokePlanCommitMovesDeviceRoomBatchFromStoredPlan(t *testing.T) {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "space-batch-organization-commit" {
+	if response["status"] != "success" || response["traceId"] != "space-batch-organization-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
@@ -356,7 +331,7 @@ func TestInvokePlanCommitMovesDeviceRoomBatchFromStoredPlan(t *testing.T) {
 	}
 }
 
-func TestInvokePlanCommitUpdatesGroupFromStoredPlan(t *testing.T) {
+func TestInvokeGroupUpdateExecutesDirectly(t *testing.T) {
 	var writeBody map[string]any
 	groupListCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -388,15 +363,8 @@ func TestInvokePlanCommitUpdatesGroupFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-space-write-secret", "client-space-write-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "group.update", map[string]any{
-		"houseId": float64(200171),
-		"groupId": "group-1",
-		"id":      "group-1",
-		"name":    "主灯组",
-		"roomId":  "401392",
-	})
 
-	input := `{"contractVersion":"1.0","requestId":"req-group-update-commit","locale":"zh-CN","utterance":"确认更新设备组","intent":"plan.commit","parameters":{"planId":"` + planID + `","roomId":"ignored","name":"ignored"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-group-update-execute","locale":"zh-CN","utterance":"把灯组改名为主灯组并移动到卧室","intent":"group.update","parameters":{"houseId":"200171","groupId":"group-1","name":"主灯组","roomId":"401392"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -407,12 +375,12 @@ func TestInvokePlanCommitUpdatesGroupFromStoredPlan(t *testing.T) {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "space-organization-commit" {
+	if response["status"] != "success" || response["traceId"] != "space-organization-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 }
 
-func TestInvokePlanCommitUpdatesGroupNameWithoutRoomFromStoredPlan(t *testing.T) {
+func TestInvokeGroupNameUpdateExecutesDirectly(t *testing.T) {
 	var writeBody map[string]any
 	groupListCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -443,14 +411,8 @@ func TestInvokePlanCommitUpdatesGroupNameWithoutRoomFromStoredPlan(t *testing.T)
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-space-write-secret", "client-space-write-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "group.update", map[string]any{
-		"houseId": float64(200171),
-		"groupId": "group-1",
-		"id":      "group-1",
-		"name":    "主灯组",
-	})
 
-	input := `{"contractVersion":"1.0","requestId":"req-group-name-update-commit","locale":"zh-CN","utterance":"确认更新设备组名称","intent":"plan.commit","parameters":{"planId":"` + planID + `","roomId":"ignored","name":"ignored"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-group-name-update-execute","locale":"zh-CN","utterance":"把灯组改名为主灯组","intent":"group.update","parameters":{"houseId":"200171","groupId":"group-1","name":"主灯组"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -461,7 +423,7 @@ func TestInvokePlanCommitUpdatesGroupNameWithoutRoomFromStoredPlan(t *testing.T)
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "space-organization-commit" {
+	if response["status"] != "success" || response["traceId"] != "space-organization-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)

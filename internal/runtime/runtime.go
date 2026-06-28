@@ -78,16 +78,6 @@ func ownerReviewPolicy(risk string, blockReason string, userMessage string) gove
 	}
 }
 
-func localApprovePolicy(blockReason string, userMessage string) governedFallbackPolicy {
-	return governedFallbackPolicy{
-		policyStatus: "blocked_missing_local_approve",
-		risk:         "R3",
-		blockReason:  blockReason,
-		userMessage:  userMessage,
-		nextAction:   "等待本机 approve 命令和一次性挑战文本机制启用。",
-	}
-}
-
 func governedFallbackResponse(request contract.Request, policy governedFallbackPolicy, runtimeMs int64) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,

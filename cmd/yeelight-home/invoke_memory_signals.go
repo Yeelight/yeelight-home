@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -45,7 +44,7 @@ func shouldObserveMemorySignal(request contract.Request, houseID string, respons
 		return false
 	}
 	switch request.Intent {
-	case "memory.remember", "memory.list", "memory.pause", "memory.resume", "memory.forget", "recommendation.list", "recommendation.feedback", "plan.commit", "plan.cancel", "execution.undo":
+	case "memory.remember", "memory.list", "memory.pause", "memory.resume", "memory.forget", "recommendation.list", "recommendation.feedback":
 		return false
 	default:
 		return true
@@ -204,91 +203,6 @@ func (app *app) ensureImplicitSignalRecommendation(signal storage.InteractionSig
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	})
-}
-
-func (app *app) recoverCommittedMemoryPlans(profile string, houseID string, now int64) error {
-	records, err := app.planStore.List()
-	if err != nil {
-		return err
-	}
-	return app.recoverCommittedMemoryPlanRecordsForScope(records, profile, houseID, now)
-}
-
-func (app *app) recoverCommittedMemoryPlanRecords(records []plan.Record, now int64) error {
-	seenScopes := map[string]bool{}
-	for _, record := range records {
-		if record.Intent != "memory.remember" || record.Status != plan.StatusCommitted {
-			continue
-		}
-		scopeKey := record.Profile + "\x00" + record.HouseID
-		if seenScopes[scopeKey] {
-			continue
-		}
-		seenScopes[scopeKey] = true
-		if err := app.recoverCommittedMemoryPlanRecordsForScope(records, record.Profile, record.HouseID, now); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (app *app) recoverCommittedMemoryPlanRecordsForScope(records []plan.Record, profile string, houseID string, now int64) error {
-	consent, ok, err := app.memoryStore.Consent(profile, houseID)
-	if err != nil {
-		return err
-	}
-	if !ok || !memoryConsentActive(consent) {
-		return nil
-	}
-	for _, record := range records {
-		if !recoverableMemoryPlan(record, profile, houseID, consent) {
-			continue
-		}
-		memoryRecord, ok := preferenceRecordFromCommittedPlan(record, now)
-		if !ok {
-			continue
-		}
-		if err := app.memoryStore.SavePreference(memoryRecord); err != nil {
-			return err
-		}
-		if err := app.ensurePreferenceRecommendation(memoryRecord, now); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func recoverableMemoryPlan(record plan.Record, profile string, houseID string, consent storage.ConsentRecord) bool {
-	if record.Profile != profile || record.HouseID != houseID {
-		return false
-	}
-	if record.Intent != "memory.remember" || record.Status != plan.StatusCommitted {
-		return false
-	}
-	if record.CommittedAt <= 0 || consent.UpdatedAt > record.CommittedAt {
-		return false
-	}
-	return true
-}
-
-func preferenceRecordFromCommittedPlan(record plan.Record, now int64) (storage.PreferenceRecord, bool) {
-	memoryRecord := storage.PreferenceRecord{
-		ID:              record.ID,
-		Profile:         record.Profile,
-		HouseID:         record.HouseID,
-		ScopeType:       planPayloadString(record.Payload, "scopeType"),
-		ScopeRef:        planPayloadString(record.Payload, "scopeRef"),
-		PreferenceType:  planPayloadString(record.Payload, "preferenceType"),
-		PreferenceValue: planPayloadString(record.Payload, "preferenceValue"),
-		Kind:            firstNonEmptyString(planPayloadString(record.Payload, "kind"), "explicit"),
-		Evidence:        firstNonEmptyString(planPayloadString(record.Payload, "evidence"), "从已提交本地记忆计划恢复"),
-		CreatedAt:       firstPositiveInt64(record.CommittedAt, record.CreatedAt, now),
-		UpdatedAt:       now,
-	}
-	if strings.TrimSpace(memoryRecord.PreferenceType) == "" || strings.TrimSpace(memoryRecord.PreferenceValue) == "" {
-		return storage.PreferenceRecord{}, false
-	}
-	return memoryRecord, true
 }
 
 func shortHash(value string) string {

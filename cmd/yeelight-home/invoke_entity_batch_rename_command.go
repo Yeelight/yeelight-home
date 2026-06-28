@@ -9,12 +9,12 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
 const entityRenameBatchLimit = 20
 
-func (app *app) invokeEntityBatchRenamePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareEntityBatchRename(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -41,19 +41,17 @@ func (app *app) invokeEntityBatchRenamePlan(ctx context.Context, request contrac
 	}
 	preview := entityBatchRenamePreview(items, entities)
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("批量重命名 %d 个设备或情景", len(items)), payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("批量重命名 %d 个设备或情景", len(items)), payload, []string{
 		"提交前重新读取家庭实体列表",
 		"每个目标必须是当前家庭下的设备或情景",
 		"单次计划最多重命名 20 个目标",
 		"提交后通过 entity.list 验证每个目标名称",
-	}, now, pendingPlanTTL)
+	}, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, 0), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
 }
 
 func normalizeEntityBatchRenameItems(request contract.Request, entities api.EntityListResult) ([]any, string) {
@@ -196,7 +194,7 @@ func entityBatchRenameAcceptedFields() []string {
 	return []string{"parameters.houseId", "parameters.items[].entityType", "parameters.items[].id", "parameters.items[].currentName", "parameters.items[].newName", "parameters.items[].typeId"}
 }
 
-func (app *app) commitEntityBatchRenamePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeEntityBatchRename(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewEntityBatchRenameClient(endpoint, nil).Run(ctx, api.EntityBatchRenameRequest{
 		HouseID:        record.HouseID,
 		Payload:        record.Payload,
@@ -210,8 +208,5 @@ func (app *app) commitEntityBatchRenamePlan(ctx context.Context, request contrac
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return entityBatchRenameCommitResponse(request, record, result), nil
+	return entityBatchRenameExecuteResponse(request, record, result), nil
 }

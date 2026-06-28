@@ -202,6 +202,34 @@ func TestNormalizeLightingDesignImportPayloadPreservesAISelectedProducts(t *test
 	}
 }
 
+func TestNormalizeLightingDesignImportPayloadIsIdempotent(t *testing.T) {
+	normalized, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
+		"rooms": []any{
+			map[string]any{
+				"name": "客厅",
+				"items": []any{
+					map[string]any{"name": "黑色格栅灯", "quantity": float64(2), "category": "格栅灯"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Normalize error: %v", err)
+	}
+	renormalized, err := NormalizeLightingDesignImportPayload("200191", normalized)
+	if err != nil {
+		t.Fatalf("Normalize normalized payload error: %v", err)
+	}
+	devices := renormalized["devices"].([]any)
+	if len(devices) != 2 {
+		t.Fatalf("renormalized devices=%#v", devices)
+	}
+	rooms := renormalized["rooms"].([]any)
+	if len(rooms) != 1 || rooms[0].(map[string]any)["localName"] != "客厅" {
+		t.Fatalf("renormalized rooms=%#v", rooms)
+	}
+}
+
 func TestLightingDesignImportClientSyncsMetadataAndVerifies(t *testing.T) {
 	var syncBody map[string]any
 	var calls []string

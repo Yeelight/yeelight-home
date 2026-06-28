@@ -2,14 +2,13 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
 
-func TestInvokeDeviceRemoveRequiresLocalApprovalBeforeCommit(t *testing.T) {
+func TestInvokeDeviceRemoveExecutesDirectlyAfterCallerConfirmation(t *testing.T) {
 	deviceVisible := true
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -44,63 +43,24 @@ func TestInvokeDeviceRemoveRequiresLocalApprovalBeforeCommit(t *testing.T) {
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
-		t.Fatalf("plan exit code = %d, stderr = %s", code, stderr.String())
-	}
-	for _, call := range gotCalls {
-		if strings.Contains(call, "/w/info") {
-			t.Fatalf("device.remove should not write before approval and commit: %#v", gotCalls)
-		}
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "destructive-delete-execute" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	if confirmation["risk"] != "R3" || confirmation["approvalRequired"] != true || confirmation["approvalChallenge"] == "" {
-		t.Fatalf("confirmation = %#v", confirmation)
-	}
-	planID := confirmation["planId"].(string)
-
-	stdout.Reset()
-	stderr.Reset()
-	commitInput := `{"contractVersion":"1.0","requestId":"req-device-remove-commit-blocked","locale":"zh-CN","utterance":"确认执行","intent":"plan.commit","parameters":{"planId":"` + planID + `"}}`
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("blocked commit exit code = %d, stderr = %s", code, stderr.String())
-	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "blocked" || response["error"].(map[string]any)["code"] != "local_approval_required" {
-		t.Fatalf("blocked response = %#v", response)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	challenge := confirmation["approvalChallenge"].(string)
-	code = app.run([]string{"approve", "--json", "--plan-id", planID, "--challenge", challenge}, strings.NewReader(""), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("approve exit code = %d, stderr = %s", code, stderr.String())
-	}
-	var approveResponse map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &approveResponse); err != nil {
-		t.Fatalf("invalid approve json: %v", err)
-	}
-	if approveResponse["status"] != "approved" || approveResponse["risk"] != "R3" {
-		t.Fatalf("approveResponse = %#v", approveResponse)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("approved commit exit code = %d, stderr = %s", code, stderr.String())
-	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "destructive-delete-commit" {
-		t.Fatalf("commit response = %#v", response)
-	}
 	result := response["result"].(map[string]any)
-	if result["capability"] != "device.remove" || result["risk"] != "R3" || result["localApproval"] != true || result["verified"] != true {
+	if result["capability"] != "device.remove" || result["risk"] != "R3" || result["verified"] != true {
 		t.Fatalf("result = %#v", result)
+	}
+	deleteCalls := 0
+	for _, call := range gotCalls {
+		if strings.Contains(call, "DELETE /apis/iot/v2/thing/manage/house/200171/device/50018330/w/info") {
+			deleteCalls++
+		}
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls = %#v", gotCalls)
 	}
 }
 
@@ -140,47 +100,14 @@ func TestInvokeHomeDeleteUsesHouseScopedFallbackForNewlyCreatedHome(t *testing.T
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
-		t.Fatalf("plan exit code = %d, stderr = %s", code, stderr.String())
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	confirmation := response["confirmation"].(map[string]any)
-	if response["status"] != "confirmation_required" || confirmation["risk"] != "R3" || confirmation["approvalRequired"] != true {
-		t.Fatalf("response = %#v", response)
-	}
-	planID := confirmation["planId"].(string)
-	commitInput := `{"contractVersion":"1.0","requestId":"req-home-delete-commit","locale":"zh-CN","utterance":"确认","intent":"plan.commit","parameters":{"planId":"` + planID + `"}}`
-
-	stdout.Reset()
-	stderr.Reset()
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("blocked commit exit code = %d, stderr = %s", code, stderr.String())
-	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "blocked" || response["error"].(map[string]any)["code"] != "local_approval_required" {
-		t.Fatalf("blocked response = %#v", response)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	challenge := confirmation["approvalChallenge"].(string)
-	code = app.run([]string{"approve", "--json", "--plan-id", planID, "--challenge", challenge}, strings.NewReader(""), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("approve exit code = %d, stderr = %s", code, stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("approved commit exit code = %d, stderr = %s", code, stderr.String())
-	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "destructive-delete-commit" {
-		t.Fatalf("commit response = %#v, calls=%#v", response, gotCalls)
+	if response["status"] != "success" || response["traceId"] != "destructive-delete-execute" {
+		t.Fatalf("response = %#v, calls=%#v", response, gotCalls)
 	}
 	result := response["result"].(map[string]any)
-	if result["capability"] != "home.delete" || result["risk"] != "R3" || result["localApproval"] != true || result["verified"] != true {
+	if result["capability"] != "home.delete" || result["risk"] != "R3" || result["verified"] != true {
 		t.Fatalf("result = %#v", result)
 	}
 }

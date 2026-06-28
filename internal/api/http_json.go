@@ -25,6 +25,7 @@ type requestCredentials struct {
 	Authorization string
 	ClientID      string
 	HouseID       string
+	BizType       string
 }
 
 func callJSON(ctx context.Context, client *http.Client, method string, url string, body map[string]any, credentials requestCredentials) (map[string]any, error) {
@@ -46,7 +47,6 @@ func callJSONBody(ctx context.Context, client *http.Client, method string, url s
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Accept-Language", "zh-CN")
-	request.Header.Set("bizType", "1")
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
@@ -60,6 +60,9 @@ func callJSONBody(ctx context.Context, client *http.Client, method string, url s
 		houseID := strings.TrimSpace(credentials.HouseID)
 		request.Header.Set("houseId", houseID)
 		request.Header.Set("house-id", houseID)
+	}
+	if strings.TrimSpace(credentials.BizType) != "" {
+		request.Header.Set("bizType", strings.TrimSpace(credentials.BizType))
 	}
 
 	response, err := client.Do(request)

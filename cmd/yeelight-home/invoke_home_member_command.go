@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeHomeMemberPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareHomeMember(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -31,27 +31,25 @@ func (app *app) invokeHomeMemberPlan(ctx context.Context, request contract.Reque
 			return contract.Response{}, err
 		}
 	}
-	payload, preconditions, summary, risk, challenge, err := buildHomeMemberPayload(request, houseID, currentUID, members)
+	payload, preconditions, summary, risk, err := buildHomeMemberPayload(request, houseID, currentUID, members)
 	if err != nil {
 		return configureClarificationResponse(request, err.Error(), homeMemberAcceptedFields(request.Intent)), nil
 	}
-	record, err := plan.NewRecordWithRisk(profile, region, houseID, request.Intent, request.RequestID, summary, risk, challenge, payload, preconditions, time.Now(), pendingPlanTTL)
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, summary, risk, payload, preconditions, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
+	app.preparedOperation = &record
 	preview := homeMemberPreview(request.Intent, payload, members)
-	return pendingPlanResponseWithPreview(request, record, api.EntityListResult{Region: endpoint.Region, HouseID: houseID, APICalls: memberCalls}, preview, accountCalls), nil
+	return executionPreviewResponseWithDetails(request, record, api.EntityListResult{Region: endpoint.Region, HouseID: houseID, APICalls: memberCalls}, preview, accountCalls), nil
 }
 
-func buildHomeMemberPayload(request contract.Request, houseID string, currentUID string, members []map[string]any) (map[string]any, []string, string, string, string, error) {
+func buildHomeMemberPayload(request contract.Request, houseID string, currentUID string, members []map[string]any) (map[string]any, []string, string, string, error) {
 	switch request.Intent {
 	case "home.member.invite":
 		expiredTime, ok := valueInt(firstNonNil(request.Parameters["expiredTime"], request.Parameters["expiresAt"]))
 		if !ok || expiredTime <= 0 {
-			return nil, nil, "", "", "", fmt.Errorf("invalid_home_member_invite_payload")
+			return nil, nil, "", "", fmt.Errorf("invalid_home_member_invite_payload")
 		}
 		userRole, ok := normalizedHomeMemberRole(firstNonNil(request.Parameters["userRole"], request.Parameters["role"]))
 		if !ok {
@@ -67,7 +65,7 @@ func buildHomeMemberPayload(request contract.Request, houseID string, currentUID
 				"提交前重新读取家庭成员列表",
 				"只有当前账号具备家庭分享权限时云端才会生成分享码",
 				"生成结果只返回脱敏后的分享证据，不暴露 Token 或原始接口信息",
-			}, "生成家庭分享邀请码", plan.RiskR2, "", nil
+			}, "生成家庭分享邀请码", operation.RiskR2, nil
 	case "home.member.accept_share":
 		shareID := firstValueIDString(request.Parameters, "shareId", "id")
 		createTime, ok := valueInt(request.Parameters["createTime"])
@@ -76,7 +74,7 @@ func buildHomeMemberPayload(request contract.Request, houseID string, currentUID
 			acceptedHouseID = houseID
 		}
 		if shareID == "" || !ok || createTime <= 0 || acceptedHouseID == "" || currentUID == "" {
-			return nil, nil, "", "", "", fmt.Errorf("invalid_home_member_accept_share_payload")
+			return nil, nil, "", "", fmt.Errorf("invalid_home_member_accept_share_payload")
 		}
 		return map[string]any{
 				"houseId":    requestNumberOrString(acceptedHouseID),
@@ -86,14 +84,14 @@ func buildHomeMemberPayload(request contract.Request, houseID string, currentUID
 			}, []string{
 				"Runtime 使用当前本地登录账号作为接受人，不接受模型传入 toUid",
 				"分享码必须提供结构化 shareId 与 createTime",
-				"plan.commit 只接受 planId，忽略提交时附带的分享字段",
+				"Runtime 根据当前请求构建受控分享 payload",
 				"提交后通过 home.summary 验证新家庭在当前账号下可见",
-			}, "接受家庭分享", plan.RiskR2, "", nil
+			}, "接受家庭分享", operation.RiskR2, nil
 	case "home.member.configure":
 		memberID := firstValueIDString(request.Parameters, "memberId", "uid", "userId", "id")
 		userRole, ok := normalizedHomeMemberRole(firstNonNil(request.Parameters["userRole"], request.Parameters["role"]))
 		if memberID == "" || !ok || userRole == 1 || !homeMemberExists(members, memberID) {
-			return nil, nil, "", "", "", fmt.Errorf("invalid_home_member_configure_payload")
+			return nil, nil, "", "", fmt.Errorf("invalid_home_member_configure_payload")
 		}
 		return map[string]any{
 				"houseId":  requestNumberOrString(houseID),
@@ -103,55 +101,50 @@ func buildHomeMemberPayload(request contract.Request, houseID string, currentUID
 			}, []string{
 				"提交前重新读取家庭成员列表",
 				"仅允许在普通成员与管理员之间切换角色",
-				"plan.commit 只接受 planId，忽略提交时附带的角色字段",
+				"Runtime 根据当前请求构建受控成员角色 payload",
 				"提交后通过 home.member.list 验证目标成员角色",
-			}, "更新家庭成员角色", plan.RiskR2, "", nil
+			}, "更新家庭成员角色", operation.RiskR2, nil
 	case "home.member.remove":
 		memberID := firstValueIDString(request.Parameters, "memberId", "uid", "userId", "id")
 		if memberID == "" || !homeMemberExists(members, memberID) || homeMemberIsMaster(members, memberID) {
-			return nil, nil, "", "", "", fmt.Errorf("invalid_home_member_remove_payload")
+			return nil, nil, "", "", fmt.Errorf("invalid_home_member_remove_payload")
 		}
-		challenge := "REMOVE home.member " + memberID
 		return map[string]any{
 			"houseId":  requestNumberOrString(houseID),
 			"memberId": requestNumberOrString(memberID),
-		}, homeMemberR3Preconditions("移除家庭成员"), "移除家庭成员", plan.RiskR3, challenge, nil
+		}, homeMemberR3Preconditions("移除家庭成员"), "移除家庭成员", operation.RiskR3, nil
 	case "home.member.transfer":
 		memberID := firstValueIDString(request.Parameters, "memberId", "uid", "userId", "id")
 		if memberID == "" || !homeMemberExists(members, memberID) || homeMemberIsMaster(members, memberID) {
-			return nil, nil, "", "", "", fmt.Errorf("invalid_home_member_transfer_payload")
+			return nil, nil, "", "", fmt.Errorf("invalid_home_member_transfer_payload")
 		}
-		challenge := "TRANSFER home.member " + memberID
 		return map[string]any{
 			"houseId":  requestNumberOrString(houseID),
 			"memberId": requestNumberOrString(memberID),
-		}, homeMemberR3Preconditions("转移家庭管理员权限"), "转移家庭管理员权限", plan.RiskR3, challenge, nil
+		}, homeMemberR3Preconditions("转移家庭管理员权限"), "转移家庭管理员权限", operation.RiskR3, nil
 	case "home.member.quit":
 		uid := firstValueIDString(request.Parameters, "uid", "memberId", "userId", "id")
 		if uid == "" {
 			uid = currentUID
 		}
 		if uid == "" || !homeMemberExists(members, uid) || homeMemberIsMaster(members, uid) {
-			return nil, nil, "", "", "", fmt.Errorf("invalid_home_member_quit_payload")
+			return nil, nil, "", "", fmt.Errorf("invalid_home_member_quit_payload")
 		}
-		challenge := "QUIT home.member " + uid
 		return map[string]any{
 			"houseId": requestNumberOrString(houseID),
 			"uid":     requestNumberOrString(uid),
-		}, homeMemberR3Preconditions("退出分享家庭"), "退出分享家庭", plan.RiskR3, challenge, nil
+		}, homeMemberR3Preconditions("退出分享家庭"), "退出分享家庭", operation.RiskR3, nil
 	default:
-		return nil, nil, "", "", "", fmt.Errorf("unsupported_home_member_intent")
+		return nil, nil, "", "", fmt.Errorf("unsupported_home_member_intent")
 	}
 }
 
 func homeMemberR3Preconditions(action string) []string {
 	return []string{
-		"这是 R3 高影响成员操作计划，普通 plan.commit 会被阻断",
-		"必须先在本机终端运行 approveCommand 完成一次性审批",
-		"plan.commit 只接受 planId，忽略提交时附带的成员字段",
-		"提交前 Runtime 会重新读取成员并确认目标仍属于当前家庭",
-		"提交后 Runtime 会通过 home.member.list 验证结果",
-		action + "可能影响家庭访问权限，需要用户明确确认",
+		"这是 R3 高影响成员操作；调用方应在调用 Runtime 前完成自己的用户确认",
+		"执行前 Runtime 会重新读取成员并确认目标仍属于当前家庭",
+		"执行后 Runtime 会通过 home.member.list 验证结果",
+		action + "可能影响家庭访问权限",
 	}
 }
 
@@ -185,7 +178,7 @@ func requestBoolDefault(value any, fallback bool) bool {
 }
 
 func homeMemberPreview(intent string, payload map[string]any, members []map[string]any) map[string]any {
-	preview := map[string]any{"planned": pendingPlanPayloadPreview(plan.Record{HouseID: requestString(payload["houseId"]), Payload: payload})}
+	preview := map[string]any{"planned": executionPayloadPreview(operation.Prepared{HouseID: requestString(payload["houseId"]), Payload: payload})}
 	memberID := firstNonEmptyString(valueIDString(payload["memberId"]), valueIDString(payload["uid"]))
 	if memberID != "" {
 		if member, ok := findHomeMember(members, memberID); ok {
@@ -198,8 +191,9 @@ func homeMemberPreview(intent string, payload map[string]any, members []map[stri
 	}
 	if intent == "home.member.transfer" || intent == "home.member.remove" || intent == "home.member.quit" {
 		preview["impact"] = map[string]any{
-			"mode":                 "r3_home_member_mutation",
-			"requiresLocalApprove": true,
+			"mode":                       "r3_home_member_mutation",
+			"callerShouldConfirm":        true,
+			"runtimeApprovalStateStored": false,
 		}
 	}
 	return preview
@@ -222,7 +216,7 @@ func homeMemberAcceptedFields(intent string) []string {
 	}
 }
 
-func (app *app) commitHomeMemberPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.HomeMemberKind) (contract.Response, error) {
+func (app *app) executeHomeMember(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.HomeMemberKind) (contract.Response, error) {
 	result, err := api.NewHomeMemberClient(endpoint, nil).Run(ctx, api.HomeMemberRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -237,10 +231,7 @@ func (app *app) commitHomeMemberPlan(ctx context.Context, request contract.Reque
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return homeMemberCommitResponse(request, record, result), nil
+	return homeMemberExecuteResponse(request, record, result), nil
 }
 
 func homeMemberExists(members []map[string]any, uid string) bool {

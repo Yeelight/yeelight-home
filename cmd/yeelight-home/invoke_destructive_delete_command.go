@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeDestructiveDeletePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareDestructiveDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -45,20 +45,15 @@ func (app *app) invokeDestructiveDeletePlan(ctx context.Context, request contrac
 		"name":       target.Name,
 	}
 	payload[idKey] = target.ID
-	challenge := destructiveDeleteChallenge(request.Intent, target.ID, target.Name)
-	record, err := plan.NewRecordWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("删除%s %s", metadataDeleteLabel(targetType), firstNonEmptyString(target.Name, target.ID)), plan.RiskR3, challenge, payload, []string{
-		"这是 R3 高影响删除计划，普通 plan.commit 会被阻断",
-		"必须先在本机终端运行 approveCommand 完成一次性审批",
-		"plan.commit 只接受 planId，忽略提交时附带的删除字段",
-		"提交前 Runtime 会重新读取目标并验证仍属于当前家庭",
-		"提交后 Runtime 会通过只读列表或详情验证目标已经消失",
-	}, time.Now(), pendingPlanTTL)
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("删除%s %s", metadataDeleteLabel(targetType), firstNonEmptyString(target.Name, target.ID)), operation.RiskR3, payload, []string{
+		"这是 R3 高影响删除操作；调用方应在调用 Runtime 前完成自己的用户确认",
+		"执行前 Runtime 会重新读取目标并验证仍属于当前家庭",
+		"执行后 Runtime 会通过只读列表或详情验证目标已经消失",
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
+	app.preparedOperation = &record
 	preview := map[string]any{
 		"deleteTarget": map[string]any{
 			"type": target.Type,
@@ -66,12 +61,12 @@ func (app *app) invokeDestructiveDeletePlan(ctx context.Context, request contrac
 			"name": target.Name,
 		},
 		"impact": map[string]any{
-			"mode":                 "r3_destructive_delete",
-			"requiresLocalApprove": true,
-			"approvalChallenge":    challenge,
+			"mode":                       "r3_destructive_delete",
+			"callerShouldConfirm":        true,
+			"runtimeApprovalStateStored": false,
 		},
 	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, apiCalls-entityListAPICalls(entities)), nil
+	return executionPreviewResponseWithDetails(request, record, entities, preview, apiCalls-entityListAPICalls(entities)), nil
 }
 
 func destructiveDeleteIntentSpec(intent string) (string, string, api.DestructiveDeleteKind, bool) {
@@ -178,14 +173,7 @@ func ternaryHouseID(condition bool, whenTrue string, whenFalse string) string {
 	return whenFalse
 }
 
-func destructiveDeleteChallenge(intent string, entityID string, name string) string {
-	if strings.TrimSpace(name) == "" {
-		return "DELETE " + intent + " " + strings.TrimSpace(entityID)
-	}
-	return "DELETE " + intent + " " + strings.TrimSpace(entityID) + " " + strings.TrimSpace(name)
-}
-
-func (app *app) commitDestructiveDeletePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.DestructiveDeleteKind) (contract.Response, error) {
+func (app *app) executeDestructiveDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.DestructiveDeleteKind) (contract.Response, error) {
 	result, err := api.NewDestructiveDeleteClient(endpoint, nil).Run(ctx, api.DestructiveDeleteRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -200,8 +188,5 @@ func (app *app) commitDestructiveDeletePlan(ctx context.Context, request contrac
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return destructiveDeleteCommitResponse(request, record, result), nil
+	return destructiveDeleteExecuteResponse(request, record, result), nil
 }

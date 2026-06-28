@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeGatewayConfigurationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareGatewayConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -46,26 +46,24 @@ func (app *app) invokeGatewayConfigurationPlan(ctx context.Context, request cont
 	if reason := validateGatewayConfigurationPayload(payload, entities); reason != "" {
 		return configureClarificationResponse(request, reason, gatewayConfigurationAcceptedFields()), nil
 	}
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新网关 %s", firstNonEmptyString(detail.Name, gatewayID)), payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新网关 %s", firstNonEmptyString(detail.Name, gatewayID)), payload, []string{
 		"提交前重新读取网关详情",
 		"关联房间必须属于当前家庭",
-		"plan.commit 只接受 planId，忽略提交时附带的网关字段",
+		"Runtime 根据当前请求构建受控网关 payload",
 		"提交后通过 gateway.detail.get 验证名称字段；其他字段按云端写入确认加详情可读性验证",
-	}, time.Now(), pendingPlanTTL)
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
+	app.preparedOperation = &record
 	preview := map[string]any{
 		"current": map[string]any{"id": detail.ID, "name": detail.Name},
-		"planned": pendingPlanPayloadPreview(plan.Record{
+		"planned": executionPayloadPreview(operation.Prepared{
 			HouseID: houseID,
 			Payload: payload,
 		}),
 	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, calls), nil
+	return executionPreviewResponseWithDetails(request, record, entities, preview, calls), nil
 }
 
 func buildGatewayConfigurationPayload(request contract.Request, houseID string) (map[string]any, error) {
@@ -94,7 +92,7 @@ func gatewayConfigurationAcceptedFields() []string {
 	return []string{"parameters.houseId", "parameters.gatewayId", "parameters.name", "parameters.desc", "parameters.icon", "parameters.mac", "parameters.roomIds"}
 }
 
-func (app *app) commitGatewayConfigurationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeGatewayConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewGatewayConfigurationClient(endpoint, nil).Run(ctx, api.GatewayConfigurationRequest{
 		HouseID:        record.HouseID,
 		GatewayID:      valueIDString(record.Payload["gatewayId"]),
@@ -109,8 +107,5 @@ func (app *app) commitGatewayConfigurationPlan(ctx context.Context, request cont
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return gatewayConfigurationCommitResponse(request, record, result), nil
+	return gatewayConfigurationExecuteResponse(request, record, result), nil
 }

@@ -7,10 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
 )
 
 func TestInvokeLightingDesignPlanBuildsLocalPlan(t *testing.T) {
@@ -59,7 +57,7 @@ func TestInvokeLightingDesignPlanBuildsLocalPlan(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
-	if result["persistentWrites"] != false || result["applyBehavior"] != "pending_plan_required" {
+	if result["persistentWrites"] != false || result["applyBehavior"] != "direct_execute_supported" {
 		t.Fatalf("result = %#v", result)
 	}
 	recipe := result["selectedRecipe"].(map[string]any)
@@ -127,7 +125,7 @@ func TestRuntimeLightingCatalogIsSelfContained(t *testing.T) {
 	}
 }
 
-func TestInvokeLightingDesignApplyCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeLightingDesignApplyDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -155,32 +153,27 @@ func TestInvokeLightingDesignApplyCreatesPendingPlanWithoutWriting(t *testing.T)
 	input := `{"contractVersion":"1.0","requestId":"req-design-apply-plan","locale":"zh-CN","utterance":"把客厅应用观影灯光设计","intent":"lighting.design.apply","targets":[{"entityType":"room","id":"room-1"}],"parameters":{"mood":"观影","hex":"#3366ff"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/w/properties/") {
-			t.Fatalf("lighting.design.apply should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("lighting.design.apply dry-run should not write: %#v", gotCalls)
 		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	planID := confirmation["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "lighting.design.apply" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
-	}
-	actions := record.Payload["actions"].([]any)
-	if len(actions) < 2 {
-		t.Fatalf("record payload = %#v", record.Payload)
-	}
-	preview := confirmation["payloadPreview"].(map[string]any)
-	if _, ok := preview["actions"]; !ok {
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)
+	if preview["intent"] != "lighting.design.apply" {
 		t.Fatalf("preview = %#v", preview)
+	}
+	payloadPreview := preview["payloadPreview"].(map[string]any)
+	actions := payloadPreview["actions"].([]any)
+	if len(actions) < 2 {
+		t.Fatalf("payloadPreview = %#v", payloadPreview)
 	}
 }
 
@@ -210,20 +203,16 @@ func TestInvokeLightingDesignApplyPrefersExplicitValuesOverRecipe(t *testing.T) 
 	input := `{"contractVersion":"1.0","requestId":"req-design-apply-explicit","locale":"zh-CN","utterance":"恢复原来的关灯亮度100色温2700","intent":"lighting.design.apply","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"mood":"阅读","power":false,"brightness":100,"colorTemperature":2700}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
-	if err != nil || !ok {
-		t.Fatalf("Load error ok=%v err=%v", ok, err)
-	}
-	actions := record.Payload["actions"].([]any)
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)
+	actions := preview["payloadPreview"].(map[string]any)["actions"].([]any)
 	got := map[string]any{}
 	for _, raw := range actions {
 		action := raw.(map[string]any)
@@ -262,20 +251,16 @@ func TestInvokeLightingDesignApplyUsesExplicitDesignActions(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-design-apply-actions","locale":"zh-CN","utterance":"恢复原来的关灯亮度100色温3900","intent":"lighting.design.apply","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"design":{"actions":[{"propertyName":"p","value":false},{"propertyName":"l","value":100},{"propertyName":"ct","value":3900}]}}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
-	if err != nil || !ok {
-		t.Fatalf("Load error ok=%v err=%v", ok, err)
-	}
-	actions := record.Payload["actions"].([]any)
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)
+	actions := preview["payloadPreview"].(map[string]any)["actions"].([]any)
 	if len(actions) != 3 {
 		t.Fatalf("actions = %#v", actions)
 	}
@@ -320,20 +305,16 @@ func TestInvokeLightingDesignApplyOnlyUsesExplicitPowerWhenOnlyPowerProvided(t *
 	input := `{"contractVersion":"1.0","requestId":"req-design-apply-power-only","locale":"zh-CN","utterance":"只把主灯关掉","intent":"lighting.design.apply","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"power":false}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
-	if err != nil || !ok {
-		t.Fatalf("Load error ok=%v err=%v", ok, err)
-	}
-	actions := record.Payload["actions"].([]any)
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)
+	actions := preview["payloadPreview"].(map[string]any)["actions"].([]any)
 	if len(actions) != 1 {
 		t.Fatalf("actions = %#v", actions)
 	}
@@ -343,7 +324,7 @@ func TestInvokeLightingDesignApplyOnlyUsesExplicitPowerWhenOnlyPowerProvided(t *
 	}
 }
 
-func TestInvokePlanCommitAppliesLightingDesignFromStoredPlan(t *testing.T) {
+func TestInvokeLightingDesignApplyExecutesDirectly(t *testing.T) {
 	writeBodies := map[string]map[string]any{}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -381,23 +362,8 @@ func TestInvokePlanCommitAppliesLightingDesignFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-design-apply-secret", "client-design-apply-1", "house-1")
-	record, err := plan.NewRecord("default", "dev", "house-1", "lighting.design.apply", "req-plan", "应用照明设计", map[string]any{
-		"houseId": "house-1",
-		"actions": []any{
-			map[string]any{"deviceId": "device-1", "deviceName": "主灯", "propertyName": "p", "value": true},
-			map[string]any{"deviceId": "device-1", "deviceName": "主灯", "propertyName": "l", "value": 20},
-			map[string]any{"deviceId": "device-1", "deviceName": "主灯", "propertyName": "ct", "value": 3000},
-			map[string]any{"deviceId": "device-1", "deviceName": "主灯", "propertyName": "c", "value": 3368703},
-		},
-	}, []string{"提交后逐项读取设备状态验证结果"}, time.Now(), pendingPlanTTL)
-	if err != nil {
-		t.Fatalf("NewRecord error: %v", err)
-	}
-	if err := app.planStore.Save(record); err != nil {
-		t.Fatalf("Save error: %v", err)
-	}
 
-	input := `{"contractVersion":"1.0","requestId":"req-design-apply-commit","locale":"zh-CN","utterance":"确认应用照明设计","intent":"plan.commit","parameters":{"planId":"` + record.ID + `","actions":[{"deviceId":"ignored","propertyName":"l","value":1}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-design-apply-execute","locale":"zh-CN","utterance":"应用主灯照明设计","intent":"lighting.design.apply","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"design":{"actions":[{"deviceId":"device-1","propertyName":"p","value":true},{"deviceId":"device-1","propertyName":"l","value":20},{"deviceId":"device-1","propertyName":"ct","value":3000},{"deviceId":"device-1","propertyName":"c","value":3368703}]}}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -417,7 +383,7 @@ func TestInvokePlanCommitAppliesLightingDesignFromStoredPlan(t *testing.T) {
 		t.Fatalf("writeBodies = %#v", writeBodies)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "lighting-design-apply-commit" {
+	if response["status"] != "success" || response["traceId"] != "lighting-design-apply-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)

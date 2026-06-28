@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestInvokeHomeLockAllCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeHomeLockAllDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -22,31 +22,27 @@ func TestInvokeHomeLockAllCreatesPendingPlanWithoutWriting(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-home-lock-plan","locale":"zh-CN","utterance":"锁定这个家里所有设备的重置能力","intent":"home.lock_all","parameters":{"houseId":"200171"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/lockall") {
-			t.Fatalf("home.lock_all should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("home.lock_all dry-run should not write: %#v", gotCalls)
 		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	preview := response["confirmation"].(map[string]any)["payloadPreview"].(map[string]any)["semanticPreview"].(map[string]any)
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)["payloadPreview"].(map[string]any)["semanticPreview"].(map[string]any)
 	if preview["affectedScope"] != "whole_house" || preview["deviceCount"] != float64(2) {
 		t.Fatalf("preview = %#v", preview)
 	}
-	planID := response["confirmation"].(map[string]any)["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "home.lock_all" || record.Payload["deviceCount"] != float64(2) {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
-	}
 }
 
-func TestInvokePlanCommitHomeUnlockAllFromStoredPlan(t *testing.T) {
+func TestInvokeHomeUnlockAllExecutesDirectly(t *testing.T) {
 	unlockCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -61,12 +57,8 @@ func TestInvokePlanCommitHomeUnlockAllFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-home-unlock-secret", "client-home-lock-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "home.unlock_all", map[string]any{
-		"houseId":     float64(200171),
-		"deviceCount": 2,
-	})
 
-	input := `{"contractVersion":"1.0","requestId":"req-home-unlock-commit","locale":"zh-CN","utterance":"确认解锁","intent":"plan.commit","parameters":{"planId":"` + planID + `","houseId":"ignored"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-home-unlock-execute","locale":"zh-CN","utterance":"解锁这个家里所有设备的重置能力","intent":"home.unlock_all","parameters":{"houseId":"200171"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -77,7 +69,7 @@ func TestInvokePlanCommitHomeUnlockAllFromStoredPlan(t *testing.T) {
 		t.Fatalf("unlockCalls = %d", unlockCalls)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "home-lock-commit" {
+	if response["status"] != "success" || response["traceId"] != "home-lock-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)

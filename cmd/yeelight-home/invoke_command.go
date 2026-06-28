@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/operation"
 	localruntime "github.com/yeelight/yeelight-home/internal/runtime"
 )
 
 func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	flags, err := parseFlags(args)
 	if err != nil || !invokeFlagsAllowed(flags) || !flags.bool("stdin") {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id <id>]")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id <id>] [--dry-run|--preview-only|--plan-only]")
 		return exitInvalidInput
 	}
 	data, err := io.ReadAll(stdin)
@@ -47,7 +49,7 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 func invokeFlagsAllowed(flags cliFlags) bool {
 	for name := range flags.values {
 		switch name {
-		case "stdin", "profile", "region", "house-id":
+		case "stdin", "profile", "region", "house-id", "dry-run", "preview-only", "plan-only":
 		default:
 			return false
 		}
@@ -61,8 +63,110 @@ func (app *app) invoke(ctx context.Context, request contract.Request) (contract.
 }
 
 func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, flags cliFlags) (response contract.Response, err error) {
+	return app.invokeWithFlagsDirect(ctx, request, flags)
+}
+
+func (app *app) invokeWithFlagsDirect(ctx context.Context, request contract.Request, flags cliFlags) (contract.Response, error) {
+	originalPrepared := app.preparedOperation
+	app.preparedOperation = nil
+	defer func() {
+		app.preparedOperation = originalPrepared
+	}()
+	response, err := app.invokeWithFlagsRaw(ctx, request, flags)
+	if err != nil {
+		return contract.Response{}, err
+	}
+	if shouldReturnPreviewOnly(request, flags) {
+		if isPreparedExecutionResponse(response) {
+			return previewOnlyResponse(response), nil
+		}
+		if response.Status == "success" || response.Status == "partial" {
+			response.Warnings = appendWarning(response.Warnings, "dry_run_no_cloud_write_not_available_for_direct_adapter")
+		}
+		return response, nil
+	}
+	if !isPreparedExecutionResponse(response) {
+		return response, nil
+	}
+	record := app.preparedOperation
+	if record == nil {
+		return response, nil
+	}
+	executed, err := app.executeTransientPreparedOperation(ctx, request, flags, *record)
+	if err != nil {
+		return contract.Response{}, err
+	}
+	executed.Warnings = appendWarning(executed.Warnings, "runtime_direct_execution_after_validation")
+	if executed.Execution == nil {
+		executed.Execution = map[string]any{}
+	}
+	executed.Execution["executionMode"] = "direct"
+	return executed, nil
+}
+
+func (app *app) executeTransientPreparedOperation(ctx context.Context, request contract.Request, flags cliFlags, record operation.Prepared) (contract.Response, error) {
+	context, err := app.resolveRuntimeContext(flags)
+	if err != nil {
+		return contract.Response{}, err
+	}
+	if record.Profile != context.Profile {
+		return executionBlockedResponse(request, "profile_mismatch", "内部执行载荷不属于当前本地 profile。"), nil
+	}
+	if record.Region != context.Region {
+		return executionBlockedResponse(request, "region_mismatch", "内部执行载荷环境与当前 Runtime 环境不一致。"), nil
+	}
+	if err := record.Verify(time.Now()); err != nil {
+		return executionVerifyBlockedResponse(request, record, err), nil
+	}
+	response, err := app.executePreparedExecution(ctx, request, context.Endpoint, record, context.AccessToken, context.ClientID)
+	if err != nil {
+		return contract.Response{}, err
+	}
+	return response, nil
+}
+
+func previewOnlyResponse(response contract.Response) contract.Response {
+	preview := copyRequestMap(requestMap(response.Result["preview"]))
+	response.Status = "success"
+	response.UserMessage = "已生成执行预览；调用方确认后可重新发送同一语义请求直接执行。"
+	response.Result = map[string]any{
+		"dryRun":       true,
+		"preview":      preview,
+		"executeModel": "resend_same_intent_after_user_confirmation",
+	}
+	response.TraceID = "invoke-preview"
+	response.Warnings = appendWarning(response.Warnings, "dry_run_no_cloud_write")
+	return response
+}
+
+func isPreparedExecutionResponse(response contract.Response) bool {
+	preview := requestMap(response.Result["preview"])
+	return preview != nil && requestString(preview["executionModel"]) == "ordinary_invoke_executes_directly"
+}
+
+func shouldReturnPreviewOnly(request contract.Request, flags cliFlags) bool {
+	if flags.bool("dry-run") || flags.bool("preview-only") || flags.bool("plan-only") {
+		return true
+	}
+	for _, source := range []map[string]any{request.Options, request.Parameters} {
+		if requestBool(source, "planOnly", "exec_only", "previewOnly", "preview_only", "dryRun", "dry_run") {
+			return true
+		}
+	}
+	return false
+}
+
+func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request, flags cliFlags) (response contract.Response, err error) {
 	if flags.values == nil {
 		flags.values = map[string]string{}
+	}
+	if request.Options == nil {
+		request.Options = map[string]any{}
+	}
+	for _, name := range []string{"dry-run", "preview-only", "plan-only"} {
+		if flags.bool(name) {
+			request.Options[strings.ReplaceAll(name, "-", "")] = true
+		}
 	}
 	if region := requestString(request.Parameters["region"]); region != "" {
 		if flags.string("region", "") == "" {
@@ -88,8 +192,22 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 	region := context.Region
 	clientID := context.ClientID
 	houseID := context.HouseID
+	if isHouseIndependentInvokeIntent(request.Intent) {
+		houseID = ""
+	}
 	endpoint := context.Endpoint
 	accessToken := context.AccessToken
+	if !isHouseIndependentInvokeIntent(request.Intent) && requestHouseID(request) == "" {
+		resolvedHouseID, resolveErr := app.resolveRequestHouseID(ctx, request, endpoint, accessToken, clientID)
+		if resolveErr != nil {
+			return contract.Response{}, resolveErr
+		}
+		if resolvedHouseID != "" {
+			houseID = resolvedHouseID
+		} else if strings.TrimSpace(firstRequestString(request.HomeRef, "name", "houseName")) != "" {
+			return configureClarificationResponse(request, "home_name_not_found_or_ambiguous", []string{"homeRef.name", "homeRef.id", "parameters.houseId"}), nil
+		}
+	}
 	defer func() {
 		if err != nil {
 			return
@@ -186,19 +304,19 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 	case "product.pedia.search":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("product.pedia.search", "已搜索产品百科资料和候选说明书/FAQ 资源。"))
 	case "home.summary":
-		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunListWithSelectedFallback(ctx, api.HomeSummaryCredentials{
+		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunList(ctx, api.HomeSummaryCredentials{
 			Authorization: accessToken,
 			ClientID:      clientID,
-		}, houseID)
+		})
 		if err != nil {
 			return contract.Response{}, err
 		}
 		return homeSummaryResponse(request, summary), nil
 	case "home.list":
-		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunListWithSelectedFallback(ctx, api.HomeSummaryCredentials{
+		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunList(ctx, api.HomeSummaryCredentials{
 			Authorization: accessToken,
 			ClientID:      clientID,
-		}, houseID)
+		})
 		if err != nil {
 			return contract.Response{}, err
 		}
@@ -425,7 +543,7 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 	case "automation.explain":
 		return app.invokeAutomationExplain(ctx, request, endpoint, houseID, accessToken, clientID)
 	case "automation.capabilities":
-		return app.invokeMetadataLocalPlan(request, houseID, automationCapabilitiesSpec())
+		return app.prepareMetadataLocal(request, houseID, automationCapabilitiesSpec())
 	case "panel.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, panelGetSpec())
 	case "panel.list":
@@ -497,61 +615,61 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 	case "favorite.list":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, favoriteListSpec())
 	case "favorite.plan":
-		return app.invokeMetadataLocalPlan(request, houseID, favoritePlanSpec())
+		return app.prepareMetadataLocal(request, houseID, favoritePlanSpec())
 	case "home.sort.list":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, homeSortListSpec())
 	case "home.sort.configure", "favorite.add", "favorite.update", "favorite.delete", "favorite.batch_add", "favorite.batch_update", "favorite.batch_delete":
-		return app.invokeHomeOrganizationPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareHomeOrganization(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "home.member.invite", "home.member.accept_share", "home.member.configure", "home.member.remove", "home.member.transfer", "home.member.quit":
-		return app.invokeHomeMemberPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareHomeMember(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "home.lock_all", "home.unlock_all":
-		return app.invokeHomeLockPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareHomeLock(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "home.create":
-		return app.invokeHomeCreatePlan(ctx, request, endpoint, profile, region, accessToken, clientID)
+		return app.prepareHomeCreate(ctx, request, endpoint, profile, region, accessToken, clientID)
 	case "home.update", "room.batch_create", "room.batch_update", "room.area.configure":
-		return app.invokeHomeSpaceConfigurationPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareHomeSpaceConfiguration(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "room.rename", "room.update", "area.update", "device.rename", "device.move", "group.update":
-		return app.invokeSpaceOrganizationPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareSpaceOrganization(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "device.move_room.batch":
-		return app.invokeSpaceBatchOrganizationPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareSpaceBatchOrganization(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "device.remove", "gateway.delete", "home.delete":
-		return app.invokeDestructiveDeletePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareDestructiveDelete(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "device.unbind":
-		return app.invokeDeviceUnbindPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareDeviceUnbind(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "gateway.configure":
-		return app.invokeGatewayConfigurationPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareGatewayConfiguration(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "entity.rename.batch":
-		return app.invokeEntityBatchRenamePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareEntityBatchRename(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "room.delete", "area.delete", "group.delete", "scene.delete", "automation.delete":
-		return app.invokeMetadataDeletePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareMetadataDelete(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "room.batch_delete", "area.batch_delete", "group.batch_delete", "scene.batch_delete", "automation.batch_delete":
-		return app.invokeMetadataBatchDeletePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareMetadataBatchDelete(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "panel.button.configure", "panel.button_event.update", "panel.button_event.batch_update", "panel.button_event.reset", "knob.configure", "knob.reset":
-		return app.invokePanelConfigurationPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.preparePanelConfiguration(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "lighting.design.plan":
-		return app.invokeLightingDesignPlan(ctx, request, endpoint, houseID, accessToken, clientID)
+		return app.prepareLightingDesign(ctx, request, endpoint, houseID, accessToken, clientID)
 	case "lighting.design.apply":
-		return app.invokeLightingDesignApplyPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareLightingDesignApply(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "lighting.design.import", "device.slot.create":
-		return app.invokeLightingDesignImportPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareLightingDesignImport(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "room.create":
-		return app.invokeRoomCreatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareRoomCreate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "area.create":
-		return app.invokeMetadataCreatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, areaCreateSpec())
+		return app.prepareMetadataCreate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, areaCreateSpec())
 	case "group.create":
-		return app.invokeMetadataCreatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, groupCreateSpec())
+		return app.prepareMetadataCreate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, groupCreateSpec())
 	case "scene.create":
-		return app.invokeMetadataCreatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, sceneCreateSpec())
+		return app.prepareMetadataCreate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, sceneCreateSpec())
 	case "scene.update":
-		return app.invokeSceneUpdatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareSceneUpdate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "automation.create":
-		return app.invokeMetadataCreatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, automationCreateSpec())
+		return app.prepareMetadataCreate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, automationCreateSpec())
 	case "automation.update":
-		return app.invokeAutomationUpdatePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareAutomationUpdate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "automation.enable", "automation.disable":
-		return app.invokeAutomationStatusPlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+		return app.prepareAutomationStatus(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "memory.remember":
-		return app.invokeMemoryRememberPlan(request, profile, region, houseID)
+		return app.invokeMemoryRemember(request, profile, region, houseID)
 	case "memory.list":
 		return app.invokeMemoryList(request, profile, houseID)
 	case "memory.pause":
@@ -565,16 +683,40 @@ func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, f
 	case "recommendation.feedback":
 		return app.invokeRecommendationFeedback(request, profile, houseID)
 	case "operation.batch.configure":
-		return app.invokeOperationBatchConfigurePlan(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
-	case "plan.commit":
-		return app.invokePlanCommit(ctx, request, endpoint, profile, region, accessToken, clientID)
-	case "plan.cancel":
-		return app.invokePlanCancel(request, profile, region, houseID)
-	case "execution.undo":
-		return app.invokeExecutionUndo(request, profile, region, houseID)
+		return app.prepareOperationBatchConfigure(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	default:
 		return localruntime.NewEngine(true).Invoke(request), nil
 	}
+}
+
+func (app *app) resolveRequestHouseID(ctx context.Context, request contract.Request, endpoint api.Endpoint, accessToken string, clientID string) (string, error) {
+	if houseID := requestHouseID(request); houseID != "" {
+		return houseID, nil
+	}
+	homeName := strings.TrimSpace(firstRequestString(request.HomeRef, "name", "houseName"))
+	if homeName == "" {
+		return "", nil
+	}
+	summary, err := api.NewHomeSummaryClient(endpoint, nil).RunList(ctx, api.HomeSummaryCredentials{
+		Authorization: accessToken,
+		ClientID:      clientID,
+	})
+	if err != nil {
+		return "", err
+	}
+	matchID := ""
+	matches := 0
+	for _, house := range summary.Houses {
+		if strings.TrimSpace(house.Name) != homeName {
+			continue
+		}
+		matches++
+		matchID = house.ID
+	}
+	if matches == 1 {
+		return matchID, nil
+	}
+	return "", nil
 }
 
 func homeSummaryResponse(request contract.Request, summary api.HomeSummaryResult) contract.Response {

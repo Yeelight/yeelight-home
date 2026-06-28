@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeHomeSpaceConfigurationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareHomeSpaceConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -35,14 +35,12 @@ func (app *app) invokeHomeSpaceConfigurationPlan(ctx context.Context, request co
 	if reason := validateHomeSpaceConfigurationPayload(request.Intent, payload, entities); reason != "" {
 		return configureClarificationResponse(request, reason, homeSpaceConfigurationAcceptedFields(request.Intent)), nil
 	}
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, time.Now(), pendingPlanTTL)
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, homeSpaceConfigurationPreview(request.Intent, payload, entities), 0), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, homeSpaceConfigurationPreview(request.Intent, payload, entities), 0), nil
 }
 
 func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string) (map[string]any, []string, string, error) {
@@ -55,7 +53,7 @@ func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string
 		return payload, []string{
 			"提交前读取当前家庭详情",
 			"只更新计划中显式提交的家庭资料字段",
-			"plan.commit 只接受 planId，忽略提交时附带的更新字段",
+			"Runtime 根据当前请求构建受控更新 payload",
 			"提交后通过家庭详情回读验证；名称字段可做精确验证，其余字段按云端写入确认加详情可读性验证",
 		}, "更新家庭资料", nil
 	case "room.batch_create":
@@ -84,7 +82,7 @@ func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string
 				"提交前重新读取家庭实体列表",
 				"每个目标房间必须属于当前家庭",
 				"单次计划最多更新 20 个房间",
-				"plan.commit 只接受 planId，忽略提交时附带的更新字段",
+				"Runtime 根据当前请求构建受控更新 payload",
 				"提交后通过 entity.list 按房间 id/name 逐项验证",
 			}, fmt.Sprintf("批量更新%d个房间", len(rooms)), nil
 	case "room.area.configure":
@@ -102,7 +100,7 @@ func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string
 			}, []string{
 				"提交前重新读取家庭实体列表",
 				"目标房间和所有区域必须属于当前家庭",
-				"plan.commit 只接受 planId，忽略提交时附带的区域字段",
+				"Runtime 根据当前请求构建受控区域 payload",
 				"提交后通过 entity.list 确认房间和区域仍可访问；区域归属字段以云端写入确认作为证据",
 			}, "调整房间区域归属", nil
 	default:
@@ -234,7 +232,7 @@ func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any
 }
 
 func homeSpaceConfigurationPreview(intent string, payload map[string]any, entities api.EntityListResult) map[string]any {
-	preview := map[string]any{"planned": pendingPlanPayloadPreview(plan.Record{HouseID: requestString(payload["houseId"]), Payload: payload})}
+	preview := map[string]any{"planned": executionPayloadPreview(operation.Prepared{HouseID: requestString(payload["houseId"]), Payload: payload})}
 	switch intent {
 	case "room.batch_update":
 		rooms, _ := payload["rooms"].([]any)
@@ -282,7 +280,7 @@ func stringListAsRequestIDs(values []string) []any {
 	return result
 }
 
-func (app *app) commitHomeSpaceConfigurationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.HomeSpaceConfigurationKind) (contract.Response, error) {
+func (app *app) executeHomeSpaceConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.HomeSpaceConfigurationKind) (contract.Response, error) {
 	result, err := api.NewHomeSpaceConfigurationClient(endpoint, nil).Run(ctx, api.HomeSpaceConfigurationRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -297,8 +295,5 @@ func (app *app) commitHomeSpaceConfigurationPlan(ctx context.Context, request co
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return homeSpaceConfigurationCommitResponse(request, record, result), nil
+	return homeSpaceConfigurationExecuteResponse(request, record, result), nil
 }

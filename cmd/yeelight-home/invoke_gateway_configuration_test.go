@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestInvokeGatewayConfigureCreatesPlanAndCommitsStoredPayload(t *testing.T) {
+func TestInvokeGatewayConfigureExecutesDirectly(t *testing.T) {
 	var writeBody map[string]any
 	gatewayDetailReads := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -48,29 +48,13 @@ func TestInvokeGatewayConfigureCreatesPlanAndCommitsStoredPayload(t *testing.T) 
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
-		t.Fatalf("plan exit code = %d, stderr = %s", code, stderr.String())
-	}
-	if writeBody != nil {
-		t.Fatalf("gateway.configure should not write before commit: %#v", writeBody)
-	}
-	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
-		t.Fatalf("plan response = %#v", response)
-	}
-	planID := response["confirmation"].(map[string]any)["planId"].(string)
-
-	stdout.Reset()
-	stderr.Reset()
-	commitInput := `{"contractVersion":"1.0","requestId":"req-gateway-configure-commit","locale":"zh-CN","utterance":"确认","intent":"plan.commit","parameters":{"planId":"` + planID + `","name":"恶意覆盖应被忽略"}}`
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("commit exit code = %d, stderr = %s", code, stderr.String())
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	if writeBody["name"] != "新网关" || writeBody["gatewayId"] != nil || writeBody["houseId"] != nil {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "gateway-configuration-commit" {
-		t.Fatalf("commit response = %#v", response)
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "gateway-configuration-execute" {
+		t.Fatalf("response = %#v", response)
 	}
 }

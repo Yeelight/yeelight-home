@@ -7,7 +7,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
 func (app *app) buildOperationBatchStepPlanPayload(ctx context.Context, request contract.Request, endpoint api.Endpoint, _ string, _ string, houseID string, authorization string, clientID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -64,7 +64,7 @@ func operationBatchRoomCreatePayload(request contract.Request, houseID string, e
 	if err != nil {
 		return nil, nil, "", nil, 0, "invalid_room_create_payload", nil
 	}
-	return payload, nil, fmt.Sprintf("创建房间 %s", roomName), pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+	return payload, nil, fmt.Sprintf("创建房间 %s", roomName), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchMetadataCreatePayload(request contract.Request, houseID string, entities api.EntityListResult, spec configureCreateSpec, label string) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -81,7 +81,7 @@ func operationBatchMetadataCreatePayload(request contract.Request, houseID strin
 			return nil, nil, "", nil, 0, fmt.Sprintf("%s_name_already_exists", spec.entityType), nil
 		}
 	}
-	return payload, spec.preconditions, fmt.Sprintf("创建%s %s", label, name), pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+	return payload, spec.preconditions, fmt.Sprintf("创建%s %s", label, name), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchHomeOrganizationPayload(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -93,7 +93,7 @@ func operationBatchHomeOrganizationPayload(ctx context.Context, request contract
 		return nil, nil, "", nil, 0, reason, nil
 	}
 	if request.Intent != "home.sort.configure" {
-		return payload, preconditions, summary, pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+		return payload, preconditions, summary, executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 	}
 	preview, calls, err := homeSortPreview(ctx, endpoint, houseID, authorization, clientID, payload)
 	if err != nil {
@@ -145,7 +145,7 @@ func operationBatchSceneUpdatePayload(request contract.Request, houseID string, 
 		return nil, nil, "", nil, 0, reason, nil
 	}
 	name := firstNonEmptyString(planPayloadString(payload, "name"), valueIDString(payload["sceneId"]))
-	return payload, nil, fmt.Sprintf("更新情景 %s", name), pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+	return payload, nil, fmt.Sprintf("更新情景 %s", name), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchAutomationUpdatePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -161,7 +161,7 @@ func operationBatchAutomationUpdatePayload(request contract.Request, houseID str
 		return nil, nil, "", nil, 0, reason, nil
 	}
 	name := firstNonEmptyString(planPayloadString(payload, "name"), automation.Name)
-	return payload, nil, fmt.Sprintf("更新自动化 %s", name), pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+	return payload, nil, fmt.Sprintf("更新自动化 %s", name), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchAutomationStatusPayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -170,7 +170,7 @@ func operationBatchAutomationStatusPayload(request contract.Request, houseID str
 		return nil, nil, "", nil, 0, reason, nil
 	}
 	payload := map[string]any{"houseId": requestNumberOrString(houseID), "automationId": automation.ID}
-	return payload, nil, automationStatusSummary(request.Intent, automation), pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+	return payload, nil, automationStatusSummary(request.Intent, automation), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchGatewayConfigurePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -184,7 +184,7 @@ func operationBatchGatewayConfigurePayload(request contract.Request, houseID str
 	if !entityExists(entities, "device", valueIDString(payload["gatewayId"])) {
 		return nil, nil, "", nil, 0, "invalid_gateway_reference", nil
 	}
-	return payload, nil, "更新网关配置", pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+	return payload, nil, "更新网关配置", executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchPanelConfigurePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -195,7 +195,7 @@ func operationBatchPanelConfigurePayload(request contract.Request, houseID strin
 	if !entityExists(entities, "device", valueIDString(payload["deviceId"])) {
 		return nil, nil, "", nil, 0, "invalid_panel_device_reference", nil
 	}
-	return payload, preconditions, summary, pendingPlanPayloadPreview(plan.Record{HouseID: houseID, Payload: payload}), 0, "", nil
+	return payload, preconditions, summary, executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchLightingDesignImportPayload(request contract.Request, houseID string) (map[string]any, []string, string, map[string]any, int, string, error) {

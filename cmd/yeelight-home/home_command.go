@@ -53,10 +53,10 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 		_, _ = fmt.Fprintln(stderr, "home list: missing token; run auth login --qr or auth token set")
 		return exitInvalidInput
 	}
-	summary, err := api.NewHomeSummaryClient(contextInfo.Endpoint, nil).RunListWithSelectedFallback(context.Background(), api.HomeSummaryCredentials{
+	summary, err := api.NewHomeSummaryClient(contextInfo.Endpoint, nil).RunList(context.Background(), api.HomeSummaryCredentials{
 		Authorization: contextInfo.AccessToken,
 		ClientID:      contextInfo.ClientID,
-	}, contextInfo.HouseID)
+	})
 	if err != nil {
 		var statusErr api.HTTPStatusError
 		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
@@ -76,7 +76,10 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 			"rawShape":   summary.RawShape,
 			"apiCalls":   summary.APICalls,
 			"source":     summary.Source,
-			"houseId":    contextInfo.HouseID,
+			"houseId":    "",
+		}
+		if contextInfo.HouseID != "" {
+			response["selectedHouseId"] = contextInfo.HouseID
 		}
 		if summary.HouseCount == 0 {
 			response["warnings"] = []string{"empty_account_home_list"}
@@ -90,9 +93,6 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 	}
 	for _, house := range summary.Houses {
 		_, _ = fmt.Fprintf(stdout, "%s\t%s\n", house.ID, house.Name)
-	}
-	if summary.HouseCount == 0 && contextInfo.HouseID != "" {
-		_, _ = fmt.Fprintf(stdout, "(selected) %s\n", contextInfo.HouseID)
 	}
 	return exitOK
 }

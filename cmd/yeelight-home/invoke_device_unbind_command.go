@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeDeviceUnbindPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareDeviceUnbind(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -46,32 +46,24 @@ func (app *app) invokeDeviceUnbindPlan(ctx context.Context, request contract.Req
 		"clearMac":         clearMac,
 		"unbindRelDevices": unbindRelDevices,
 	}
-	challenge := "UNBIND device " + target.ID
-	if target.Name != "" {
-		challenge += " " + target.Name
-	}
-	record, err := plan.NewRecordWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("解绑设备 %s", firstNonEmptyString(target.Name, target.ID)), plan.RiskR3, challenge, payload, []string{
-		"这是 R3 高影响设备解绑计划，普通 plan.commit 会被阻断",
-		"必须先在本机终端运行 approveCommand 完成一次性审批",
-		"plan.commit 只接受 planId，忽略提交时附带的解绑字段",
-		"提交前 Runtime 会重新读取设备并验证仍属于当前家庭",
-		"提交后 Runtime 会通过 entity.list 验证设备已消失或已变为未绑定状态",
-	}, time.Now(), pendingPlanTTL)
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("解绑设备 %s", firstNonEmptyString(target.Name, target.ID)), operation.RiskR3, payload, []string{
+		"这是 R3 高影响设备解绑操作；调用方应在调用 Runtime 前完成自己的用户确认",
+		"执行前 Runtime 会重新读取设备并验证仍属于当前家庭",
+		"执行后 Runtime 会通过 entity.list 验证设备已消失或已变为未绑定状态",
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
+	app.preparedOperation = &record
 	preview := map[string]any{
 		"unbindTarget": map[string]any{"type": "device", "id": target.ID, "name": target.Name},
 		"options":      map[string]any{"clearMac": clearMac, "unbindRelDevices": unbindRelDevices},
-		"impact":       map[string]any{"mode": "r3_device_unbind", "requiresLocalApprove": true},
+		"impact":       map[string]any{"mode": "r3_device_unbind", "callerShouldConfirm": true, "runtimeApprovalStateStored": false},
 	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, 0), nil
+	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
 }
 
-func (app *app) commitDeviceUnbindPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeDeviceUnbind(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewDeviceUnbindClient(endpoint, nil).Run(ctx, api.DeviceUnbindRequest{
 		HouseID:          record.HouseID,
 		DeviceID:         valueIDString(record.Payload["deviceId"]),
@@ -87,10 +79,7 @@ func (app *app) commitDeviceUnbindPlan(ctx context.Context, request contract.Req
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return deviceUnbindCommitResponse(request, record, result), nil
+	return deviceUnbindExecuteResponse(request, record, result), nil
 }
 
 func boolFromPlanPayload(value any) bool {

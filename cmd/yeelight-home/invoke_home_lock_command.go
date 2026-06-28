@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeHomeLockPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareHomeLock(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -33,14 +33,12 @@ func (app *app) invokeHomeLockPlan(ctx context.Context, request contract.Request
 		return configureClarificationResponse(request, err.Error(), homeLockAcceptedFields(request.Intent)), nil
 	}
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now, pendingPlanTTL)
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, homeLockPreview(request.Intent, entities), 0), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, homeLockPreview(request.Intent, entities), 0), nil
 }
 
 func buildHomeLockPayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, error) {
@@ -90,7 +88,7 @@ func homeLockAcceptedFields(intent string) []string {
 	}
 }
 
-func (app *app) commitHomeLockPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.HomeLockKind) (contract.Response, error) {
+func (app *app) executeHomeLock(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.HomeLockKind) (contract.Response, error) {
 	result, err := api.NewHomeLockClient(endpoint, nil).Run(ctx, api.HomeLockRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -104,8 +102,5 @@ func (app *app) commitHomeLockPlan(ctx context.Context, request contract.Request
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return homeLockCommitResponse(request, record, result), nil
+	return homeLockExecuteResponse(request, record, result), nil
 }

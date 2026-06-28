@@ -10,7 +10,7 @@ Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH
 
 - 直连 Yeelight 云端能力，覆盖家庭、房间、区域、设备、灯组、网关、面板、旋钮、情景、自动化、诊断、灯光设计、产品知识、本地记忆和推荐。
 - 产品百科搜索：支持按产品名、型号、SKU/SPU、物料编码、条码或模糊关键词查询产品资料、附件、说明书候选地址和 FAQ 候选地址。
-- 安全写入模型：持久化写入、删除和高风险操作先生成本地待确认计划，只有 `plan.commit` 携带已保存的 `planId` 才会执行。
+- 薄执行模型：持久化写入、删除和高风险操作通过语义 Runtime adapter 校验后直接执行；调用方负责用户确认，需要预览时使用 dry-run。
 - 凭据本地化：token 优先进入系统凭据存储；普通 profile 配置只保存 region、houseId、qrDevice 等非密钥元数据。
 - 多 profile：可为不同账号、区域、家庭或测试环境维护独立配置。
 - 默认区域是 `cn`，也支持 `sg`、`us`、`eu`，开发场景可显式使用 `dev`。
@@ -26,12 +26,12 @@ Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH
 | 家庭拓扑 | 家庭、房间、区域、灯组、网关、面板、旋钮、传感器、统一实体列表 |
 | 设备控制 | 开关、亮度、色温、颜色、行为执行、状态查询 |
 | 组织管理 | 房间和设备命名、设备移动、收藏、首页排序、面板和旋钮配置 |
-| 情景和自动化 | 列表、详情、执行、创建/更新/删除计划、启用/禁用、提交确认 |
+| 情景和自动化 | 列表、详情、执行、创建/更新/删除、启用/禁用、写后验证 |
 | 产品知识 | `product.pedia.search`、说明书和 FAQ 候选资源、物模型 schema、产品定义 |
 | 诊断维护 | 网关/设备诊断、升级文件、进度查询、安装和凭据诊断 |
 | 本地智能 | 本地偏好记忆、推荐列表、推荐反馈、冷却和拒绝 |
 
-只读能力会立即执行。持久化写入和删除默认走待确认计划，除非该命令明确是只读或诊断命令。
+只读能力会立即执行。持久化写入和删除也通过语义 Runtime adapter 校验后直接执行；调用方需要先让用户确认时，可使用 `--dry-run`、`--preview-only` 或 `options.dryRun=true` 获取无写入预览。
 
 ## 安装
 
@@ -149,10 +149,9 @@ yeelight-home room list --json
 yeelight-home scene execute --scene-id <scene-id> --json
 yeelight-home light brightness --device-id <device-id> --brightness 60 --json
 yeelight-home automation enable --automation-id <automation-id> --json
-yeelight-home plan commit --plan-id <plan-id> --json
 ```
 
-资源命令和 `invoke` 共用同一套 Runtime adapter、校验、脱敏、待确认计划和写后验证规则。
+资源命令和 `invoke` 共用同一套 Runtime adapter、校验、脱敏、直接执行、dry-run 预览和写后验证规则。
 
 查看帮助：
 
@@ -190,16 +189,13 @@ yeelight-home product search --product-model YP-0117 --json
 
 ```sh
 yeelight-home memory remember --house-id <house-id> --set scopeType=room,scopeRef=客厅,preferenceType=brightness,preferenceValue=45 --json
-yeelight-home plan commit --plan-id <plan-id> --json
 yeelight-home recommendation list --house-id <house-id> --json
 yeelight-home recommendation feedback --house-id <house-id> --params-json '{"recommendationId":"<id>","feedback":"cooldown","cooldownHours":24}' --json
 ```
 
-本地记忆和推荐默认对每个 profile + 家庭范围开启。`memory pause` 是明确的退出开关，`memory resume` 会重新开启本地学习。`memory remember` 会先生成本地待确认计划。确认提交后，Runtime 会把偏好写入本地数据文件，并可能生成一条基于偏好的待处理推荐。`recommendation list` 只返回 Runtime 本地生成或保存的推荐，不由模型临时编造。`accepted`、`dismissed`、`rejected` 和 `cooldown` 等反馈会被本地保存，并影响后续推荐展示。
+本地记忆和推荐默认对每个 profile + 家庭范围开启。`memory pause` 是明确的退出开关，`memory resume` 会重新开启本地学习。`memory remember` 会直接 upsert 本地偏好，合并含义相近的重复记忆，并可能生成一条基于偏好的推荐。`recommendation list` 只返回 Runtime 本地生成或保存的推荐，不由模型临时编造。`accepted`、`dismissed`、`rejected` 和 `cooldown` 等反馈会被本地保存，并影响后续推荐展示。
 
-Runtime 不会把完整对话日志当作记忆保存。它只在用户明确要求保存偏好时，通过 `memory.remember` 生成待确认计划；确认提交后才写入本地偏好。对于“记住以后卧室默认柔和暖光”这类明确自然语言，Runtime 会保守提取偏好候选，但仍然必须走 `plan commit`。
-
-`pending_plans.json` 是短期安全确认和审计队列，不是永久会话历史库。Runtime 会自动压缩该文件：保留未过期可提交计划，短期保留已过期 pending 计划，近期保留已提交/已取消计划，默认最多保留 200 条记录。这样可以保持 `plan.commit` 和 `plan.cancel` 的查找规模可控，同时不破坏确认流程。
+Runtime 不会把完整对话日志当作记忆保存。它只保存用户明确要求记录的偏好状态。对于“记住以后卧室默认柔和暖光”这类明确自然语言，Runtime 会保守提取偏好候选，并把“柔和暖光/偏暖一点”“夜里别太亮/暗一点”等近义偏好合并为同一条记忆。
 
 默认本地数据目录是：
 
@@ -254,4 +250,4 @@ Skill 不应调用 raw URL、raw header、curl、兼容服务或带 token 的命
 - `auth status`、`doctor` 和 `invoke` 输出会脱敏。
 - profile 元数据只保存 profile 名称、region、默认 home、QR device 等非密钥信息。
 - token 保存在本地凭据存储或受保护的本地 fallback 中。
-- 持久化写入使用待确认计划；模型不能执行任意 raw API payload。
+- 持久化写入使用语义 Runtime adapter；模型不能执行任意 raw API payload。高影响操作的用户确认由调用方负责。

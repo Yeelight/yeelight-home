@@ -1037,17 +1037,6 @@
   },
   {
     "contractVersion": "1.0",
-    "requestId": "fixture-execution-undo-1",
-    "locale": "zh-CN",
-    "utterance": "撤销刚才那个待确认计划",
-    "intent": "execution.undo",
-    "parameters": {
-      "houseId": "house-1",
-      "planId": "plan-example-1"
-    }
-  },
-  {
-    "contractVersion": "1.0",
     "requestId": "fixture-favorite-delete-1",
     "locale": "zh-CN",
     "utterance": "删除主灯首页收藏",

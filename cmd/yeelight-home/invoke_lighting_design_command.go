@@ -44,7 +44,7 @@ func newRuntimeLightingCatalog() runtimeLightingCatalog {
 	return catalog
 }
 
-func (app *app) invokeLightingDesignPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareLightingDesign(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -91,7 +91,7 @@ func (app *app) invokeLightingDesignPlan(ctx context.Context, request contract.R
 		"planType":         "local_lighting_design",
 		"persistentWrites": false,
 		"applyIntent":      "lighting.design.apply",
-		"applyBehavior":    "pending_plan_required",
+		"applyBehavior":    "direct_execute_supported",
 		"scope":            scope,
 		"selectedRecipe":   recipe,
 		"deviceEvidence":   capabilityEvidence,
@@ -99,7 +99,7 @@ func (app *app) invokeLightingDesignPlan(ctx context.Context, request contract.R
 		"steps": []string{
 			"按当前家庭实体和设备能力证据生成建议",
 			"只使用可确认支持的灯光属性作为候选",
-			"任何持久化应用必须进入 pending plan 确认链路",
+			"如需持久化应用，调用 lighting.design.apply；调用方负责在调用前完成用户确认",
 		},
 	}
 	result["runtimeLightingCatalog"] = map[string]any{

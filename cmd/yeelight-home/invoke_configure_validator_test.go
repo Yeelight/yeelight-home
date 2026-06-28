@@ -49,8 +49,8 @@ func TestInvokeSceneCreateRejectsUnknownDeviceDetail(t *testing.T) {
 }
 
 func TestInvokeSceneCreateValidatesCustomGroupTypeAgainstGroups(t *testing.T) {
-	response := invokeConfigureWithSeededEntities(t, `{"contractVersion":"1.0","requestId":"req-scene-custom-group","locale":"zh-CN","utterance":"创建分组情景","intent":"scene.create","parameters":{"houseId":"200171","name":"分组情景","details":[{"typeId":3,"resId":"600001","resName":"已有灯组","rank":0,"params":"{\"set\":{\"p\":true}}"}]}}`)
-	if response["status"] != "confirmation_required" {
+	response := invokeConfigureWithSeededEntitiesDryRun(t, `{"contractVersion":"1.0","requestId":"req-scene-custom-group","locale":"zh-CN","utterance":"创建分组情景","intent":"scene.create","parameters":{"houseId":"200171","name":"分组情景","details":[{"typeId":3,"resId":"600001","resName":"已有灯组","rank":0,"params":"{\"set\":{\"p\":true}}"}]}}`)
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
 }
@@ -251,6 +251,16 @@ func TestInvokeRoomCreateRejectsHouseRoomLimit(t *testing.T) {
 
 func invokeConfigureWithSeededEntities(t *testing.T, input string) map[string]any {
 	t.Helper()
+	return invokeConfigureWithSeededEntitiesArgs(t, input, []string{"invoke", "--stdin"})
+}
+
+func invokeConfigureWithSeededEntitiesDryRun(t *testing.T, input string) map[string]any {
+	t.Helper()
+	return invokeConfigureWithSeededEntitiesArgs(t, input, []string{"invoke", "--stdin", "--dry-run"})
+}
+
+func invokeConfigureWithSeededEntitiesArgs(t *testing.T, input string, args []string) map[string]any {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writeSeededHouseScopedListForConfigureTest(writer, request)
@@ -261,7 +271,7 @@ func invokeConfigureWithSeededEntities(t *testing.T, input string) map[string]an
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run(args, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}

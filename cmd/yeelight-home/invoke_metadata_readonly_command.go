@@ -37,7 +37,9 @@ func (app *app) invokeAccountInfo(ctx context.Context, request contract.Request,
 }
 
 func (app *app) invokeMetadataReadonlyProjection(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, spec metadataReadonlySpec) (contract.Response, error) {
-	if requestHouseID := requestHouseID(request); requestHouseID != "" {
+	if isHouseIndependentInvokeIntent(request.Intent) {
+		houseID = ""
+	} else if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
 	if len(spec.entityTypes) == 0 {
@@ -60,7 +62,9 @@ func (app *app) invokeMetadataReadonlyProjection(ctx context.Context, request co
 }
 
 func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, spec metadataReadonlySpec) (contract.Response, error) {
-	if requestHouseID := requestHouseID(request); requestHouseID != "" {
+	if isHouseIndependentInvokeIntent(request.Intent) {
+		houseID = ""
+	} else if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
 	target := entityGetTargetFromRequest(request)
@@ -310,8 +314,10 @@ func metadataReadonlyProjectionResponse(request contract.Request, spec metadataR
 	}
 }
 
-func (app *app) invokeMetadataLocalPlan(request contract.Request, houseID string, spec metadataReadonlySpec) (contract.Response, error) {
-	if requestHouseID := requestHouseID(request); requestHouseID != "" {
+func (app *app) prepareMetadataLocal(request contract.Request, houseID string, spec metadataReadonlySpec) (contract.Response, error) {
+	if isHouseIndependentInvokeIntent(request.Intent) {
+		houseID = ""
+	} else if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
 	return contract.Response{
@@ -388,7 +394,7 @@ func automationCapabilitiesSpec() metadataReadonlySpec {
 		source:          "runtime_policy",
 		unknownEvidence: []string{},
 		guidance: []string{
-			"automation.create 会先生成 pending plan，plan.commit 重新校验后创建并按名称读回验证。",
+			"automation.create 会先生成 execution preview，direct semantic execution 重新校验后创建并按名称读回验证。",
 			"automation.explain 和 diagnose.automation 可做只读解释和诊断。",
 			"automation.update/enable/disable/delete 仍需 owner review 或本地批准。",
 		},
@@ -407,7 +413,7 @@ func favoritePlanSpec() metadataReadonlySpec {
 		traceID:         "favorite-plan-local",
 		source:          "local_guidance_only",
 		unknownEvidence: []string{"favorite_current_order_unavailable"},
-		guidance:        []string{"先读取当前房间、设备、情景和自动化实体。", "按高频设备、关键情景、房间维度整理收藏候选。", "真实收藏写入仍需后续 pending plan 与 owner-reviewed adapter。"},
+		guidance:        []string{"先读取当前房间、设备、情景和自动化实体。", "按高频设备、关键情景、房间维度整理收藏候选。", "真实收藏写入仍需后续 execution preview 与 owner-reviewed adapter。"},
 	}
 }
 

@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeAutomationStatusPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareAutomationStatus(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -34,21 +34,19 @@ func (app *app) invokeAutomationStatusPlan(ctx context.Context, request contract
 	}
 	summary := automationStatusSummary(request.Intent, automation)
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, summary, map[string]any{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, map[string]any{
 		"houseId":      requestNumberOrString(houseID),
 		"automationId": automation.ID,
 	}, []string{
 		"提交前重新读取家庭自动化列表",
 		"目标自动化必须属于当前家庭",
 		"提交后通过 automation.list 校验目标状态",
-	}, now, pendingPlanTTL)
+	}, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponse(request, record, entities), nil
+	app.preparedOperation = &record
+	return executionPreviewResponse(request, record, entities), nil
 }
 
 func automationStatusTarget(request contract.Request, entities api.EntityListResult) (api.EntitySummary, string) {
@@ -96,7 +94,7 @@ func automationStatusSummary(intent string, automation api.EntitySummary) string
 	return fmt.Sprintf("%s自动化 %s", action, automation.ID)
 }
 
-func (app *app) commitAutomationStatusPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.AutomationStatusKind) (contract.Response, error) {
+func (app *app) executeAutomationStatus(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.AutomationStatusKind) (contract.Response, error) {
 	result, err := api.NewAutomationStatusClient(endpoint, nil).Run(ctx, api.AutomationStatusRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -111,8 +109,5 @@ func (app *app) commitAutomationStatusPlan(ctx context.Context, request contract
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return automationStatusCommitResponse(request, record, result), nil
+	return automationStatusExecuteResponse(request, record, result), nil
 }

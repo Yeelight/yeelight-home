@@ -8,9 +8,11 @@ import (
 	"testing"
 )
 
-func TestInvokeDeviceUnbindRequiresLocalApproval(t *testing.T) {
+func TestInvokeDeviceUnbindExecutesDirectlyAfterCallerConfirmation(t *testing.T) {
 	deviceVisible := true
+	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/apis/iot/v2/thing/manage/house/200171/device/r/info/1/100":
@@ -41,46 +43,23 @@ func TestInvokeDeviceUnbindRequiresLocalApproval(t *testing.T) {
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
-		t.Fatalf("plan exit code = %d, stderr = %s", code, stderr.String())
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	confirmation := response["confirmation"].(map[string]any)
-	if response["status"] != "confirmation_required" || confirmation["risk"] != "R3" || confirmation["approvalRequired"] != true {
+	if response["status"] != "success" || response["traceId"] != "device-unbind-execute" {
 		t.Fatalf("response = %#v", response)
-	}
-	planID := confirmation["planId"].(string)
-	commitInput := `{"contractVersion":"1.0","requestId":"req-device-unbind-commit","locale":"zh-CN","utterance":"确认","intent":"plan.commit","parameters":{"planId":"` + planID + `"}}`
-
-	stdout.Reset()
-	stderr.Reset()
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("blocked exit code = %d, stderr = %s", code, stderr.String())
-	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "blocked" || response["error"].(map[string]any)["code"] != "local_approval_required" {
-		t.Fatalf("blocked response = %#v", response)
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	code = app.run([]string{"approve", "--json", "--plan-id", planID, "--challenge", confirmation["approvalChallenge"].(string)}, strings.NewReader(""), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("approve exit code = %d, stderr = %s", code, stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("commit exit code = %d, stderr = %s", code, stderr.String())
-	}
-	response = decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "device-unbind-commit" {
-		t.Fatalf("commit response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
 	if result["deviceId"] != "50018330" || result["clearMac"] != true || result["unbindRelDevices"] != true || result["verified"] != true {
 		t.Fatalf("result = %#v", result)
+	}
+	unbindCalls := 0
+	for _, call := range gotCalls {
+		if call == "POST /apis/iot/v1/device/50018330/w/unbind" {
+			unbindCalls++
+		}
+	}
+	if unbindCalls != 1 {
+		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
 }

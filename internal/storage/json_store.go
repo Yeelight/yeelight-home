@@ -1,10 +1,13 @@
 package storage
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -14,6 +17,7 @@ const (
 	DefaultImplicitCandidateRetentionDays = 30
 	DefaultRecommendationRetentionDays    = 90
 	ExplicitPreferenceRetention           = "until_user_forgets"
+	maxMergedEvidenceRunes                = 240
 )
 
 type PreferenceRecord struct {
@@ -64,6 +68,12 @@ type JSONStore struct {
 	path string
 }
 
+type PreferenceUpsertResult struct {
+	Record  PreferenceRecord
+	Created bool
+	Merged  bool
+}
+
 type jsonDocument struct {
 	Version         int                       `json:"version"`
 	Consents        []ConsentRecord           `json:"consents"`
@@ -104,6 +114,67 @@ func (store JSONStore) SavePreference(record PreferenceRecord) error {
 		document.Preferences = append(document.Preferences, record)
 	}
 	return store.save(document)
+}
+
+func (store JSONStore) UpsertPreference(record PreferenceRecord) (PreferenceUpsertResult, error) {
+	if containsSensitiveKey(record.PreferenceType) {
+		return PreferenceUpsertResult{}, errors.New("preference type must not contain token-like data")
+	}
+	if containsSensitiveKey(record.PreferenceValue) || containsSensitiveKey(record.Evidence) {
+		return PreferenceUpsertResult{}, errors.New("preference value and evidence must not contain token-like data")
+	}
+	record.Profile = strings.TrimSpace(record.Profile)
+	record.HouseID = strings.TrimSpace(record.HouseID)
+	record.ScopeType = normalizeMemoryText(record.ScopeType)
+	record.ScopeRef = normalizeMemoryText(record.ScopeRef)
+	record.PreferenceType = normalizeMemoryText(record.PreferenceType)
+	record.PreferenceValue = normalizePreferenceValue(record.PreferenceValue)
+	record.Kind = normalizeMemoryKind(record.Kind)
+	record.Status = normalizeMemoryStatus(record.Status)
+	if record.Profile == "" || record.HouseID == "" {
+		return PreferenceUpsertResult{}, errors.New("profile and houseId are required")
+	}
+	if record.PreferenceType == "" || record.PreferenceValue == "" {
+		return PreferenceUpsertResult{}, errors.New("preference type and value are required")
+	}
+	if record.UpdatedAt <= 0 {
+		record.UpdatedAt = record.CreatedAt
+	}
+	if record.CreatedAt <= 0 {
+		record.CreatedAt = record.UpdatedAt
+	}
+	if record.CreatedAt <= 0 {
+		return PreferenceUpsertResult{}, errors.New("preference timestamp is required")
+	}
+	document, err := store.load()
+	if err != nil {
+		return PreferenceUpsertResult{}, err
+	}
+	for index, existing := range document.Preferences {
+		if !preferenceEquivalent(existing, record) {
+			continue
+		}
+		if strings.TrimSpace(record.ID) == "" {
+			record.ID = existing.ID
+		}
+		if existing.CreatedAt > 0 && existing.CreatedAt < record.CreatedAt {
+			record.CreatedAt = existing.CreatedAt
+		}
+		record.Evidence = mergeEvidence(existing.Evidence, record.Evidence)
+		document.Preferences[index] = record
+		if err := store.save(document); err != nil {
+			return PreferenceUpsertResult{}, err
+		}
+		return PreferenceUpsertResult{Record: record, Created: false, Merged: true}, nil
+	}
+	if strings.TrimSpace(record.ID) == "" {
+		record.ID = preferenceStableID(record)
+	}
+	document.Preferences = append(document.Preferences, record)
+	if err := store.save(document); err != nil {
+		return PreferenceUpsertResult{}, err
+	}
+	return PreferenceUpsertResult{Record: record, Created: true, Merged: false}, nil
 }
 
 func (store JSONStore) SetConsent(record ConsentRecord) error {
@@ -301,6 +372,164 @@ func normalizeMemoryStatus(value string) string {
 	default:
 		return "confirmed"
 	}
+}
+
+func preferenceEquivalent(left PreferenceRecord, right PreferenceRecord) bool {
+	if strings.TrimSpace(left.Profile) != strings.TrimSpace(right.Profile) || strings.TrimSpace(left.HouseID) != strings.TrimSpace(right.HouseID) {
+		return false
+	}
+	if normalizeMemoryText(left.ScopeType) != normalizeMemoryText(right.ScopeType) {
+		return false
+	}
+	if normalizeMemoryText(left.ScopeRef) != normalizeMemoryText(right.ScopeRef) {
+		return false
+	}
+	if normalizeMemoryText(left.PreferenceType) != normalizeMemoryText(right.PreferenceType) {
+		return false
+	}
+	return normalizePreferenceValue(left.PreferenceValue) == normalizePreferenceValue(right.PreferenceValue)
+}
+
+func normalizeMemoryText(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(
+		"，", " ", "。", " ", "、", " ", "；", " ", "：", " ",
+		",", " ", ".", " ", ";", " ", ":", " ", "!", " ", "！", " ",
+		"?", " ", "？", " ", "（", " ", "）", " ", "(", " ", ")", " ",
+		"“", " ", "”", " ", "\"", " ", "'", " ",
+	)
+	normalized = replacer.Replace(normalized)
+	return strings.Join(strings.Fields(normalized), " ")
+}
+
+func normalizePreferenceValue(value string) string {
+	normalized := normalizeMemoryText(value)
+	compact := compactMemoryText(normalized)
+	for _, marker := range []string{
+		"preferdimmer", "dimmer", "preferdarker", "darker",
+		"太亮", "调暗", "暗一点", "暗一些", "暗点", "别太亮", "不要太亮", "夜里别太亮", "夜晚别太亮", "晚上别太亮", "柔和一点", "柔和些", "别刺眼", "不要刺眼", "不刺眼",
+	} {
+		if strings.Contains(compact, marker) {
+			return "prefer_dimmer"
+		}
+	}
+	for _, marker := range []string{
+		"preferbrighter", "brighter", "亮一点", "亮一些", "亮点", "太暗", "不够亮",
+	} {
+		if strings.Contains(compact, marker) {
+			return "prefer_brighter"
+		}
+	}
+	for _, marker := range []string{
+		"preferwarm", "warm", "暖一点", "暖一些", "暖点", "偏暖", "暖光", "柔和暖光", "温暖一点", "温暖些", "暖白",
+	} {
+		if strings.Contains(compact, marker) {
+			return "prefer_warm"
+		}
+	}
+	for _, marker := range []string{
+		"prefercool", "cool", "冷一点", "冷一些", "冷点", "偏冷", "冷光", "冷白",
+	} {
+		if strings.Contains(compact, marker) {
+			return "prefer_cool"
+		}
+	}
+	for _, marker := range []string{
+		"avoidcolorful", "avoidcolor", "不要彩光", "不喜欢彩色", "别用彩光", "不要彩色", "少彩光",
+	} {
+		if strings.Contains(compact, marker) {
+			return "avoid_colorful"
+		}
+	}
+	replacements := map[string]string{
+		"prefer dimmer":   "prefer_dimmer",
+		"dimmer":          "prefer_dimmer",
+		"prefer darker":   "prefer_dimmer",
+		"dark":            "prefer_dimmer",
+		"调暗":              "prefer_dimmer",
+		"暗一点":             "prefer_dimmer",
+		"太亮":              "prefer_dimmer",
+		"prefer brighter": "prefer_brighter",
+		"brighter":        "prefer_brighter",
+		"亮一点":             "prefer_brighter",
+		"太暗":              "prefer_brighter",
+		"prefer warm":     "prefer_warm",
+		"warm":            "prefer_warm",
+		"暖一点":             "prefer_warm",
+		"暖光":              "prefer_warm",
+		"prefer cool":     "prefer_cool",
+		"cool":            "prefer_cool",
+		"冷一点":             "prefer_cool",
+		"冷光":              "prefer_cool",
+		"avoid colorful":  "avoid_colorful",
+		"avoid color":     "avoid_colorful",
+		"不要彩光":            "avoid_colorful",
+		"不喜欢彩色":           "avoid_colorful",
+	}
+	if replacement, ok := replacements[normalized]; ok {
+		return replacement
+	}
+	return normalized
+}
+
+var memorySpacePattern = regexp.MustCompile(`\s+`)
+
+func compactMemoryText(value string) string {
+	return memorySpacePattern.ReplaceAllString(value, "")
+}
+
+func mergeEvidence(existing string, incoming string) string {
+	parts := dedupeEvidenceParts(existing, incoming)
+	if len(parts) == 0 {
+		return ""
+	}
+	merged := strings.Join(parts, "；")
+	runes := []rune(merged)
+	if len(runes) <= maxMergedEvidenceRunes {
+		return merged
+	}
+	return string(runes[:maxMergedEvidenceRunes])
+}
+
+func dedupeEvidenceParts(values ...string) []string {
+	parts := []string{}
+	for _, value := range values {
+		for _, part := range strings.Split(value, "；") {
+			part = strings.TrimSpace(part)
+			if part == "" || evidencePartExists(parts, part) {
+				continue
+			}
+			parts = append(parts, part)
+		}
+	}
+	return parts
+}
+
+func evidencePartExists(parts []string, incoming string) bool {
+	normalizedIncoming := normalizeMemoryText(incoming)
+	for _, existing := range parts {
+		normalizedExisting := normalizeMemoryText(existing)
+		if normalizedExisting == normalizedIncoming {
+			return true
+		}
+		if strings.Contains(normalizedExisting, normalizedIncoming) || strings.Contains(normalizedIncoming, normalizedExisting) {
+			return true
+		}
+	}
+	return false
+}
+
+func preferenceStableID(record PreferenceRecord) string {
+	key := strings.Join([]string{
+		record.Profile,
+		record.HouseID,
+		record.ScopeType,
+		record.ScopeRef,
+		record.PreferenceType,
+		record.PreferenceValue,
+	}, "|")
+	sum := sha1.Sum([]byte(key))
+	return "mem-" + hex.EncodeToString(sum[:])[:16]
 }
 
 func filterConsents(records []ConsentRecord, profile string, houseID string) []ConsentRecord {

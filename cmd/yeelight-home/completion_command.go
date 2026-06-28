@@ -9,7 +9,6 @@ import (
 
 var nativeCompletionCommands = map[string][]string{
 	"api":        {"smoke"},
-	"approve":    {},
 	"auth":       {"login", "qr-check", "status", "token"},
 	"auth token": {"delete", "set"},
 	"completion": {"bash", "fish", "powershell", "zsh"},

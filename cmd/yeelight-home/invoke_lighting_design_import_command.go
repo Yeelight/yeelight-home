@@ -7,10 +7,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeLightingDesignImportPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareLightingDesignImport(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -41,25 +41,21 @@ func (app *app) invokeLightingDesignImportPlan(ctx context.Context, request cont
 		summary = "创建设备预留槽位"
 	}
 	preconditions := []string{
-		"提交前重新读取家庭实体列表",
+		"执行前重新读取家庭实体列表",
 		"只使用 Runtime 归一化后的房间、网关槽位、设备槽位和可选设备组结构",
 		"设备槽位代表照明设计占位，不代表设备已配网或可被真实控制",
-		"提交后通过家庭实体列表验证房间和设备槽位可见",
+		"执行后通过家庭实体列表验证房间和设备槽位可见",
 	}
-	risk := plan.RiskR2
-	challenge := ""
+	risk := operation.RiskR2
 	if lightingDesignImportWipesHome(normalized) {
-		risk = plan.RiskR3
-		challenge = "CONFIRM_CLEAR_HOME_DESIGN"
-		preconditions = append(preconditions, "该计划会覆盖/清空家庭设计元数据，需要本机终端审批")
+		risk = operation.RiskR3
+		preconditions = append(preconditions, "该操作会覆盖/清空家庭设计元数据，调用方应在调用 Runtime 前完成用户确认")
 	}
-	record, err := plan.NewRecordWithRisk(profile, region, houseID, intent, request.RequestID, summary, risk, challenge, normalized, preconditions, time.Now(), pendingPlanTTL)
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, intent, request.RequestID, summary, risk, normalized, preconditions, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
+	app.preparedOperation = &record
 	preview := map[string]any{
 		"mode":                           "design_sync_metadata",
 		"counts":                         lightingDesignImportPlanCounts(normalized),
@@ -72,10 +68,10 @@ func (app *app) invokeLightingDesignImportPlan(ctx context.Context, request cont
 		preview["clearAll"] = true
 		preview["riskNote"] = "会覆盖家庭现有设计元数据"
 	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, 0), nil
+	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
 }
 
-func (app *app) commitLightingDesignImportPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeLightingDesignImport(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewLightingDesignImportClient(endpoint, nil).Run(ctx, api.LightingDesignImportRequest{
 		HouseID:        record.HouseID,
 		Intent:         record.Intent,
@@ -90,10 +86,7 @@ func (app *app) commitLightingDesignImportPlan(ctx context.Context, request cont
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return lightingDesignImportCommitResponse(request, record, result), nil
+	return lightingDesignImportExecuteResponse(request, record, result), nil
 }
 
 func lightingDesignProductResolutionPreview(payload map[string]any) map[string]any {
@@ -162,12 +155,12 @@ func lightingDesignImportWipesHome(payload map[string]any) bool {
 	return ok && value
 }
 
-func lightingDesignImportCommitResponse(request contract.Request, record plan.Record, result api.LightingDesignImportResult) contract.Response {
+func lightingDesignImportExecuteResponse(request contract.Request, record operation.Prepared, result api.LightingDesignImportResult) contract.Response {
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     "已提交并验证照明设计导入计划，设备槽位已作为预建设计占位写入家庭。",
+		UserMessage:     "已导入并验证照明设计，设备槽位已作为预建设计占位写入家庭。",
 		Result: map[string]any{
 			"region":                         result.Region,
 			"houseId":                        result.HouseID,
@@ -182,13 +175,11 @@ func lightingDesignImportCommitResponse(request contract.Request, record plan.Re
 			"clearAll":                       result.ClearAll,
 		},
 		Execution: map[string]any{
-			"planId":   record.ID,
-			"planHash": record.Hash,
-			"intent":   record.Intent,
-			"status":   "committed",
+			"intent": record.Intent,
+			"status": "executed",
 		},
 		Warnings: result.Warnings,
-		TraceID:  "lighting-design-import-commit",
+		TraceID:  "lighting-design-import-execute",
 		Metrics: map[string]any{
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,

@@ -4,43 +4,18 @@ import (
 	"fmt"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
-func pendingMemoryPlanResponse(request contract.Request, record plan.Record) contract.Response {
-	return contract.Response{
-		ContractVersion: contract.Version,
-		RequestID:       request.RequestID,
-		Status:          "confirmation_required",
-		UserMessage:     "已生成本地记忆待确认计划。确认后只会写入本机 JSON，不会修改云端配置。",
-		Confirmation: map[string]any{
-			"planId":       record.ID,
-			"planHash":     record.Hash,
-			"risk":         record.Risk,
-			"intent":       record.Intent,
-			"summary":      record.Summary,
-			"expiresAt":    record.ExpiresAt,
-			"commitIntent": "plan.commit",
-			"commitShape": map[string]any{
-				"parameters": map[string]any{"planId": record.ID},
-			},
-			"preconditions": record.Preconditions,
-		},
-		Warnings: []string{},
-		TraceID:  "memory-pending-plan-created",
-		Metrics:  noAPIMetrics(),
-	}
-}
-
-func memoryRememberCommitResponse(request contract.Request, record plan.Record, memory storage.PreferenceRecord) contract.Response {
+func memoryRememberResponse(request contract.Request, upsert storage.PreferenceUpsertResult) contract.Response {
+	memory := upsert.Record
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
 		UserMessage:     "已保存本地偏好。",
 		Memory: map[string]any{
-			"planId":          record.ID,
+			"id":              memory.ID,
 			"profile":         memory.Profile,
 			"houseId":         memory.HouseID,
 			"kind":            memory.Kind,
@@ -50,9 +25,11 @@ func memoryRememberCommitResponse(request contract.Request, record plan.Record, 
 			"preferenceType":  memory.PreferenceType,
 			"preferenceValue": memory.PreferenceValue,
 			"evidence":        memory.Evidence,
+			"created":         upsert.Created,
+			"merged":          upsert.Merged,
 		},
 		Warnings: []string{},
-		TraceID:  "memory-remember-commit",
+		TraceID:  "memory-remember-local",
 		Metrics:  noAPIMetrics(),
 	}
 }

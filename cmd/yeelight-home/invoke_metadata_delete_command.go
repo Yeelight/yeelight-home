@@ -8,10 +8,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeMetadataDeletePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareMetadataDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -62,19 +62,17 @@ func (app *app) invokeMetadataDeletePlan(ctx context.Context, request contract.R
 		},
 		"impact": metadataDeleteImpact(targetType, match, entities),
 	}
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("删除%s %s", metadataDeleteLabel(targetType), match.Name), payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("删除%s %s", metadataDeleteLabel(targetType), match.Name), payload, []string{
 		"提交前重新读取家庭实体列表并确认目标仍存在",
 		"只删除本计划中已解析的单个目标对象",
-		"plan.commit 只接受 planId，忽略提交时附带的删除字段",
+		"Runtime 根据当前请求构建受控删除 payload",
 		"提交后通过 entity.list 验证目标对象已不存在",
-	}, time.Now(), pendingPlanTTL)
+	}, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, 0), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
 }
 
 func firstValueIDString(values map[string]any, keys ...string) string {
@@ -169,7 +167,7 @@ func countEntities(entities []api.EntitySummary, match func(api.EntitySummary) b
 	return count
 }
 
-func (app *app) commitMetadataDeletePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.MetadataDeleteKind) (contract.Response, error) {
+func (app *app) executeMetadataDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.MetadataDeleteKind) (contract.Response, error) {
 	result, err := api.NewMetadataDeleteClient(endpoint, nil).Run(ctx, api.MetadataDeleteRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -184,8 +182,5 @@ func (app *app) commitMetadataDeletePlan(ctx context.Context, request contract.R
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return metadataDeleteCommitResponse(request, record, result), nil
+	return metadataDeleteExecuteResponse(request, record, result), nil
 }

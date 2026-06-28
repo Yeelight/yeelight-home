@@ -9,10 +9,10 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
-	"github.com/yeelight/yeelight-home/internal/plan"
+	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) invokeSpaceOrganizationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareSpaceOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -38,14 +38,12 @@ func (app *app) invokeSpaceOrganizationPlan(ctx context.Context, request contrac
 	}
 	preview := spaceOrganizationPreview(request.Intent, payload, entities)
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now, pendingPlanTTL)
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, 0), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
 }
 
 func buildSpaceOrganizationPayload(request contract.Request, houseID string) (map[string]any, []string, string, error) {
@@ -344,7 +342,7 @@ func validateRoomUpdateGatewayReferences(payload map[string]any, entities api.En
 	return ""
 }
 
-func (app *app) commitSpaceOrganizationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.SpaceOrganizationKind) (contract.Response, error) {
+func (app *app) executeSpaceOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.SpaceOrganizationKind) (contract.Response, error) {
 	result, err := api.NewSpaceOrganizationClient(endpoint, nil).Run(ctx, api.SpaceOrganizationRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -359,13 +357,10 @@ func (app *app) commitSpaceOrganizationPlan(ctx context.Context, request contrac
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return spaceOrganizationCommitResponse(request, record, result), nil
+	return spaceOrganizationExecuteResponse(request, record, result), nil
 }
 
-func (app *app) invokeSpaceBatchOrganizationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareSpaceBatchOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -391,14 +386,12 @@ func (app *app) invokeSpaceBatchOrganizationPlan(ctx context.Context, request co
 	}
 	preview := spaceBatchOrganizationPreview(request.Intent, payload, entities)
 	now := time.Now()
-	record, err := plan.NewRecord(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now, pendingPlanTTL)
+	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.planStore.Save(record); err != nil {
-		return contract.Response{}, err
-	}
-	return pendingPlanResponseWithPreview(request, record, entities, preview, 0), nil
+	app.preparedOperation = &record
+	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
 }
 
 func buildSpaceBatchOrganizationPayload(request contract.Request, houseID string) (map[string]any, []string, string, error) {
@@ -517,7 +510,7 @@ func spaceBatchOrganizationAcceptedFields(intent string) []string {
 	}
 }
 
-func (app *app) commitSpaceBatchOrganizationPlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string, kind api.SpaceBatchOrganizationKind) (contract.Response, error) {
+func (app *app) executeSpaceBatchOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.SpaceBatchOrganizationKind) (contract.Response, error) {
 	result, err := api.NewSpaceBatchOrganizationClient(endpoint, nil).Run(ctx, api.SpaceBatchOrganizationRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
@@ -532,13 +525,10 @@ func (app *app) commitSpaceBatchOrganizationPlan(ctx context.Context, request co
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	return spaceBatchOrganizationCommitResponse(request, record, result), nil
+	return spaceBatchOrganizationExecuteResponse(request, record, result), nil
 }
 
-func (app *app) commitDeviceMovePlan(ctx context.Context, request contract.Request, endpoint api.Endpoint, record plan.Record, authorization string, clientID string) (contract.Response, error) {
+func (app *app) executeDeviceMove(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	deviceID := valueIDString(firstNonNil(record.Payload["deviceId"], record.Payload["id"]))
 	roomID := valueIDString(record.Payload["roomId"])
 	if deviceID == "" || roomID == "" {
@@ -566,10 +556,7 @@ func (app *app) commitDeviceMovePlan(ctx context.Context, request contract.Reque
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if _, err := app.planStore.MarkCommitted(record.ID); err != nil {
-		return contract.Response{}, err
-	}
-	response := spaceBatchOrganizationCommitResponse(request, batchRecord, result)
+	response := spaceBatchOrganizationExecuteResponse(request, batchRecord, result)
 	response.Result["capability"] = "device.move"
 	return response, nil
 }

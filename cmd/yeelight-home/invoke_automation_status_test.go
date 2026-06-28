@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestInvokeAutomationEnableCreatesPendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeAutomationEnableDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -22,31 +22,27 @@ func TestInvokeAutomationEnableCreatesPendingPlanWithoutWriting(t *testing.T) {
 	input := `{"contractVersion":"1.0","requestId":"req-auto-enable-plan","locale":"zh-CN","utterance":"启用回家开灯自动化","intent":"automation.enable","parameters":{"houseId":"200171","automationId":"auto-1"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/automations/w/enable") || strings.Contains(call, "/automations/w/disable") {
-			t.Fatalf("automation status should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("automation status dry-run should not write: %#v", gotCalls)
 		}
 	}
 	if strings.Contains(stdout.String(), "token-auto-status-secret") || strings.Contains(stderr.String(), "token-auto-status-secret") {
 		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	preview := confirmation["payloadPreview"].(map[string]any)
+	result := response["result"].(map[string]any)
+	previewContainer := result["preview"].(map[string]any)
+	preview := previewContainer["payloadPreview"].(map[string]any)
 	if preview["automationId"] != "auto-1" {
 		t.Fatalf("preview = %#v", preview)
-	}
-	planID := confirmation["planId"].(string)
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Intent != "automation.enable" || record.Payload["automationId"] != "auto-1" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
 	}
 }
 
@@ -76,7 +72,7 @@ func TestInvokeAutomationDisableRequiresKnownAutomation(t *testing.T) {
 	}
 }
 
-func TestInvokePlanCommitDisablesAutomationFromStoredPlan(t *testing.T) {
+func TestInvokeAutomationDisableExecutesDirectly(t *testing.T) {
 	automationListCalls := 0
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -99,12 +95,7 @@ func TestInvokePlanCommitDisablesAutomationFromStoredPlan(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-auto-status-secret", "client-auto-status-1", "200171")
-	planID := createHomeOrganizationPlanForTest(t, app, "200171", "automation.disable", map[string]any{
-		"houseId":      float64(200171),
-		"automationId": "auto-1",
-	})
-
-	input := `{"contractVersion":"1.0","requestId":"req-auto-disable-commit","locale":"zh-CN","utterance":"确认停用","intent":"plan.commit","parameters":{"planId":"` + planID + `","automationId":"ignored"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-auto-disable-execute","locale":"zh-CN","utterance":"停用回家开灯自动化","intent":"automation.disable","parameters":{"houseId":"200171","automationId":"auto-1"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -116,15 +107,12 @@ func TestInvokePlanCommitDisablesAutomationFromStoredPlan(t *testing.T) {
 		if call == "POST /apis/iot/v1/automations/w/disable/auto-1" {
 			disableCalls++
 		}
-		if strings.Contains(call, "ignored") {
-			t.Fatalf("commit request payload leaked into API call: %#v", gotCalls)
-		}
 	}
 	if disableCalls != 1 {
 		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "automation-status-commit" {
+	if response["status"] != "success" || response["traceId"] != "automation-status-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)

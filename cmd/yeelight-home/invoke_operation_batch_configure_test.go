@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestInvokeOperationBatchConfigureCreatesSinglePendingPlanWithoutWriting(t *testing.T) {
+func TestInvokeOperationBatchConfigureDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -23,34 +23,27 @@ func TestInvokeOperationBatchConfigureCreatesSinglePendingPlanWithoutWriting(t *
 	input := `{"contractVersion":"1.0","requestId":"req-batch-plan","locale":"zh-CN","utterance":"建书房并把主灯改名","intent":"operation.batch.configure","parameters":{"houseId":"200171","operations":[{"intent":"room.create","parameters":{"name":"书房"}},{"intent":"device.rename","parameters":{"deviceId":"50018330","name":"书房主灯"}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	for _, call := range gotCalls {
 		if strings.Contains(call, "/w/create") || strings.Contains(call, "/w/update") {
-			t.Fatalf("batch configure should not write before plan.commit: %#v", gotCalls)
+			t.Fatalf("batch configure dry-run should not write: %#v", gotCalls)
 		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "confirmation_required" {
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
 		t.Fatalf("response = %#v", response)
 	}
-	confirmation := response["confirmation"].(map[string]any)
-	if confirmation["intent"] != "operation.batch.configure" || confirmation["commitIntent"] != "plan.commit" {
-		t.Fatalf("confirmation = %#v", confirmation)
-	}
-	record, ok, err := app.planStore.Load(confirmation["planId"].(string))
-	if err != nil || !ok || record.Intent != "operation.batch.configure" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
-	}
-	steps := record.Payload["steps"].([]any)
-	if len(steps) != 2 {
-		t.Fatalf("steps = %#v", steps)
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)
+	if preview["intent"] != "operation.batch.configure" || result["dryRun"] != true {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
-func TestInvokeOperationBatchConfigureCommitUsesStoredPayloadOnly(t *testing.T) {
+func TestInvokeOperationBatchConfigureExecutesDirectly(t *testing.T) {
 	var createBody map[string]any
 	var renameBody map[string]any
 	roomCreated := false
@@ -76,41 +69,28 @@ func TestInvokeOperationBatchConfigureCommitUsesStoredPayloadOnly(t *testing.T) 
 	}))
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
-	app := newInvokeTestApp(t, "Bearer token-batch-commit-secret", "client-batch-commit-1", "200171")
+	app := newInvokeTestApp(t, "Bearer token-batch-execute-secret", "client-batch-execute-1", "200171")
 
-	planInput := `{"contractVersion":"1.0","requestId":"req-batch-plan-commit","locale":"zh-CN","utterance":"建书房并把主灯改名","intent":"operation.batch.configure","parameters":{"houseId":"200171","operations":[{"intent":"room.create","parameters":{"name":"书房"}},{"intent":"device.rename","parameters":{"deviceId":"50018330","name":"书房主灯"}}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-batch-plan-execute","locale":"zh-CN","utterance":"建书房并把主灯改名","intent":"operation.batch.configure","parameters":{"houseId":"200171","operations":[{"intent":"room.create","parameters":{"name":"书房"}},{"intent":"device.rename","parameters":{"deviceId":"50018330","name":"书房主灯"}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(planInput), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
-		t.Fatalf("plan exit code = %d, stderr = %s", code, stderr.String())
-	}
-	planID := decodeInvokeResponse(t, stdout.Bytes())["confirmation"].(map[string]any)["planId"].(string)
-
-	stdout.Reset()
-	stderr.Reset()
-	commitInput := `{"contractVersion":"1.0","requestId":"req-batch-commit","locale":"zh-CN","utterance":"确认批量执行","intent":"plan.commit","parameters":{"planId":"` + planID + `","operations":[{"intent":"room.create","parameters":{"name":"恶意覆盖"}}]}}`
-	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(commitInput), &stdout, &stderr)
-	if code != exitOK {
-		t.Fatalf("commit exit code = %d, stderr = %s", code, stderr.String())
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	if createBody["name"] != "书房" {
-		t.Fatalf("createBody should use stored payload: %#v", createBody)
+		t.Fatalf("createBody = %#v", createBody)
 	}
 	if renameBody["name"] != "书房主灯" {
-		t.Fatalf("renameBody should use stored payload: %#v", renameBody)
+		t.Fatalf("renameBody = %#v", renameBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "operation-batch-configure-commit" {
+	if response["status"] != "success" || response["traceId"] != "operation-batch-configure-execute" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
 	if result["stepCount"] != float64(2) {
 		t.Fatalf("result = %#v", result)
-	}
-	record, ok, err := app.planStore.Load(planID)
-	if err != nil || !ok || record.Status != "committed" {
-		t.Fatalf("record = %#v ok=%v err=%v", record, ok, err)
 	}
 }
 
@@ -138,9 +118,8 @@ func TestInvokeOperationBatchConfigureRejectsStrictDeleteIntent(t *testing.T) {
 	if clarification["reason"] != "operation_batch_contains_strict_or_destructive_intent" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	records, err := app.planStore.List()
-	if err != nil || len(records) != 0 {
-		t.Fatalf("records = %#v err=%v", records, err)
+	if app.preparedOperation != nil {
+		t.Fatalf("rejected batch must not retain prepared operation: %#v", app.preparedOperation)
 	}
 }
 
@@ -168,9 +147,8 @@ func TestInvokeOperationBatchConfigureRejectsAccountScopedHomeCreate(t *testing.
 	if clarification["reason"] != "operation_batch_contains_account_scoped_intent" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	records, err := app.planStore.List()
-	if err != nil || len(records) != 0 {
-		t.Fatalf("records = %#v err=%v", records, err)
+	if app.preparedOperation != nil {
+		t.Fatalf("rejected batch must not retain prepared operation: %#v", app.preparedOperation)
 	}
 }
 

@@ -174,10 +174,49 @@ func isImplementedInvokeIntent(intent string) bool {
 		"recommendation.list",
 		"recommendation.feedback",
 		"operation.batch.configure",
-		"lighting.design.apply",
-		"plan.commit",
-		"plan.cancel",
-		"execution.undo":
+		"lighting.design.apply":
+		return true
+	default:
+		return false
+	}
+}
+
+func isHouseIndependentInvokeIntent(intent string) bool {
+	switch intent {
+	case "home.summary",
+		"home.list",
+		"home.search",
+		"account.info",
+		"geo_area.children.list",
+		"geo_area.search",
+		"message.list",
+		"product.pedia.search",
+		"thing.schema.list",
+		"thing.schema.detail.list",
+		"thing.schema.get",
+		"thing.schema.event.list",
+		"thing.product.info.batch_get",
+		"thing.product.info.v3.batch_get",
+		"thing.product.list.v3",
+		"thing.product_domain.list",
+		"thing.product_faq.list",
+		"thing.product_faq.detail.get",
+		"thing.product_faq.type.list",
+		"thing.product_faq.item_type.list",
+		"thing.product_faq.locale.list",
+		"thing.product_faq.page.list",
+		"thing.product_faq.page_detail.list",
+		"thing.category.list",
+		"thing.component.list",
+		"thing.component.get",
+		"thing.property.list",
+		"upgrade.file.list",
+		"upgrade.file.batch_list",
+		"progress.get",
+		"app_upgrade.latest.get",
+		"ota.version_file.batch_list",
+		"ai_voice.list",
+		"ai_voice.product.list":
 		return true
 	default:
 		return false
