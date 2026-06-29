@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestNormalizeLightingDesignImportPayloadCreatesGatewayRoomsSlotsAndGroups(t *testing.T) {
+func TestNormalizeLightingDesignImportPayloadCreatesGatewayRoomsAndSlotsWithoutImplicitGroups(t *testing.T) {
 	payload, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
 		"rooms": []any{
 			map[string]any{
@@ -38,12 +38,16 @@ func TestNormalizeLightingDesignImportPayloadCreatesGatewayRoomsSlotsAndGroups(t
 		t.Fatalf("devices = %#v", devices)
 	}
 	first := devices[0].(map[string]any)
-	if first["pid"] != int64(198666) || first["connectType"] != -1 {
+	if first["pid"] != int64(-1) || first["connectType"] != -1 {
 		t.Fatalf("function slot fields = %#v", first)
 	}
 	firstAttrs := first["attrs"].(map[string]any)
-	if firstAttrs["materialCode"] != "1-000000031" || firstAttrs["productName"] != "Yeelight Pro M20 吸顶灯 C450" {
+	if _, ok := firstAttrs["materialCode"]; ok {
 		t.Fatalf("product attrs = %#v", firstAttrs)
+	}
+	firstCandidates := firstAttrs["productCandidates"].([]any)
+	if len(firstCandidates) == 0 || firstCandidates[0].(map[string]any)["materialCode"] != "1-000000031" {
+		t.Fatalf("ceiling light candidates = %#v", firstAttrs)
 	}
 	secondAttrs := devices[1].(map[string]any)["attrs"].(map[string]any)
 	if _, ok := secondAttrs["materialCode"]; ok {
@@ -53,13 +57,62 @@ func TestNormalizeLightingDesignImportPayloadCreatesGatewayRoomsSlotsAndGroups(t
 	if len(candidates) == 0 || candidates[0].(map[string]any)["materialCode"] != "1-000002044" {
 		t.Fatalf("grid light candidates = %#v", secondAttrs)
 	}
-	groups := payload["deviceGroups"].([]any)
-	if len(groups) != 1 {
-		t.Fatalf("groups = %#v", groups)
+	if groups, ok := payload["deviceGroups"]; ok {
+		t.Fatalf("Runtime must not auto-create groups without explicit groups[] or deviceGroups[]: %#v", groups)
 	}
-	group := groups[0].(map[string]any)
-	if group["localName"] != "客厅格栅灯组" {
-		t.Fatalf("group = %#v", group)
+}
+
+func TestNormalizeLightingDesignImportPayloadConvertsExplicitNaturalGroups(t *testing.T) {
+	payload, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
+		"rooms": []any{
+			map[string]any{
+				"name": "客厅",
+				"items": []any{
+					map[string]any{"name": "吸顶灯", "quantity": float64(1), "category": "吸顶灯"},
+					map[string]any{"name": "黑色格栅灯", "quantity": float64(2), "category": "格栅灯", "color": "黑色"},
+					map[string]any{"name": "白色嵌入式射灯", "quantity": float64(2), "category": "筒射灯", "color": "白色", "installStyle": "嵌入式"},
+				},
+			},
+		},
+		"groups": []any{
+			map[string]any{
+				"name":     "客厅格栅灯组",
+				"roomName": "客厅",
+				"match":    map[string]any{"category": "格栅灯"},
+			},
+			map[string]any{
+				"name":     "客厅嵌入式射灯组",
+				"roomName": "客厅",
+				"match":    map[string]any{"name": "白色嵌入式射灯"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Normalize error: %v", err)
+	}
+	groups := payload["deviceGroups"].([]any)
+	if len(groups) != 2 {
+		t.Fatalf("deviceGroups=%#v", groups)
+	}
+	assertGroup := func(name string, wantCount int) {
+		t.Helper()
+		for _, raw := range groups {
+			group := raw.(map[string]any)
+			if group["localName"] != name {
+				continue
+			}
+			deviceIDs := group["deviceIds"].([]any)
+			if len(deviceIDs) != wantCount || group["roomId"] == nil {
+				t.Fatalf("group %s = %#v", name, group)
+			}
+			return
+		}
+		t.Fatalf("group %s not found: %#v", name, groups)
+	}
+	assertGroup("客厅格栅灯组", 2)
+	assertGroup("客厅嵌入式射灯组", 2)
+	if _, ok := payload["groups"]; ok {
+		t.Fatalf("natural groups alias must not be sent to cloud: %#v", payload)
 	}
 }
 
@@ -103,23 +156,6 @@ func TestNormalizeLightingDesignImportPayloadEnrichesNaturalDesignSlotProducts(t
 	if len(devices) != 18 {
 		t.Fatalf("devices=%d %#v", len(devices), devices)
 	}
-	assertResolvedProduct := func(name string, materialCode string) {
-		t.Helper()
-		for _, raw := range devices {
-			device := raw.(map[string]any)
-			if strings.Contains(device["localName"].(string), name) {
-				attrs := device["attrs"].(map[string]any)
-				if attrs["materialCode"] != materialCode {
-					t.Fatalf("%s materialCode=%#v attrs=%#v", name, attrs["materialCode"], attrs)
-				}
-				if device["pid"] == int64(-1) {
-					t.Fatalf("%s should have resolved pid: %#v", name, device)
-				}
-				return
-			}
-		}
-		t.Fatalf("device %s not found in %#v", name, devices)
-	}
 	assertCandidateOnly := func(name string, materialCode string) {
 		t.Helper()
 		for _, raw := range devices {
@@ -142,15 +178,15 @@ func TestNormalizeLightingDesignImportPayloadEnrichesNaturalDesignSlotProducts(t
 		}
 		t.Fatalf("device %s not found in %#v", name, devices)
 	}
-	assertResolvedProduct("吸顶灯", "1-000000031")
+	assertCandidateOnly("吸顶灯", "1-000000031")
 	assertCandidateOnly("黑色格栅灯", "1-000002044")
 	assertCandidateOnly("筒灯", "1-000003857")
 	assertCandidateOnly("36°射灯", "1-000005105")
 	assertCandidateOnly("爱思系列筒射灯", "1-000004861")
-	assertResolvedProduct("夙夜版青空灯", "1-000003810")
+	assertCandidateOnly("夙夜版青空灯", "1-000003810")
 }
 
-func TestNormalizeLightingDesignImportPayloadPreservesAISelectedProducts(t *testing.T) {
+func TestNormalizeLightingDesignImportPayloadPreservesCallerSelectedProducts(t *testing.T) {
 	payload, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
 		"rooms": []any{
 			map[string]any{
@@ -160,13 +196,13 @@ func TestNormalizeLightingDesignImportPayloadPreservesAISelectedProducts(t *test
 						"name":         "36°射灯",
 						"quantity":     float64(4),
 						"materialCode": "1-000004714",
-						"notes":        "AI 按主卧重点照明选择 S 系列 75 开孔 36° 15w 深空灰候选",
+						"notes":        "Skill 按主卧重点照明选择 S 系列 75 开孔 36° 15w 深空灰候选",
 					},
 					map[string]any{
 						"name":         "爱思系列筒射灯",
 						"quantity":     float64(3),
 						"materialCode": "1-000004861",
-						"notes":        "AI 按用户爱思系列描述选择 S 系列 75 开孔 36° 12w 深空灰候选",
+						"notes":        "Skill 按用户爱思系列描述选择 S 系列 75 开孔 36° 12w 深空灰候选",
 					},
 				},
 			},

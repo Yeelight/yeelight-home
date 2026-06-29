@@ -68,7 +68,7 @@ func (app *app) prepareMetadataCreate(ctx context.Context, request contract.Requ
 	}
 	payload, err := spec.buildPayload(request, houseID)
 	if err != nil {
-		return configureClarificationResponse(request, spec.invalidReason, spec.acceptedFields), nil
+		return configureClarificationResponseWithGuide(request, spec.invalidReason, spec.acceptedFields, payloadGuideForIntent(request.Intent)), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -81,7 +81,7 @@ func (app *app) prepareMetadataCreate(ctx context.Context, request contract.Requ
 		return contract.Response{}, err
 	}
 	if reason := validateConfigureCreatePayload(spec.entityType, payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, spec.acceptedFields), nil
+		return configureClarificationResponseWithGuide(request, reason, spec.acceptedFields, payloadGuideForIntent(request.Intent)), nil
 	}
 	name := planPayloadString(payload, "name")
 	for _, entity := range entities.Entities {

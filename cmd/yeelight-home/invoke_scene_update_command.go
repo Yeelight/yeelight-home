@@ -30,10 +30,10 @@ func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request
 	}
 	payload, err := buildSceneUpdatePayload(request, houseID)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), sceneUpdateAcceptedFields()), nil
+		return sceneUpdateClarificationResponse(request, err.Error()), nil
 	}
 	if reason := validateSceneUpdatePayload(payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, sceneUpdateAcceptedFields()), nil
+		return sceneUpdateClarificationResponse(request, reason), nil
 	}
 	name := planPayloadString(payload, "name")
 	if name == "" {
@@ -51,6 +51,10 @@ func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request
 	}
 	app.preparedOperation = &record
 	return executionPreviewResponse(request, record, entities), nil
+}
+
+func sceneUpdateClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, sceneUpdateAcceptedFields(), scenePayloadGuide())
 }
 
 func buildSceneUpdatePayload(request contract.Request, houseID string) (map[string]any, error) {

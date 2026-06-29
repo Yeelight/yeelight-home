@@ -32,7 +32,7 @@ func (app *app) prepareOperationBatchConfigure(ctx context.Context, request cont
 	}
 	rawSteps, ok := requestMapList(firstNonNil(request.Parameters["operations"], request.Parameters["steps"]))
 	if !ok || len(rawSteps) == 0 || len(rawSteps) > maxOperationBatchConfigureSteps {
-		return configureClarificationResponse(request, "invalid_operation_batch_payload", []string{"parameters.operations[].intent", "parameters.operations[].parameters"}), nil
+		return operationBatchConfigureClarificationResponse(request, "invalid_operation_batch_payload"), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -52,7 +52,7 @@ func (app *app) prepareOperationBatchConfigure(ctx context.Context, request cont
 			return contract.Response{}, err
 		}
 		if reason != "" {
-			return configureClarificationResponse(request, reason, []string{"parameters.operations[].intent", "parameters.operations[].parameters"}), nil
+			return operationBatchConfigureClarificationResponse(request, reason), nil
 		}
 		steps = append(steps, step)
 		extraAPICalls += step.APICalls
@@ -80,6 +80,10 @@ func (app *app) prepareOperationBatchConfigure(ctx context.Context, request cont
 		"writePolicy": "direct_execute_allowlisted_add_update_configure_steps",
 	}
 	return executionPreviewResponseWithDetails(request, record, entities, preview, extraAPICalls), nil
+}
+
+func operationBatchConfigureClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, []string{"parameters.operations[].intent", "parameters.operations[].parameters"}, operationBatchConfigurePayloadGuide())
 }
 
 func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent contract.Request, endpoint api.Endpoint, profile string, region string, defaultHouseID string, authorization string, clientID string, entities api.EntityListResult, raw map[string]any, stepNumber int) (operationBatchStep, string, error) {

@@ -60,6 +60,19 @@ func TestInvokeSceneCreateDoesNotTreatCustomGroupTypeAsArea(t *testing.T) {
 	assertConfigureClarificationReason(t, response, "invalid_scene_resource_reference")
 }
 
+func TestInvokeSceneCreateInvalidPayloadReturnsNestedPayloadGuide(t *testing.T) {
+	response := invokeConfigureWithSeededEntities(t, `{"contractVersion":"1.0","requestId":"req-scene-create-guide","locale":"zh-CN","utterance":"创建孩子屋开灯情景","intent":"scene.create","parameters":{"houseId":"200171","name":"孩子屋开灯","params":{"set":{"ct":3000}}}}`)
+	assertConfigureClarificationReason(t, response, "invalid_scene_create_payload")
+	clarification := response["clarification"].(map[string]any)
+	shape := clarification["payloadShape"].(map[string]any)
+	details := shape["details"].([]any)
+	params := details[0].(map[string]any)["params"].(map[string]any)
+	set := params["set"].(map[string]any)
+	if set["ct"] == nil || set["l"] == nil || clarification["examples"] == nil || !strings.Contains(requestString(clarification["nextStep"]), "scene.create") {
+		t.Fatalf("scene payload guide incomplete: %#v", clarification)
+	}
+}
+
 func TestInvokeAutomationCreateRejectsInvalidStructure(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -87,6 +100,20 @@ func TestInvokeAutomationCreateRejectsInvalidStructure(t *testing.T) {
 			response := invokeConfigureWithSeededEntities(t, test.input)
 			assertConfigureClarificationReason(t, response, test.reason)
 		})
+	}
+}
+
+func TestInvokeAutomationCreateInvalidPayloadReturnsNestedPayloadGuide(t *testing.T) {
+	response := invokeConfigureWithSeededEntities(t, `{"contractVersion":"1.0","requestId":"req-auto-create-guide","locale":"zh-CN","utterance":"创建主卧9点开灯自动化","intent":"automation.create","parameters":{"houseId":"200171","name":"主卧9点开灯","startTime":"00:00:00","endTime":"23:59:59","repeatType":2,"params":{"conditions":[{"type":"alarm","clock":"09:00:00"}]}}}`)
+	assertConfigureClarificationReason(t, response, "invalid_automation_create_payload")
+	clarification := response["clarification"].(map[string]any)
+	shape := clarification["payloadShape"].(map[string]any)
+	params := shape["params"].(map[string]any)
+	conditions := params["conditions"].([]any)
+	actions := shape["actions"].([]any)
+	actionParams := actions[0].(map[string]any)["params"].(map[string]any)
+	if conditions[0].(map[string]any)["clock"] == nil || actionParams["set"] == nil || clarification["examples"] == nil {
+		t.Fatalf("automation payload guide incomplete: %#v", clarification)
 	}
 }
 

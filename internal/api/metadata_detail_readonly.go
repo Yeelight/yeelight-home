@@ -247,7 +247,27 @@ func (client MetadataReadonlyClient) RunSceneDetailGet(ctx context.Context, requ
 	if sceneID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "scene.detail.get", "scene_context_missing"), nil
 	}
-	return client.readPath(ctx, request, "scene.detail.get", "/v1/scene/"+sceneID+"/r/detail", http.MethodPost, nil, map[string]any{"detail": nil})
+	response, err := client.call(ctx, http.MethodPost, "/v1/scene/"+sceneID+"/r/detail", nil, request.Credentials)
+	if err != nil {
+		var statusErr HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			return metadataReadonlyAuthBoundaryResult(client.endpoint.Region, request.HouseID, request.DeviceID, "scene.detail.get", statusErr.StatusCode), nil
+		}
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, request.HouseID, request.DeviceID, "scene.detail.get", response), nil
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    strings.TrimSpace(request.HouseID),
+		DeviceID:   strings.TrimSpace(request.DeviceID),
+		Capability: "scene.detail.get",
+		Data:       sceneDetailData(response["data"], sceneID),
+		RawShape:   responseDataType(response),
+		APICalls:   1,
+		Warnings:   []string{},
+	}, nil
 }
 
 func (client MetadataReadonlyClient) RunSceneSearch(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
@@ -567,7 +587,27 @@ func (client MetadataReadonlyClient) RunAutomationDetailGet(ctx context.Context,
 		result.HouseID = houseID
 		return result, nil
 	}
-	return client.readPath(ctx, request, "automation.detail.get", "/v2/thing/manage/house/"+pathSegment(houseID)+"/automation/"+pathSegment(automationID)+"/r/info", http.MethodGet, nil, map[string]any{"detail": nil})
+	response, err := client.call(ctx, http.MethodGet, "/v2/thing/manage/house/"+pathSegment(houseID)+"/automation/"+pathSegment(automationID)+"/r/info", nil, request.Credentials)
+	if err != nil {
+		var statusErr HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			return metadataReadonlyAuthBoundaryResult(client.endpoint.Region, request.HouseID, request.DeviceID, "automation.detail.get", statusErr.StatusCode), nil
+		}
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, request.HouseID, request.DeviceID, "automation.detail.get", response), nil
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		DeviceID:   strings.TrimSpace(request.DeviceID),
+		Capability: "automation.detail.get",
+		Data:       automationDetailData(response["data"], automationID),
+		RawShape:   responseDataType(response),
+		APICalls:   1,
+		Warnings:   []string{},
+	}, nil
 }
 
 func (client MetadataReadonlyClient) RunSensorList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {

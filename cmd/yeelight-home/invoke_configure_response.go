@@ -9,17 +9,25 @@ import (
 )
 
 func configureClarificationResponse(request contract.Request, reason string, acceptedFields []string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, acceptedFields, nil)
+}
+
+func configureClarificationResponseWithGuide(request contract.Request, reason string, acceptedFields []string, guide map[string]any) contract.Response {
+	clarification := map[string]any{
+		"reason":         reason,
+		"acceptedFields": acceptedFields,
+	}
+	for key, value := range guide {
+		clarification[key] = value
+	}
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "clarification_required",
 		UserMessage:     "请补充要配置的必要信息。",
-		Clarification: map[string]any{
-			"reason":         reason,
-			"acceptedFields": acceptedFields,
-		},
-		Warnings: []string{},
-		TraceID:  "configure-clarification",
+		Clarification:   clarification,
+		Warnings:        []string{},
+		TraceID:         "configure-clarification",
 		Metrics: map[string]any{
 			"apiCalls":  0,
 			"cacheHits": 0,

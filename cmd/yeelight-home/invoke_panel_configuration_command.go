@@ -20,7 +20,7 @@ func (app *app) preparePanelConfiguration(ctx context.Context, request contract.
 	}
 	payload, preconditions, summary, err := buildPanelConfigurationPayload(request)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), panelConfigurationAcceptedFields(request.Intent)), nil
+		return panelConfigurationClarificationResponse(request, err.Error()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -33,7 +33,7 @@ func (app *app) preparePanelConfiguration(ctx context.Context, request contract.
 		return contract.Response{}, err
 	}
 	if !entityExists(entities, "device", valueIDString(payload["deviceId"])) {
-		return configureClarificationResponse(request, "invalid_panel_device_reference", panelConfigurationAcceptedFields(request.Intent)), nil
+		return panelConfigurationClarificationResponse(request, "invalid_panel_device_reference"), nil
 	}
 	now := time.Now()
 	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now)
@@ -274,6 +274,10 @@ func panelConfigurationAcceptedFields(intent string) []string {
 	default:
 		return []string{"parameters.houseId", "parameters.deviceId"}
 	}
+}
+
+func panelConfigurationClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, panelConfigurationAcceptedFields(request.Intent), payloadGuideForIntent(request.Intent))
 }
 
 func (app *app) executePanelConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.PanelConfigurationKind) (contract.Response, error) {

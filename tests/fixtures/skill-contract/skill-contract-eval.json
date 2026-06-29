@@ -493,6 +493,27 @@
       ]
     },
     {
+      "id": "scene-update-warm-color-temperature-uses-detail-contract",
+      "utterance": "把孩子屋开灯改成暖一点",
+      "expectedIntent": "scene.update",
+      "mustUse": [
+        "scripts/invoke",
+        "scene.update"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token",
+        "plan.commit",
+        "hash mismatch",
+        "pending plan",
+        "direct_url",
+        "direct_header"
+      ]
+    },
+    {
       "id": "home-sort-configure-uses-direct-execute",
       "utterance": "把客厅主灯排到房间设备第一位",
       "expectedIntent": "home.sort.configure",
@@ -1088,6 +1109,27 @@
         "operationId",
         "Authorization",
         "Token",
+        "direct_url",
+        "direct_header"
+      ]
+    },
+    {
+      "id": "automation-update-warm-light-uses-complete-rule",
+      "utterance": "把主卧每天9点开灯自动化改成暖光并保持每天执行",
+      "expectedIntent": "automation.update",
+      "mustUse": [
+        "scripts/invoke",
+        "automation.update"
+      ],
+      "forbidden": [
+        "curl",
+        "raw HTTP",
+        "operationId",
+        "Authorization",
+        "Token",
+        "plan.commit",
+        "hash mismatch",
+        "pending plan",
         "direct_url",
         "direct_header"
       ]

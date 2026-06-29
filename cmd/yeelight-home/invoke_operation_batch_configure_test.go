@@ -118,8 +118,35 @@ func TestInvokeOperationBatchConfigureRejectsStrictDeleteIntent(t *testing.T) {
 	if clarification["reason"] != "operation_batch_contains_strict_or_destructive_intent" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
+	if clarification["payloadShape"] == nil || clarification["examples"] == nil || !strings.Contains(requestString(clarification["nextStep"]), "multiple reversible") {
+		t.Fatalf("clarification missing operation batch guide = %#v", clarification)
+	}
 	if app.preparedOperation != nil {
 		t.Fatalf("rejected batch must not retain prepared operation: %#v", app.preparedOperation)
+	}
+}
+
+func TestInvokeOperationBatchConfigureInvalidPayloadReturnsPayloadGuide(t *testing.T) {
+	t.Setenv("YEELIGHT_API_BASE_URL", "http://127.0.0.1:1/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-batch-invalid-secret", "client-batch-invalid-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-batch-invalid","locale":"zh-CN","utterance":"批量配置一下","intent":"operation.batch.configure","parameters":{"houseId":"200171","operations":{"intent":"room.create","parameters":{"name":"书房"}}}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "clarification_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	clarification := response["clarification"].(map[string]any)
+	if clarification["reason"] != "invalid_operation_batch_payload" || clarification["payloadShape"] == nil || clarification["examples"] == nil {
+		t.Fatalf("clarification = %#v", clarification)
+	}
+	if !strings.Contains(requestString(clarification["nextStep"]), "one batch for one user request") {
+		t.Fatalf("clarification nextStep = %#v", clarification["nextStep"])
 	}
 }
 

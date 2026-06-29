@@ -33,7 +33,7 @@ func (app *app) prepareEntityBatchRename(ctx context.Context, request contract.R
 	}
 	items, reason := normalizeEntityBatchRenameItems(request, entities)
 	if reason != "" {
-		return configureClarificationResponse(request, reason, entityBatchRenameAcceptedFields()), nil
+		return entityBatchRenameClarificationResponse(request, reason), nil
 	}
 	payload := map[string]any{
 		"houseId": requestNumberOrString(houseID),
@@ -192,6 +192,10 @@ func entityBatchRenamePreview(items []any, entities api.EntityListResult) map[st
 
 func entityBatchRenameAcceptedFields() []string {
 	return []string{"parameters.houseId", "parameters.items[].entityType", "parameters.items[].id", "parameters.items[].currentName", "parameters.items[].newName", "parameters.items[].typeId"}
+}
+
+func entityBatchRenameClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, entityBatchRenameAcceptedFields(), entityRenameBatchPayloadGuide())
 }
 
 func (app *app) executeEntityBatchRename(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {

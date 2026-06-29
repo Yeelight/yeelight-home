@@ -20,7 +20,7 @@ func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Re
 	}
 	payload, preconditions, summary, err := buildHomeOrganizationPayload(request, houseID)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), homeOrganizationAcceptedFields(request.Intent)), nil
+		return homeOrganizationClarificationResponse(request, err.Error()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -33,7 +33,7 @@ func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Re
 		return contract.Response{}, err
 	}
 	if reason := validateHomeOrganizationPayload(request.Intent, payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, homeOrganizationAcceptedFields(request.Intent)), nil
+		return homeOrganizationClarificationResponse(request, reason), nil
 	}
 	var preview map[string]any
 	previewCalls := 0
@@ -58,7 +58,7 @@ func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Re
 			return contract.Response{}, err
 		}
 		if reason != "" {
-			return configureClarificationResponse(request, reason, homeOrganizationAcceptedFields(request.Intent)), nil
+			return homeOrganizationClarificationResponse(request, reason), nil
 		}
 		preview = favoritePreview
 		previewCalls = calls
@@ -366,6 +366,10 @@ func homeOrganizationAcceptedFields(intent string) []string {
 	default:
 		return []string{"parameters.houseId"}
 	}
+}
+
+func homeOrganizationClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, homeOrganizationAcceptedFields(request.Intent), payloadGuideForIntent(request.Intent))
 }
 
 func payloadItems(payload map[string]any) []any {

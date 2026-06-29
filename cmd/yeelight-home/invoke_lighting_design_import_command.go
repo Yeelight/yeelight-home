@@ -23,7 +23,7 @@ func (app *app) prepareLightingDesignImport(ctx context.Context, request contrac
 	}
 	normalized, err := api.NormalizeLightingDesignImportPayload(houseID, payload)
 	if err != nil {
-		return configureClarificationResponse(request, "invalid_lighting_design_import_payload", []string{"parameters.houseId", "parameters.rooms", "parameters.rooms[].items", "parameters.slots", "parameters.items"}), nil
+		return configureClarificationResponseWithGuide(request, "invalid_lighting_design_import_payload", []string{"parameters.houseId", "parameters.rooms", "parameters.rooms[].items", "parameters.slots", "parameters.items"}, lightingDesignImportPayloadGuide()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,

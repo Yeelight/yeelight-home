@@ -31,21 +31,7 @@ func lightingDesignResolveSlotProduct(slot map[string]any, baseName string) (lig
 	if len(candidates) == 0 {
 		return lightingDesignProductMatch{}, nil
 	}
-	best := candidates[0]
-	if lightingDesignCanAutoResolveProduct(candidates) {
-		return best, candidates
-	}
 	return lightingDesignProductMatch{}, candidates
-}
-
-func lightingDesignCanAutoResolveProduct(candidates []lightingDesignProductMatch) bool {
-	if len(candidates) == 0 || candidates[0].Score < lightingDesignProductMatchHighThreshold {
-		return false
-	}
-	if len(candidates) == 1 {
-		return true
-	}
-	return candidates[0].Score-candidates[1].Score >= 25
 }
 
 func lightingDesignHasProductIdentity(match lightingDesignProductMatch) bool {

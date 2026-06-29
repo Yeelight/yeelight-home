@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/yeelight/yeelight-home/internal/contract"
 )
 
 func TestInvokeLightingDesignPlanBuildsLocalPlan(t *testing.T) {
@@ -57,12 +55,11 @@ func TestInvokeLightingDesignPlanBuildsLocalPlan(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
-	if result["persistentWrites"] != false || result["applyBehavior"] != "direct_execute_supported" {
+	if result["persistentWrites"] != false || result["applyBehavior"] != "caller_authored_actions_required" {
 		t.Fatalf("result = %#v", result)
 	}
-	recipe := result["selectedRecipe"].(map[string]any)
-	if recipe["name"] != "观影模式" {
-		t.Fatalf("recipe = %#v", recipe)
+	if _, ok := result["selectedRecipe"]; ok {
+		t.Fatalf("Runtime must not select subjective lighting recipes: %#v", result)
 	}
 	evidence := result["deviceEvidence"].([]any)
 	if len(evidence) != 2 {
@@ -109,22 +106,6 @@ func TestInvokeLightingDesignPlanClarifiesUnknownTarget(t *testing.T) {
 	}
 }
 
-func TestRuntimeLightingCatalogIsSelfContained(t *testing.T) {
-	catalog := loadRuntimeLightingCatalog()
-	if catalog.Status != "runtime_builtin" || len(catalog.LightingExperience.SceneRecipes) == 0 || len(catalog.LightingExperience.MoodRecipes) == 0 {
-		t.Fatalf("catalog = %#v", catalog)
-	}
-	recipe := selectLightingRecipe(contract.Request{
-		Utterance: "给客厅做一个观影灯光方案",
-		Parameters: map[string]any{
-			"mood": "观影",
-		},
-	}, catalog)
-	if recipe["name"] != "观影模式" {
-		t.Fatalf("recipe = %#v", recipe)
-	}
-}
-
 func TestInvokeLightingDesignApplyDryRunPreviewsWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -150,7 +131,7 @@ func TestInvokeLightingDesignApplyDryRunPreviewsWithoutWriting(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-design-apply-secret", "client-design-apply-1", "house-1")
 
-	input := `{"contractVersion":"1.0","requestId":"req-design-apply-plan","locale":"zh-CN","utterance":"把客厅应用观影灯光设计","intent":"lighting.design.apply","targets":[{"entityType":"room","id":"room-1"}],"parameters":{"mood":"观影","hex":"#3366ff"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-design-apply-plan","locale":"zh-CN","utterance":"把客厅应用观影灯光设计","intent":"lighting.design.apply","targets":[{"entityType":"room","id":"room-1"}],"parameters":{"brightness":20,"colorTemperature":3000,"hex":"#3366ff"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)

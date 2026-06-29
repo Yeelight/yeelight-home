@@ -30,14 +30,14 @@ func (app *app) prepareAutomationUpdate(ctx context.Context, request contract.Re
 	}
 	automation, reason := automationStatusTarget(request, entities)
 	if reason != "" {
-		return configureClarificationResponse(request, reason, automationUpdateAcceptedFields()), nil
+		return automationUpdateClarificationResponse(request, reason), nil
 	}
 	payload, err := buildAutomationUpdatePayload(request, houseID, automation.ID)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), automationUpdateAcceptedFields()), nil
+		return automationUpdateClarificationResponse(request, err.Error()), nil
 	}
 	if reason := validateAutomationUpdatePayload(payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, automationUpdateAcceptedFields()), nil
+		return automationUpdateClarificationResponse(request, reason), nil
 	}
 	summaryName := planPayloadString(payload, "name")
 	if summaryName == "" {
@@ -55,6 +55,10 @@ func (app *app) prepareAutomationUpdate(ctx context.Context, request contract.Re
 	}
 	app.preparedOperation = &record
 	return executionPreviewResponse(request, record, entities), nil
+}
+
+func automationUpdateClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, automationUpdateAcceptedFields(), automationPayloadGuide())
 }
 
 func buildAutomationUpdatePayload(request contract.Request, houseID string, automationID string) (map[string]any, error) {

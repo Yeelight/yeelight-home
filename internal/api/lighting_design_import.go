@@ -139,13 +139,15 @@ func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any
 	normalizedRooms := make([]any, 0, len(rooms))
 	devices := []any{}
 	deviceGroups := []any{}
-	deviceLocalIDsByRoomType := map[string][]int64{}
+	slotsByRoomName := map[string][]lightingDesignSlotRef{}
+	roomLocalIDByName := map[string]int64{}
 	for _, room := range rooms {
 		roomLocalID := int64FromMap(room, "localId", localSeq.next())
 		roomName := strings.TrimSpace(firstNonEmpty(stringFromMap(room, "name"), stringFromMap(room, "roomName"), stringFromMap(room, "localName")))
 		if roomName == "" {
 			return nil, fmt.Errorf("room name is required")
 		}
+		roomLocalIDByName[roomName] = roomLocalID
 		normalizedRooms = append(normalizedRooms, map[string]any{
 			"localId":    roomLocalID,
 			"localName":  roomName,
@@ -182,6 +184,7 @@ func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any
 				if !hasMapKey(slot, "connectType") && lightingDesignHasProductIdentity(productMatch) && productMatch.Entry.ConnectType >= -1 {
 					connectType = productMatch.Entry.ConnectType
 				}
+				attrs := lightingDesignSlotAttrs(slot, roomName, deviceName, productMatch, productCandidates)
 				device := map[string]any{
 					"localId":         deviceLocalID,
 					"localName":       deviceName,
@@ -190,7 +193,7 @@ func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any
 					"addr":            deviceLocalID,
 					"pid":             pid,
 					"connectType":     connectType,
-					"attrs":           lightingDesignSlotAttrs(slot, roomName, deviceName, productMatch, productCandidates),
+					"attrs":           attrs,
 				}
 				pcID := int64FromMap(slot, "pcId", 0)
 				if pcID <= 0 && lightingDesignHasProductIdentity(productMatch) && productMatch.Entry.PCID > 0 {
@@ -203,25 +206,26 @@ func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any
 					device["mac"] = mac
 				}
 				devices = append(devices, device)
-				groupKey := roomName + "\x00" + lightingDesignGroupKey(slot, baseName)
-				deviceLocalIDsByRoomType[groupKey] = append(deviceLocalIDsByRoomType[groupKey], deviceLocalID)
+				slotsByRoomName[roomName] = append(slotsByRoomName[roomName], lightingDesignSlotRef{
+					DeviceLocalID: deviceLocalID,
+					Name:          deviceName,
+					BaseName:      baseName,
+					Category:      stringFromMap(attrs, "category"),
+					Series:        stringFromMap(attrs, "series"),
+					ProductName:   stringFromMap(attrs, "productName"),
+					MaterialCode:  stringFromMap(attrs, "materialCode"),
+					GroupKey:      lightingDesignGroupKey(slot, baseName),
+				})
 			}
 		}
-		for groupKey, ids := range deviceLocalIDsByRoomType {
-			parts := strings.SplitN(groupKey, "\x00", 2)
-			if len(parts) != 2 || parts[0] != roomName || len(ids) < 2 {
-				continue
-			}
-			if !lightingDesignGroupEnabled(payload, room) {
-				continue
-			}
-			deviceGroups = append(deviceGroups, map[string]any{
-				"localId":   localSeq.next(),
-				"localName": roomName + parts[1] + "组",
-				"roomId":    roomLocalID,
-				"deviceIds": int64sToAny(ids),
-			})
-		}
+	}
+	explicitDeviceGroups, err := normalizeLightingDesignExplicitGroups(payload, slotsByRoomName, roomLocalIDByName, localSeq)
+	if err != nil {
+		return nil, err
+	}
+	if len(explicitDeviceGroups) > 0 {
+		deviceGroups = append(explicitDeviceGroups, deviceGroups...)
+		deviceGroups = dedupeLightingDesignDeviceGroups(deviceGroups)
 	}
 	if len(devices) > lightingDesignMaxDevices {
 		return nil, fmt.Errorf("device slot count exceeds limit %d", lightingDesignMaxDevices)
@@ -260,6 +264,168 @@ func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any
 		result["automations"] = automations
 	}
 	return result, nil
+}
+
+type lightingDesignSlotRef struct {
+	DeviceLocalID int64
+	Name          string
+	BaseName      string
+	Category      string
+	Series        string
+	ProductName   string
+	MaterialCode  string
+	GroupKey      string
+}
+
+func normalizeLightingDesignExplicitGroups(payload map[string]any, slotsByRoomName map[string][]lightingDesignSlotRef, roomLocalIDByName map[string]int64, localSeq *lightingDesignLocalSeq) ([]any, error) {
+	groups, ok := mapListFromAny(payload["groups"])
+	if !ok || len(groups) == 0 {
+		return nil, nil
+	}
+	if len(groups) > lightingDesignMaxGroups {
+		return nil, fmt.Errorf("group count exceeds limit %d", lightingDesignMaxGroups)
+	}
+	result := make([]any, 0, len(groups))
+	for _, group := range groups {
+		groupName := strings.TrimSpace(firstNonEmpty(stringFromMap(group, "name"), stringFromMap(group, "localName")))
+		if groupName == "" {
+			return nil, fmt.Errorf("group name is required")
+		}
+		roomName := strings.TrimSpace(stringFromMap(group, "roomName"))
+		if roomName == "" {
+			return nil, fmt.Errorf("group roomName is required")
+		}
+		roomLocalID := roomLocalIDByName[roomName]
+		if roomLocalID <= 0 {
+			return nil, fmt.Errorf("group roomName %q does not match an imported room", roomName)
+		}
+		deviceIDs := lightingDesignExplicitGroupDeviceIDs(group, slotsByRoomName[roomName])
+		if len(deviceIDs) == 0 {
+			return nil, fmt.Errorf("group %q did not match any imported device slots", groupName)
+		}
+		result = append(result, map[string]any{
+			"localId":   int64FromMap(group, "localId", localSeq.next()),
+			"localName": groupName,
+			"roomId":    roomLocalID,
+			"deviceIds": int64sToAny(deviceIDs),
+		})
+	}
+	return result, nil
+}
+
+func lightingDesignExplicitGroupDeviceIDs(group map[string]any, slots []lightingDesignSlotRef) []int64 {
+	if ids, ok := anyInt64List(group["deviceIds"]); ok && len(ids) > 0 {
+		return ids
+	}
+	match, _ := group["match"].(map[string]any)
+	if len(match) == 0 {
+		if groupKey := strings.TrimSpace(stringFromMap(group, "groupKey")); groupKey != "" {
+			match = map[string]any{"groupKey": groupKey}
+		}
+	}
+	if len(match) == 0 {
+		return nil
+	}
+	result := []int64{}
+	for _, slot := range slots {
+		if lightingDesignSlotMatchesGroup(slot, match) {
+			result = append(result, slot.DeviceLocalID)
+		}
+	}
+	return result
+}
+
+func lightingDesignSlotMatchesGroup(slot lightingDesignSlotRef, match map[string]any) bool {
+	for key, raw := range match {
+		expected := lightingDesignStringFromAny(raw)
+		if expected == "" {
+			continue
+		}
+		switch key {
+		case "name", "slotName", "deviceName":
+			if !strings.Contains(slot.Name, expected) && !strings.Contains(slot.BaseName, expected) {
+				return false
+			}
+		case "category":
+			if slot.Category != expected {
+				return false
+			}
+		case "series":
+			if slot.Series != expected {
+				return false
+			}
+		case "productName":
+			if slot.ProductName != expected {
+				return false
+			}
+		case "materialCode":
+			if slot.MaterialCode != expected {
+				return false
+			}
+		case "groupKey":
+			if slot.GroupKey != expected {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func anyInt64List(value any) ([]int64, bool) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	result := make([]int64, 0, len(items))
+	for _, item := range items {
+		parsed, ok := lightingDesignIntFromAny(item)
+		if !ok || parsed <= 0 {
+			return nil, false
+		}
+		result = append(result, int64(parsed))
+	}
+	return result, true
+}
+
+func dedupeLightingDesignDeviceGroups(groups []any) []any {
+	seen := map[string]bool{}
+	result := make([]any, 0, len(groups))
+	for _, raw := range groups {
+		group, ok := raw.(map[string]any)
+		if !ok {
+			result = append(result, raw)
+			continue
+		}
+		key := lightingDesignDeviceGroupMemberKey(group)
+		if key == "" {
+			key = strings.TrimSpace(stringFromMap(group, "localName")) + "\x00" + lightingDesignStringFromAny(group["roomId"])
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		result = append(result, group)
+	}
+	return result
+}
+
+func lightingDesignDeviceGroupMemberKey(group map[string]any) string {
+	roomID := lightingDesignStringFromAny(group["roomId"])
+	deviceIDs, ok := group["deviceIds"].([]any)
+	if roomID == "" || !ok || len(deviceIDs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(deviceIDs))
+	for _, id := range deviceIDs {
+		parsed := lightingDesignStringFromAny(id)
+		if parsed == "" {
+			return ""
+		}
+		parts = append(parts, parsed)
+	}
+	return roomID + "\x00" + strings.Join(parts, ",")
 }
 
 func normalizedLightingDesignImportPayload(houseID string, payload map[string]any) (map[string]any, bool, error) {
@@ -459,16 +625,6 @@ func lightingDesignGroupKey(slot map[string]any, fallback string) string {
 		stringFromMap(slot, "productName"),
 		fallback,
 	)
-}
-
-func lightingDesignGroupEnabled(payload map[string]any, room map[string]any) bool {
-	if value, ok := lightingDesignBoolFromAny(room["autoGroup"]); ok {
-		return value
-	}
-	if value, ok := lightingDesignBoolFromAny(payload["autoGroup"]); ok {
-		return value
-	}
-	return true
 }
 
 func lightingDesignImportMode(payload map[string]any) string {

@@ -26,7 +26,7 @@ func (app *app) prepareMetadataBatchDelete(ctx context.Context, request contract
 	}
 	requestedItems, ok := metadataBatchDeleteRequestedItems(request, idKey, targetType)
 	if !ok || len(requestedItems) == 0 || len(requestedItems) > metadataBatchDeleteLimit {
-		return configureClarificationResponse(request, "invalid_metadata_batch_delete_payload", metadataBatchDeleteAcceptedFields(request.Intent)), nil
+		return metadataBatchDeleteClarificationResponse(request, "invalid_metadata_batch_delete_payload"), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -40,7 +40,7 @@ func (app *app) prepareMetadataBatchDelete(ctx context.Context, request contract
 	}
 	items, previewItems, reason := resolveMetadataBatchDeleteItems(targetType, idKey, requestedItems, entities)
 	if reason != "" {
-		return configureClarificationResponse(request, reason, metadataBatchDeleteAcceptedFields(request.Intent)), nil
+		return metadataBatchDeleteClarificationResponse(request, reason), nil
 	}
 	payload := map[string]any{
 		"houseId":    requestNumberOrString(houseID),
@@ -159,6 +159,10 @@ func metadataBatchDeleteAcceptedFields(intent string) []string {
 	default:
 		return []string{"parameters.houseId", "parameters.items", "parameters.ids", "parameters.names"}
 	}
+}
+
+func metadataBatchDeleteClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, metadataBatchDeleteAcceptedFields(request.Intent), metadataBatchDeletePayloadGuide(request.Intent))
 }
 
 func (app *app) executeMetadataBatchDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.MetadataBatchDeleteKind) (contract.Response, error) {

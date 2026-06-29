@@ -34,18 +34,15 @@ func (app *app) prepareLightingDesignApply(ctx context.Context, request contract
 		return *clarification, nil
 	}
 	if len(selectedDevices) == 0 {
-		return configureClarificationResponse(request, "target_device_evidence_unavailable", []string{"targets[0].id", "targets[0].name", "parameters.houseId"}), nil
+		return configureClarificationResponseWithGuide(request, "target_device_evidence_unavailable", []string{"targets[0].id", "targets[0].name", "parameters.houseId", "parameters.actions"}, lightingDesignApplyPayloadGuide()), nil
 	}
-	domainCatalog := loadRuntimeLightingCatalog()
-	recipe := selectLightingRecipe(request, domainCatalog)
-	actions, preview, calls := lightingDesignApplyActions(ctx, endpoint, houseID, selectedDevices, recipe, request, authorization, clientID)
+	actions, preview, calls := lightingDesignApplyActions(ctx, endpoint, houseID, selectedDevices, request, authorization, clientID)
 	if len(actions) == 0 {
-		return executionBlockedResponse(request, "lighting_design_no_verifiable_actions", "当前设计没有可验证的设备级灯光动作，未生成可执行操作。"), nil
+		return configureClarificationResponseWithGuide(request, "explicit_lighting_actions_required", []string{"parameters.actions", "parameters.design.actions", "parameters.power", "parameters.brightness", "parameters.colorTemperature", "parameters.color"}, lightingDesignApplyPayloadGuide()), nil
 	}
 	payload := map[string]any{
 		"houseId": requestNumberOrString(houseID),
 		"scope":   scope,
-		"recipe":  recipe,
 		"actions": actions,
 	}
 	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, "应用照明设计到已验证设备属性", payload, []string{
@@ -61,7 +58,7 @@ func (app *app) prepareLightingDesignApply(ctx context.Context, request contract
 	return executionPreviewResponseWithDetails(request, record, entities, preview, calls), nil
 }
 
-func lightingDesignApplyActions(ctx context.Context, endpoint api.Endpoint, houseID string, devices []api.EntitySummary, recipe map[string]any, request contract.Request, authorization string, clientID string) ([]any, map[string]any, int) {
+func lightingDesignApplyActions(ctx context.Context, endpoint api.Endpoint, houseID string, devices []api.EntitySummary, request contract.Request, authorization string, clientID string) ([]any, map[string]any, int) {
 	actions := []any{}
 	skipped := []string{}
 	apiCalls := 0
@@ -90,7 +87,7 @@ func lightingDesignApplyActions(ctx context.Context, endpoint api.Endpoint, hous
 		}
 		apiCalls++
 		propertyIDs := stateQueryPropertySet(capability.Device)
-		for _, action := range lightingDesignActionsForDevice(device, propertyIDs, recipe, request) {
+		for _, action := range lightingDesignActionsForDevice(device, propertyIDs, request) {
 			actions = append(actions, action)
 		}
 	}
@@ -157,56 +154,34 @@ func explicitLightingDesignActions(request contract.Request, devices []api.Entit
 	return actions, len(actions) > 0
 }
 
-func lightingDesignActionsForDevice(device api.EntitySummary, propertyIDs []string, recipe map[string]any, request contract.Request) []any {
+func lightingDesignActionsForDevice(device api.EntitySummary, propertyIDs []string, request contract.Request) []any {
 	actions := []any{}
 	explicitPower, hasExplicitPower := lightPowerValue(request)
 	explicitBrightness, hasExplicitBrightness := lightIntegerValue(request, 1, 100, "brightness", "level", "l")
 	explicitColorTemperature, hasExplicitColorTemperature := lightIntegerValue(request, 2700, 6500, "colorTemperature", "color_temperature", "ct")
 	explicitColor, hasExplicitColor := lightColorValue(request)
-	hasExplicitDesign := hasExplicitPower || hasExplicitBrightness || hasExplicitColorTemperature || hasExplicitColor
-	setsPowerOff := lightingDesignPowerOff(recipe, request)
 	hasDeviceLevelDesign := false
 	if hasPropertyID(propertyIDs, "l", "brightness") {
 		if hasExplicitBrightness {
 			actions = append(actions, lightingDesignAction(device, "l", explicitBrightness))
 			hasDeviceLevelDesign = true
-		} else if !hasExplicitDesign {
-			if value, ok := recipeInt(recipe, "brightness", "brightnessMax", "backgroundBrightnessMax"); ok {
-				actions = append(actions, lightingDesignAction(device, "l", clampInt(value, 1, 100)))
-				hasDeviceLevelDesign = true
-			} else if mainLight, ok := recipe["mainLight"].(string); ok && mainLight == "off_or_low" {
-				actions = append(actions, lightingDesignAction(device, "l", 10))
-				hasDeviceLevelDesign = true
-			}
 		}
 	}
 	if hasPropertyID(propertyIDs, "ct", "colorTemperature") {
 		if hasExplicitColorTemperature {
 			actions = append(actions, lightingDesignAction(device, "ct", explicitColorTemperature))
 			hasDeviceLevelDesign = true
-		} else if !hasExplicitDesign {
-			if value, ok := recipeInt(recipe, "colorTemperature"); ok {
-				actions = append(actions, lightingDesignAction(device, "ct", clampInt(value, 2700, 6500)))
-				hasDeviceLevelDesign = true
-			}
 		}
 	}
 	if hasPropertyID(propertyIDs, "c", "color", "rgb") {
 		if hasExplicitColor {
 			actions = append(actions, lightingDesignAction(device, "c", explicitColor))
 			hasDeviceLevelDesign = true
-		} else if !hasExplicitDesign {
-			if value, ok := lightingDesignColorValue(recipe, request); ok {
-				actions = append(actions, lightingDesignAction(device, "c", value))
-				hasDeviceLevelDesign = true
-			}
 		}
 	}
 	if hasPropertyID(propertyIDs, "p", "power", "on") {
 		if hasExplicitPower {
 			actions = append([]any{lightingDesignAction(device, "p", explicitPower)}, actions...)
-		} else if setsPowerOff {
-			actions = append([]any{lightingDesignAction(device, "p", false)}, actions...)
 		} else if hasDeviceLevelDesign {
 			actions = append([]any{lightingDesignAction(device, "p", true)}, actions...)
 		}
@@ -221,37 +196,6 @@ func lightingDesignAction(device api.EntitySummary, propertyName string, value a
 		"propertyName": propertyName,
 		"value":        value,
 	}
-}
-
-func lightingDesignPowerOff(recipe map[string]any, request contract.Request) bool {
-	if value, ok := lightPowerValue(request); ok && !value {
-		return true
-	}
-	for _, key := range []string{"name", "behavior", "mainLight"} {
-		value, _ := recipe[key].(string)
-		normalized := strings.ToLower(strings.TrimSpace(value))
-		if strings.Contains(normalized, "离家") || strings.Contains(normalized, "关闭") || strings.Contains(normalized, "关灯") || normalized == "off" {
-			return true
-		}
-	}
-	return false
-}
-
-func lightingDesignColorValue(recipe map[string]any, request contract.Request) (int, bool) {
-	if value, ok := lightColorValue(request); ok {
-		return value, true
-	}
-	for _, key := range []string{"color", "rgb", "c"} {
-		if value, ok := recipe[key]; ok {
-			if parsed, ok := requestInt(value); ok && parsed >= 0 && parsed <= 16777215 {
-				return parsed, true
-			}
-			if text, ok := value.(string); ok {
-				return parseRGBHex(text)
-			}
-		}
-	}
-	return 0, false
 }
 
 func hasPropertyID(ids []string, candidates ...string) bool {

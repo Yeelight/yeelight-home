@@ -71,6 +71,9 @@ func TestInvokeAutomationUpdateRejectsStatusField(t *testing.T) {
 	if clarification["reason"] != "automation_status_update_requires_enable_disable_intent" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
+	if clarification["payloadShape"] == nil || clarification["examples"] == nil || !strings.Contains(requestString(clarification["nextStep"]), "automation.enable") {
+		t.Fatalf("clarification missing payload guide = %#v", clarification)
+	}
 }
 
 func TestInvokeAutomationUpdateRequiresKnownAutomation(t *testing.T) {
@@ -96,6 +99,38 @@ func TestInvokeAutomationUpdateRequiresKnownAutomation(t *testing.T) {
 	clarification := response["clarification"].(map[string]any)
 	if clarification["reason"] != "invalid_automation_reference" {
 		t.Fatalf("clarification = %#v", clarification)
+	}
+	if clarification["payloadShape"] == nil || clarification["examples"] == nil || !strings.Contains(requestString(clarification["nextStep"]), "automation.detail.get") {
+		t.Fatalf("clarification missing payload guide = %#v", clarification)
+	}
+}
+
+func TestInvokeAutomationUpdateInvalidPayloadReturnsPayloadGuide(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writeAutomationUpdateSeedList(writer, request, "回家开灯", "1")
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-auto-update-secret", "client-auto-update-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-auto-update-bad-shape","locale":"zh-CN","utterance":"把回家开灯自动化改成18点触发","intent":"automation.update","parameters":{"houseId":"200171","automationId":"auto-1","name":"回家开灯更新","params":{"type":"and","conditions":[{"type":"alarm","clock":"18:00:00"}]}}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "clarification_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	clarification := response["clarification"].(map[string]any)
+	if clarification["reason"] != "invalid_automation_update_payload" || clarification["payloadShape"] == nil || clarification["examples"] == nil {
+		t.Fatalf("clarification = %#v", clarification)
+	}
+	if !strings.Contains(requestString(clarification["nextStep"]), "complete rule payload") {
+		t.Fatalf("clarification nextStep = %#v", clarification["nextStep"])
 	}
 }
 

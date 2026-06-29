@@ -8,42 +8,6 @@ import (
 	"github.com/yeelight/yeelight-home/internal/contract"
 )
 
-type runtimeLightingCatalog struct {
-	Version            string `json:"version"`
-	Status             string `json:"status"`
-	LightingExperience struct {
-		SceneRecipes []map[string]any `json:"sceneRecipes"`
-		MoodRecipes  []map[string]any `json:"moodRecipes"`
-	} `json:"lightingExperience"`
-}
-
-func newRuntimeLightingCatalog() runtimeLightingCatalog {
-	catalog := runtimeLightingCatalog{
-		Version: "0.1.0",
-		Status:  "runtime_builtin",
-	}
-	catalog.LightingExperience.SceneRecipes = []map[string]any{
-		{"name": "回家模式", "brightness": 90, "colorTemperature": 4500},
-		{"name": "离家模式", "mainLight": "off"},
-		{"name": "清洁模式", "brightness": 100, "colorTemperature": 5700},
-		{"name": "日常模式", "brightnessMax": 80, "colorTemperature": 3800},
-		{"name": "会客模式", "brightnessMax": 100, "colorTemperature": 4500},
-		{"name": "观影模式", "mainLight": "off_or_low", "backgroundBrightnessMax": 20, "colorTemperature": 3000},
-		{"name": "阅读模式", "brightness": 80, "colorTemperature": 4500},
-		{"name": "睡眠模式", "brightness": 8, "colorTemperature": 2700},
-		{"name": "夜灯模式", "brightness": 8, "colorTemperature": 2700},
-	}
-	catalog.LightingExperience.MoodRecipes = []map[string]any{
-		{"expression": "放松", "brightness": 35, "colorTemperature": 3000},
-		{"expression": "睡前", "brightness": 8, "colorTemperature": 2700},
-		{"expression": "专注", "brightness": 80, "colorTemperature": 5000},
-		{"expression": "阅读", "brightness": 80, "colorTemperature": 4500},
-		{"expression": "观影", "brightness": 20, "mainLight": "off_or_low", "colorTemperature": 3000},
-		{"expression": "聚餐", "brightness": 65, "colorTemperature": 3500},
-	}
-	return catalog
-}
-
 func (app *app) prepareLightingDesign(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
@@ -65,8 +29,6 @@ func (app *app) prepareLightingDesign(ctx context.Context, request contract.Requ
 	if clarification != nil {
 		return *clarification, nil
 	}
-	domainCatalog := loadRuntimeLightingCatalog()
-	recipe := selectLightingRecipe(request, domainCatalog)
 	capabilityEvidence, capabilityWarnings, capabilityCalls := lightingDesignCapabilities(ctx, endpoint, entities.HouseID, selectedDevices, authorization, clientID)
 
 	unknowns := []string{}
@@ -91,22 +53,15 @@ func (app *app) prepareLightingDesign(ctx context.Context, request contract.Requ
 		"planType":         "local_lighting_design",
 		"persistentWrites": false,
 		"applyIntent":      "lighting.design.apply",
-		"applyBehavior":    "direct_execute_supported",
+		"applyBehavior":    "caller_authored_actions_required",
 		"scope":            scope,
-		"selectedRecipe":   recipe,
 		"deviceEvidence":   capabilityEvidence,
 		"unknownEvidence":  unknowns,
 		"steps": []string{
-			"按当前家庭实体和设备能力证据生成建议",
-			"只使用可确认支持的灯光属性作为候选",
-			"如需持久化应用，调用 lighting.design.apply；调用方负责在调用前完成用户确认",
+			"读取当前家庭实体和设备能力证据",
+			"调用方或 Skill 根据用户目标生成明确的设备级动作",
+			"如需应用到真实设备，调用 lighting.design.apply 并传入 actions[] 或明确的 power/brightness/colorTemperature/color 参数",
 		},
-	}
-	result["runtimeLightingCatalog"] = map[string]any{
-		"version":          domainCatalog.Version,
-		"status":           domainCatalog.Status,
-		"sceneRecipeCount": len(domainCatalog.LightingExperience.SceneRecipes),
-		"moodRecipeCount":  len(domainCatalog.LightingExperience.MoodRecipes),
 	}
 	return contract.Response{
 		ContractVersion: contract.Version,
@@ -168,57 +123,6 @@ func lightingDesignCapabilities(ctx context.Context, endpoint api.Endpoint, hous
 		})
 	}
 	return evidence, warnings, apiCalls
-}
-
-func loadRuntimeLightingCatalog() runtimeLightingCatalog {
-	return newRuntimeLightingCatalog()
-}
-
-func selectLightingRecipe(request contract.Request, catalog runtimeLightingCatalog) map[string]any {
-	query := strings.ToLower(strings.TrimSpace(request.Utterance + " " + firstRequestString(request.Parameters, "mood", "scene", "purpose", "recipe")))
-	for _, recipe := range catalog.LightingExperience.SceneRecipes {
-		if recipeMatches(query, recipe, "name") {
-			return compactRecipe(recipe, "scene")
-		}
-	}
-	for _, recipe := range catalog.LightingExperience.MoodRecipes {
-		if recipeMatches(query, recipe, "expression") {
-			return compactRecipe(recipe, "mood")
-		}
-	}
-	for _, recipe := range catalog.LightingExperience.SceneRecipes {
-		if recipe["name"] == "日常模式" {
-			return compactRecipe(recipe, "scene")
-		}
-	}
-	return map[string]any{"type": "conservative_default", "name": "日常模式"}
-}
-
-func recipeMatches(query string, recipe map[string]any, key string) bool {
-	value, ok := recipe[key].(string)
-	if !ok || value == "" {
-		return false
-	}
-	normalizedQuery := normalizeRecipeMatchText(query)
-	normalizedValue := normalizeRecipeMatchText(value)
-	return strings.Contains(normalizedQuery, normalizedValue) || strings.Contains(normalizedValue, normalizedQuery)
-}
-
-func normalizeRecipeMatchText(value string) string {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	normalized = strings.ReplaceAll(normalized, " ", "")
-	normalized = strings.TrimSuffix(normalized, "模式")
-	return normalized
-}
-
-func compactRecipe(recipe map[string]any, recipeType string) map[string]any {
-	result := map[string]any{"type": recipeType}
-	for _, key := range []string{"name", "expression", "brightness", "brightnessMax", "colorTemperature", "mainLight", "backgroundBrightnessMax"} {
-		if value, ok := recipe[key]; ok {
-			result[key] = value
-		}
-	}
-	return result
 }
 
 func firstEntitiesByType(entities []api.EntitySummary, entityType string, limit int) []api.EntitySummary {

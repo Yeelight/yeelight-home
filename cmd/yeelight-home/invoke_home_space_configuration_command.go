@@ -20,7 +20,7 @@ func (app *app) prepareHomeSpaceConfiguration(ctx context.Context, request contr
 	}
 	payload, preconditions, summary, err := buildHomeSpaceConfigurationPayload(request, houseID)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), homeSpaceConfigurationAcceptedFields(request.Intent)), nil
+		return homeSpaceConfigurationClarificationResponse(request, err.Error()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -33,7 +33,7 @@ func (app *app) prepareHomeSpaceConfiguration(ctx context.Context, request contr
 		return contract.Response{}, err
 	}
 	if reason := validateHomeSpaceConfigurationPayload(request.Intent, payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, homeSpaceConfigurationAcceptedFields(request.Intent)), nil
+		return homeSpaceConfigurationClarificationResponse(request, reason), nil
 	}
 	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, time.Now())
 	if err != nil {
@@ -268,6 +268,10 @@ func homeSpaceConfigurationAcceptedFields(intent string) []string {
 	default:
 		return []string{"parameters.houseId"}
 	}
+}
+
+func homeSpaceConfigurationClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, homeSpaceConfigurationAcceptedFields(request.Intent), payloadGuideForIntent(request.Intent))
 }
 
 func stringListAsRequestIDs(values []string) []any {

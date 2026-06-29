@@ -122,11 +122,14 @@
         {
           "typeId": 2,
           "resId": "device-1",
+          "resName": "主灯",
           "rank": 0,
           "action": 0,
           "params": {
             "set": {
-              "p": true
+              "p": true,
+              "l": 60,
+              "ct": 3000
             }
           }
         }
@@ -989,10 +992,13 @@
         {
           "typeId": 2,
           "resId": "device-1",
+          "resName": "主灯",
           "rank": 0,
           "params": {
             "set": {
-              "power": true
+              "p": true,
+              "l": 60,
+              "ct": 3000
             }
           }
         }

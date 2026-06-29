@@ -21,7 +21,7 @@ func (app *app) prepareSpaceOrganization(ctx context.Context, request contract.R
 	}
 	payload, preconditions, summary, err := buildSpaceOrganizationPayload(request, houseID)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), spaceOrganizationAcceptedFields(request.Intent)), nil
+		return spaceOrganizationClarificationResponse(request, err.Error()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -34,7 +34,7 @@ func (app *app) prepareSpaceOrganization(ctx context.Context, request contract.R
 		return contract.Response{}, err
 	}
 	if reason := validateSpaceOrganizationPayload(request.Intent, payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, spaceOrganizationAcceptedFields(request.Intent)), nil
+		return spaceOrganizationClarificationResponse(request, reason), nil
 	}
 	preview := spaceOrganizationPreview(request.Intent, payload, entities)
 	now := time.Now()
@@ -328,6 +328,10 @@ func spaceOrganizationAcceptedFields(intent string) []string {
 	}
 }
 
+func spaceOrganizationClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, spaceOrganizationAcceptedFields(request.Intent), payloadGuideForIntent(request.Intent))
+}
+
 func validateRoomUpdateGatewayReferences(payload map[string]any, entities api.EntityListResult) string {
 	if gatewayID := valueIDString(payload["gatewayDeviceId"]); gatewayID != "" && !entityExists(entities, "device", gatewayID) {
 		return "invalid_gateway_device_reference"
@@ -369,7 +373,7 @@ func (app *app) prepareSpaceBatchOrganization(ctx context.Context, request contr
 	}
 	payload, preconditions, summary, err := buildSpaceBatchOrganizationPayload(request, houseID)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), spaceBatchOrganizationAcceptedFields(request.Intent)), nil
+		return spaceBatchOrganizationClarificationResponse(request, err.Error()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -382,7 +386,7 @@ func (app *app) prepareSpaceBatchOrganization(ctx context.Context, request contr
 		return contract.Response{}, err
 	}
 	if reason := validateSpaceBatchOrganizationPayload(request.Intent, payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, spaceBatchOrganizationAcceptedFields(request.Intent)), nil
+		return spaceBatchOrganizationClarificationResponse(request, reason), nil
 	}
 	preview := spaceBatchOrganizationPreview(request.Intent, payload, entities)
 	now := time.Now()
@@ -508,6 +512,10 @@ func spaceBatchOrganizationAcceptedFields(intent string) []string {
 	default:
 		return []string{"parameters.houseId"}
 	}
+}
+
+func spaceBatchOrganizationClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, spaceBatchOrganizationAcceptedFields(request.Intent), payloadGuideForIntent(request.Intent))
 }
 
 func (app *app) executeSpaceBatchOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.SpaceBatchOrganizationKind) (contract.Response, error) {

@@ -20,7 +20,7 @@ func (app *app) prepareGatewayConfiguration(ctx context.Context, request contrac
 	}
 	payload, err := buildGatewayConfigurationPayload(request, houseID)
 	if err != nil {
-		return configureClarificationResponse(request, err.Error(), gatewayConfigurationAcceptedFields()), nil
+		return gatewayConfigurationClarificationResponse(request, err.Error()), nil
 	}
 	gatewayID := valueIDString(payload["gatewayId"])
 	detail, calls, err := api.NewDestructiveDeleteClient(endpoint, nil).ProbeGateway(ctx, houseID, gatewayID, api.DestructiveDeleteCredentials{
@@ -31,7 +31,7 @@ func (app *app) prepareGatewayConfiguration(ctx context.Context, request contrac
 		return contract.Response{}, err
 	}
 	if detail.ID == "" {
-		return configureClarificationResponse(request, "invalid_gateway_reference", gatewayConfigurationAcceptedFields()), nil
+		return gatewayConfigurationClarificationResponse(request, "invalid_gateway_reference"), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -44,7 +44,7 @@ func (app *app) prepareGatewayConfiguration(ctx context.Context, request contrac
 		return contract.Response{}, err
 	}
 	if reason := validateGatewayConfigurationPayload(payload, entities); reason != "" {
-		return configureClarificationResponse(request, reason, gatewayConfigurationAcceptedFields()), nil
+		return gatewayConfigurationClarificationResponse(request, reason), nil
 	}
 	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新网关 %s", firstNonEmptyString(detail.Name, gatewayID)), payload, []string{
 		"提交前重新读取网关详情",
@@ -90,6 +90,10 @@ func validateGatewayConfigurationPayload(payload map[string]any, entities api.En
 
 func gatewayConfigurationAcceptedFields() []string {
 	return []string{"parameters.houseId", "parameters.gatewayId", "parameters.name", "parameters.desc", "parameters.icon", "parameters.mac", "parameters.roomIds"}
+}
+
+func gatewayConfigurationClarificationResponse(request contract.Request, reason string) contract.Response {
+	return configureClarificationResponseWithGuide(request, reason, gatewayConfigurationAcceptedFields(), gatewayConfigurePayloadGuide())
 }
 
 func (app *app) executeGatewayConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
