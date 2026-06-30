@@ -71,11 +71,11 @@ func homeCreateAcceptedFields() []string {
 
 func (app *app) executeHomeCreate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewHomeCreateClient(endpoint, nil).Run(ctx, api.HomeCreateRequest{
-		Name:           planPayloadString(record.Payload, "name"),
-		Description:    planPayloadString(record.Payload, "desc"),
-		Icon:           planPayloadString(record.Payload, "icon"),
-		AreaCode:       planPayloadString(record.Payload, "areaCode"),
-		AreaName:       planPayloadString(record.Payload, "areaName"),
+		Name:           executionPayloadString(record.Payload, "name"),
+		Description:    executionPayloadString(record.Payload, "desc"),
+		Icon:           executionPayloadString(record.Payload, "icon"),
+		AreaCode:       executionPayloadString(record.Payload, "areaCode"),
+		AreaName:       executionPayloadString(record.Payload, "areaName"),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.HomeCreateCredentials{

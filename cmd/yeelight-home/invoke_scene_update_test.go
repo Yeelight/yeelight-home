@@ -145,7 +145,7 @@ func TestInvokeSceneUpdateExecutesDirectly(t *testing.T) {
 			updateCalls++
 		}
 		if strings.Contains(call, "ignored") {
-			t.Fatalf("commit request payload leaked into API call: %#v", gotCalls)
+			t.Fatalf("execution request payload leaked into API call: %#v", gotCalls)
 		}
 	}
 	if updateCalls != 1 {

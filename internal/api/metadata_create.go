@@ -32,15 +32,16 @@ type MetadataCreateRequest struct {
 }
 
 type MetadataCreateResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	EntityType string `json:"entityType"`
-	EntityID   string `json:"entityId"`
-	Name       string `json:"name"`
-	Created    bool   `json:"created"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	EntityType       string           `json:"entityType"`
+	EntityID         string           `json:"entityId"`
+	Name             string           `json:"name"`
+	Created          bool             `json:"created"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type MetadataCreateClient struct {
@@ -77,7 +78,7 @@ func (client MetadataCreateClient) Run(ctx context.Context, request MetadataCrea
 		return MetadataCreateResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
 	apiCalls := 0
-	verifyCalls, err := client.verifyHouseScopedEntityList(ctx, houseID, credentials)
+	preflightEntities, verifyCalls, err := client.verifyHouseScopedEntityList(ctx, houseID, credentials)
 	if err != nil {
 		return MetadataCreateResult{}, fmt.Errorf("verify house before %s create: %w", request.Kind, err)
 	}
@@ -97,6 +98,12 @@ func (client MetadataCreateClient) Run(ctx context.Context, request MetadataCrea
 			Verified:   true,
 			VerifiedBy: existing.Source,
 			APICalls:   apiCalls,
+			VerifiedEntities: upsertEntityListSummary(preflightEntities, EntitySummary{
+				Type:    string(request.Kind),
+				ID:      existing.ID,
+				Name:    existing.Name,
+				HouseID: houseID,
+			}),
 		}, nil
 	}
 	created, err := client.createMetadata(ctx, spec, houseID, request.Payload, credentials)
@@ -122,10 +129,16 @@ func (client MetadataCreateClient) Run(ctx context.Context, request MetadataCrea
 		Verified:   true,
 		VerifiedBy: verified.Source,
 		APICalls:   apiCalls,
+		VerifiedEntities: upsertEntityListSummary(preflightEntities, EntitySummary{
+			Type:    string(request.Kind),
+			ID:      verified.ID,
+			Name:    verified.Name,
+			HouseID: houseID,
+		}),
 	}, nil
 }
 
-func (client MetadataCreateClient) verifyHouseScopedEntityList(ctx context.Context, houseID string, credentials requestCredentials) (int, error) {
+func (client MetadataCreateClient) verifyHouseScopedEntityList(ctx context.Context, houseID string, credentials requestCredentials) (EntityListResult, int, error) {
 	result, err := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
 		HouseID: houseID,
 		Credentials: EntityListCredentials{
@@ -134,12 +147,12 @@ func (client MetadataCreateClient) verifyHouseScopedEntityList(ctx context.Conte
 		},
 	})
 	if err != nil {
-		return result.APICalls, err
+		return result, result.APICalls, err
 	}
 	if result.APICalls > 0 {
-		return result.APICalls, nil
+		return result, result.APICalls, nil
 	}
-	return houseScopedEntityListCallCount, nil
+	return result, houseScopedEntityListCallCount, nil
 }
 
 func (client MetadataCreateClient) findMetadataByName(ctx context.Context, spec metadataCreateSpec, houseID string, name string, credentials requestCredentials) (metadataSummary, error) {

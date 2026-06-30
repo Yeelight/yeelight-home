@@ -83,7 +83,7 @@ func TestInvokeMetadataDeleteExecutesDirectly(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
 		default:
 			if strings.Contains(request.URL.Path, "ignored") {
-				t.Fatalf("commit request payload leaked into API path: %s", request.URL.Path)
+				t.Fatalf("execution request payload leaked into API path: %s", request.URL.Path)
 			}
 			http.NotFound(writer, request)
 		}
@@ -198,7 +198,7 @@ func TestInvokeMetadataBatchDeleteExecutesDirectly(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"success":true}`))
 		default:
 			if strings.Contains(request.URL.Path, "ignored") {
-				t.Fatalf("commit request payload leaked into API path: %s", request.URL.Path)
+				t.Fatalf("execution request payload leaked into API path: %s", request.URL.Path)
 			}
 			http.NotFound(writer, request)
 		}

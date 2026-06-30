@@ -91,6 +91,69 @@ func TestInvokeRoomCreateExecutesDirectlyAndVerifies(t *testing.T) {
 	}
 }
 
+func TestInvokeRoomCreateReusesWriteVerificationTopologyCacheForNextRead(t *testing.T) {
+	roomCreated := false
+	listCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/200171/room/w/create":
+			roomCreated = true
+			_, _ = writer.Write([]byte(`{"success":true,"data":"room-created"}`))
+		case "/apis/iot/v2/thing/manage/house/200171/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			listCalls++
+			if request.URL.Path == "/apis/iot/v2/thing/manage/house/200171/room/r/info/1/100" && roomCreated {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-created","name":"书房"}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-configure-cache-secret", "client-configure-cache-1", "200171")
+
+	createInput := `{"contractVersion":"1.0","requestId":"req-room-create-cache","locale":"zh-CN","utterance":"创建一个书房","intent":"room.create","parameters":{"houseId":"200171","name":"书房"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(createInput), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("create exit code = %d, stderr = %s", code, stderr.String())
+	}
+	createResponse := decodeInvokeResponse(t, stdout.Bytes())
+	createMetrics := createResponse["metrics"].(map[string]any)
+	if createMetrics["topologyCacheRefreshApiCalls"] != float64(0) || createMetrics["topologyCacheWriteSource"] != "write_verification" {
+		t.Fatalf("create metrics = %#v", createMetrics)
+	}
+	listCallsAfterCreate := listCalls
+
+	stdout.Reset()
+	stderr.Reset()
+	getInput := `{"contractVersion":"1.0","requestId":"req-room-get-cache","locale":"zh-CN","utterance":"看看书房","intent":"entity.get","parameters":{"houseId":"200171","entityType":"room","name":"书房"}}`
+	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(getInput), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("entity get exit code = %d, stderr = %s", code, stderr.String())
+	}
+	getResponse := decodeInvokeResponse(t, stdout.Bytes())
+	if getResponse["status"] != "success" {
+		t.Fatalf("getResponse = %#v", getResponse)
+	}
+	getMetrics := getResponse["metrics"].(map[string]any)
+	if getMetrics["apiCalls"] != float64(0) {
+		t.Fatalf("get metrics = %#v", getMetrics)
+	}
+	if listCalls != listCallsAfterCreate {
+		t.Fatalf("entity.get should use refreshed topology cache, before=%d after=%d", listCallsAfterCreate, listCalls)
+	}
+}
+
 func TestInvokeGroupCreateRequiresRoomAndComponent(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-configure-secret", "client-configure-1", "200171")
 	input := `{"contractVersion":"1.0","requestId":"req-group-missing","locale":"zh-CN","utterance":"创建客厅灯组","intent":"group.create","parameters":{"houseId":"200171","name":"客厅灯组"}}`

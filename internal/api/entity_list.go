@@ -182,6 +182,62 @@ func projectEntities(entityType string, houseID string, response map[string]any)
 	return entities
 }
 
+func upsertEntityListSummary(result EntityListResult, entity EntitySummary) EntityListResult {
+	if strings.TrimSpace(entity.Type) == "" || strings.TrimSpace(entity.ID) == "" {
+		return result
+	}
+	if result.Counts == nil {
+		result.Counts = map[string]int{}
+	}
+	if result.Entities == nil {
+		result.Entities = []EntitySummary{}
+	}
+	if entity.HouseID == "" {
+		entity.HouseID = result.HouseID
+	}
+	for index, existing := range result.Entities {
+		if existing.Type == entity.Type && existing.ID == entity.ID {
+			result.Entities[index] = entity
+			result.Total = len(result.Entities)
+			result.Counts = entityListCounts(result.Entities)
+			return result
+		}
+	}
+	result.Entities = append(result.Entities, entity)
+	result.Total = len(result.Entities)
+	result.Counts = entityListCounts(result.Entities)
+	return result
+}
+
+func removeEntityListSummary(result EntityListResult, entityType string, entityID string) EntityListResult {
+	entityType = strings.TrimSpace(entityType)
+	entityID = strings.TrimSpace(entityID)
+	if entityType == "" || entityID == "" || len(result.Entities) == 0 {
+		return result
+	}
+	entities := make([]EntitySummary, 0, len(result.Entities))
+	for _, entity := range result.Entities {
+		if entity.Type == entityType && entity.ID == entityID {
+			continue
+		}
+		entities = append(entities, entity)
+	}
+	result.Entities = entities
+	result.Total = len(result.Entities)
+	result.Counts = entityListCounts(result.Entities)
+	return result
+}
+
+func entityListCounts(entities []EntitySummary) map[string]int {
+	counts := map[string]int{}
+	for _, entity := range entities {
+		if strings.TrimSpace(entity.Type) != "" {
+			counts[entity.Type]++
+		}
+	}
+	return counts
+}
+
 func extractRows(response map[string]any) []any {
 	data, ok := response["data"]
 	if !ok {

@@ -29,6 +29,10 @@ func TestRootHelpAndVersionFlags(t *testing.T) {
 		{name: "root help explains command model", args: []string{"--help"}, wantOutput: "Human-friendly operations use: yeelight-home <resource> <action> [flags]"},
 		{name: "help command", args: []string{"help", "home"}, wantOutput: "yeelight-home home list"},
 		{name: "module help command", args: []string{"help", "device"}, wantOutput: "yeelight-home device detail --device-id <id> --json"},
+		{name: "intent help command", args: []string{"help", "intent"}, wantOutput: "yeelight-home intent explain --intent <intent> [--json]"},
+		{name: "intent explain help command", args: []string{"help", "intent", "explain"}, wantOutput: "Returns accepted parameter fields, nested payloadShape, examples, and nextStep"},
+		{name: "intent schema help command", args: []string{"help", "intent", "schema"}, wantOutput: "machine-readable SkillRequest schema"},
+		{name: "explain help command", args: []string{"help", "explain"}, wantOutput: "yeelight-home explain <intent> [--json]"},
 		{name: "module action help command", args: []string{"help", "scene", "execute"}, wantOutput: "Intent:\n  scene.execute"},
 		{name: "scene update help shows payload shape", args: []string{"help", "scene", "update"}, wantOutput: "complete updated details[] list"},
 		{name: "scene update help shows millisecond timing", args: []string{"help", "scene", "update"}, wantOutput: "non-negative milliseconds"},
@@ -40,9 +44,11 @@ func TestRootHelpAndVersionFlags(t *testing.T) {
 		{name: "automation update help shows source backed condition fields", args: []string{"help", "automation", "update"}, wantOutput: "id, pid, typeId, resId, prop, operation, value, extArgs"},
 		{name: "automation create help shows actions shape", args: []string{"help", "automation", "create"}, wantOutput: "actions[] item fields:"},
 		{name: "lighting apply help shows properties", args: []string{"help", "lighting", "apply"}, wantOutput: "propertyName  one of p, l, ct, c"},
-		{name: "lighting import help shows normalized topology", args: []string{"help", "lighting", "import"}, wantOutput: "Normalized topology alternative:"},
-		{name: "lighting import help shows device attrs", args: []string{"help", "lighting", "import"}, wantOutput: "attrs"},
-		{name: "lighting import help shows source backed operations", args: []string{"help", "lighting", "import"}, wantOutput: "add, modify, remove, bind, unbind"},
+		{name: "lighting import help shows meta import", args: []string{"help", "lighting", "import"}, wantOutput: "/v1/meta/import"},
+		{name: "lighting import help shows product metadata", args: []string{"help", "lighting", "import"}, wantOutput: "extraMeta"},
+		{name: "lighting import help shows HouseMeta groups", args: []string{"help", "lighting", "import"}, wantOutput: "deviceTempIdList[]"},
+		{name: "device module help uses HouseMeta slot example", args: []string{"help", "device"}, wantOutput: "gateway\":{\"tempId\":\"gw1\""},
+		{name: "lighting module help uses HouseMeta import example", args: []string{"help", "lighting"}, wantOutput: "deviceTempIdList"},
 		{name: "panel button event help shows details", args: []string{"help", "panel", "button-event-update"}, wantOutput: "Button event updates replace the target event's complete details[] list"},
 		{name: "knob configure help shows config type", args: []string{"help", "knob", "configure"}, wantOutput: "index, configType, resId, typeId"},
 		{name: "knob configure help shows event evidence words", args: []string{"help", "knob", "configure"}, wantOutput: "rotate, press_rotate, click, double_click, and hold"},
@@ -126,6 +132,164 @@ func TestCompletionCommandPrintsShellScripts(t *testing.T) {
 			for _, forbidden := range test.forbidOutput {
 				if strings.Contains(stdout.String(), forbidden) {
 					t.Fatalf("stdout contains forbidden substring %q: %s", forbidden, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+func TestIntentExplainReturnsMachineReadablePayloadGuide(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "explain", "--intent", "lighting.design.import", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["intent"] != "lighting.design.import" || response["implemented"] != true {
+		t.Fatalf("response = %#v", response)
+	}
+	guide := response["payloadGuide"].(map[string]any)
+	shape := guide["payloadShape"].(map[string]any)
+	if shape["gateway"] == nil || shape["sceneList"] == nil || shape["automationList"] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(response["nextStep"].(string), "/v1/meta/import") {
+		t.Fatalf("nextStep = %#v", response["nextStep"])
+	}
+	fields := response["acceptedFields"].([]any)
+	if len(fields) == 0 {
+		t.Fatalf("acceptedFields empty")
+	}
+	for _, field := range []string{
+		"parameters.gateway.roomList[].deviceList[].pid",
+		"parameters.gateway.roomList[].groupList[].deviceTempIdList",
+		"parameters.sceneList[].details[]",
+		"parameters.automationList[].actions[]",
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+}
+
+func TestIntentSchemaCommandReturnsSkillRequestSchema(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "schema", "--intent", "lighting.design.import", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json schema: %v", err)
+	}
+	properties := schema["properties"].(map[string]any)
+	intentSchema := properties["intent"].(map[string]any)
+	if intentSchema["const"] != "lighting.design.import" {
+		t.Fatalf("intent schema = %#v", intentSchema)
+	}
+	parameters := properties["parameters"].(map[string]any)
+	parameterProperties := parameters["properties"].(map[string]any)
+	if parameterProperties["gateway"] == nil || parameterProperties["sceneList"] == nil || parameterProperties["automationList"] == nil {
+		t.Fatalf("parameter properties = %#v", parameterProperties)
+	}
+}
+
+func TestExplainAliasReturnsIntentSchema(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"explain", "scene.update", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json schema: %v", err)
+	}
+	properties := schema["properties"].(map[string]any)
+	intentSchema := properties["intent"].(map[string]any)
+	if intentSchema["const"] != "scene.update" {
+		t.Fatalf("intent schema = %#v", intentSchema)
+	}
+	if schema["examples"] == nil || schema["nextStep"] == nil {
+		t.Fatalf("schema missing examples/nextStep: %#v", schema)
+	}
+}
+
+func TestInvokeIntentExplainReturnsMachineReadablePayloadGuide(t *testing.T) {
+	app := newTestApp(t)
+	input := `{"contractVersion":"1.0","requestId":"req-intent-explain","locale":"zh-CN","utterance":"解释照明设计导入参数","intent":"intent.explain","parameters":{"intent":"lighting.design.import"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	explanation := result["intentExplanation"].(map[string]any)
+	if explanation["intent"] != "lighting.design.import" || explanation["implemented"] != true {
+		t.Fatalf("intent explanation = %#v", explanation)
+	}
+	guide := explanation["payloadGuide"].(map[string]any)
+	shape := guide["payloadShape"].(map[string]any)
+	if shape["gateway"] == nil || shape["sceneList"] == nil || shape["automationList"] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(explanation["nextStep"].(string), "/v1/meta/import") {
+		t.Fatalf("nextStep = %#v", explanation["nextStep"])
+	}
+	fields := explanation["acceptedFields"].([]any)
+	if !containsAnyString(fields, "parameters.gateway.roomList[].deviceList[].pid") {
+		t.Fatalf("acceptedFields missing nested HouseMeta device field: %#v", fields)
+	}
+}
+
+func TestIntentExplainRejectsUnsupportedIntent(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "explain", "--intent", "behavior.execute", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitInvalidInput {
+		t.Fatalf("exit code = %d, stdout = %s, stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), `unsupported intent "behavior.execute"`) {
+		t.Fatalf("stderr = %s", stderr.String())
+	}
+}
+
+func TestPublicHelpDoesNotAdvertiseLegacyLightingImportPayloads(t *testing.T) {
+	tests := [][]string{
+		{"help", "device"},
+		{"help", "lighting"},
+		{"help", "lighting", "import"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run(args, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			output := stdout.String()
+			for _, forbidden := range []string{"\"rooms\":[{\"name\":\"客厅\",\"items\""} {
+				if strings.Contains(output, forbidden) {
+					t.Fatalf("help contains legacy payload marker %q: %s", forbidden, output)
 				}
 			}
 		})
@@ -1279,6 +1443,7 @@ func newTestApp(t *testing.T) *app {
 		tokenStore:    tokenStore,
 		metadataStore: credential.NewFileMetadataStore(t.TempDir() + "/profiles.json"),
 		memoryStore:   storage.NewJSONStore(t.TempDir() + "/memory.json"),
+		topologyCache: newTopologyCache(t.TempDir() + "/topology.json"),
 		sleep:         func(context.Context, time.Duration) error { return nil },
 	}
 	return app

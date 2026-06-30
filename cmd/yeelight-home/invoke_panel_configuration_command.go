@@ -281,7 +281,7 @@ func panelConfigurationClarificationResponse(request contract.Request, reason st
 }
 
 func (app *app) executePanelConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.PanelConfigurationKind) (contract.Response, error) {
-	deviceID := planPayloadString(record.Payload, "deviceId")
+	deviceID := executionPayloadString(record.Payload, "deviceId")
 	result, err := api.NewPanelConfigurationClient(endpoint, nil).Run(ctx, api.PanelConfigurationRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,

@@ -558,7 +558,7 @@ func TestInvokeKnobGetReturnsPartialWhenOneAdapterFails(t *testing.T) {
 	}
 }
 
-func TestInvokeMetadataLocalPlanDoesNotPersist(t *testing.T) {
+func TestInvokeMetadataLocalGuidanceDoesNotPersist(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-favorite-secret", "client-fav-1", "house-1")
 	input := `{"contractVersion":"1.0","requestId":"req-favorite-plan","locale":"zh-CN","utterance":"帮我规划收藏","intent":"favorite.plan","parameters":{"houseId":"house-1"}}`
 	var stdout bytes.Buffer

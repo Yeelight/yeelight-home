@@ -31,15 +31,16 @@ type DestructiveDeleteRequest struct {
 }
 
 type DestructiveDeleteResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId,omitempty"`
-	Capability string `json:"capability"`
-	EntityType string `json:"entityType"`
-	EntityID   string `json:"entityId"`
-	Name       string `json:"name,omitempty"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId,omitempty"`
+	Capability       string           `json:"capability"`
+	EntityType       string           `json:"entityType"`
+	EntityID         string           `json:"entityId"`
+	Name             string           `json:"name,omitempty"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type DestructiveDeleteClient struct {
@@ -70,7 +71,7 @@ func (client DestructiveDeleteClient) Run(ctx context.Context, request Destructi
 		if houseID == "" {
 			return DestructiveDeleteResult{}, fmt.Errorf("house id is required")
 		}
-		target, calls, err = client.findEntity(ctx, houseID, "device", entityID, credentials)
+		target, _, calls, err = client.findEntity(ctx, houseID, "device", entityID, credentials)
 	case DestructiveDeleteGateway:
 		if houseID == "" {
 			return DestructiveDeleteResult{}, fmt.Errorf("house id is required")
@@ -93,7 +94,7 @@ func (client DestructiveDeleteClient) Run(ctx context.Context, request Destructi
 	if err != nil {
 		return DestructiveDeleteResult{}, err
 	}
-	deleted, calls, err := client.verifyDeleted(ctx, request.Kind, firstNonEmpty(houseID, target.HouseID, target.ID), target.ID, credentials, request.VerifyAttempts, request.VerifyInterval)
+	deleted, verifiedEntities, calls, err := client.verifyDeleted(ctx, request.Kind, firstNonEmpty(houseID, target.HouseID, target.ID), target.ID, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += calls
 	if err != nil {
 		return DestructiveDeleteResult{}, err
@@ -102,15 +103,16 @@ func (client DestructiveDeleteClient) Run(ctx context.Context, request Destructi
 		return DestructiveDeleteResult{}, fmt.Errorf("%s delete verification mismatch", request.Kind)
 	}
 	return DestructiveDeleteResult{
-		Region:     client.endpoint.Region,
-		HouseID:    firstNonEmpty(houseID, target.HouseID),
-		Capability: string(request.Kind),
-		EntityType: destructiveEntityType(request.Kind),
-		EntityID:   target.ID,
-		Name:       target.Name,
-		Verified:   true,
-		VerifiedBy: destructiveVerifyWith(request.Kind),
-		APICalls:   apiCalls,
+		Region:           client.endpoint.Region,
+		HouseID:          firstNonEmpty(houseID, target.HouseID),
+		Capability:       string(request.Kind),
+		EntityType:       destructiveEntityType(request.Kind),
+		EntityID:         target.ID,
+		Name:             target.Name,
+		Verified:         true,
+		VerifiedBy:       destructiveVerifyWith(request.Kind),
+		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 
@@ -149,7 +151,7 @@ func (client DestructiveDeleteClient) writeDelete(ctx context.Context, kind Dest
 	return 1, nil
 }
 
-func (client DestructiveDeleteClient) verifyDeleted(ctx context.Context, kind DestructiveDeleteKind, houseID string, entityID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
+func (client DestructiveDeleteClient) verifyDeleted(ctx context.Context, kind DestructiveDeleteKind, houseID string, entityID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, EntityListResult, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -159,42 +161,43 @@ func (client DestructiveDeleteClient) verifyDeleted(ctx context.Context, kind De
 	calls := 0
 	for attempt := 0; attempt < attempts; attempt++ {
 		var target EntitySummary
+		var entities EntityListResult
 		var readCalls int
 		var err error
 		switch kind {
 		case DestructiveDeleteDevice:
-			target, readCalls, err = client.findEntity(ctx, houseID, "device", entityID, credentials)
+			target, entities, readCalls, err = client.findEntity(ctx, houseID, "device", entityID, credentials)
 		case DestructiveDeleteGateway:
 			target, readCalls, err = client.findGatewayFromList(ctx, houseID, entityID, credentials)
 		case DestructiveDeleteHome:
 			target, readCalls, err = client.findHome(ctx, entityID, credentials)
 		default:
-			return false, calls, fmt.Errorf("unsupported destructive delete kind %q", kind)
+			return false, EntityListResult{}, calls, fmt.Errorf("unsupported destructive delete kind %q", kind)
 		}
 		calls += readCalls
 		if err != nil {
-			return false, calls, err
+			return false, entities, calls, err
 		}
 		if target.ID == "" {
-			return true, calls, nil
+			return true, entities, calls, nil
 		}
 		if attempt == attempts-1 {
-			return false, calls, nil
+			return false, entities, calls, nil
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return false, calls, ctx.Err()
+			return false, entities, calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return false, calls, nil
+	return false, EntityListResult{}, calls, nil
 }
 
-func (client DestructiveDeleteClient) findEntity(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials) (EntitySummary, int, error) {
+func (client DestructiveDeleteClient) findEntity(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials) (EntitySummary, EntityListResult, int, error) {
 	if strings.TrimSpace(entityID) == "" {
-		return EntitySummary{}, 0, fmt.Errorf("%s id is required", entityType)
+		return EntitySummary{}, EntityListResult{}, 0, fmt.Errorf("%s id is required", entityType)
 	}
 	result, err := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
 		HouseID: houseID,
@@ -204,14 +207,14 @@ func (client DestructiveDeleteClient) findEntity(ctx context.Context, houseID st
 		},
 	})
 	if err != nil {
-		return EntitySummary{}, result.APICalls, err
+		return EntitySummary{}, result, result.APICalls, err
 	}
 	for _, entity := range result.Entities {
 		if entity.Type == entityType && entity.ID == entityID {
-			return entity, result.APICalls, nil
+			return entity, result, result.APICalls, nil
 		}
 	}
-	return EntitySummary{}, result.APICalls, nil
+	return EntitySummary{}, result, result.APICalls, nil
 }
 
 func (client DestructiveDeleteClient) findGateway(ctx context.Context, houseID string, gatewayID string, credentials requestCredentials) (EntitySummary, int, error) {

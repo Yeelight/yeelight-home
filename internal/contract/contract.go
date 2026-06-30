@@ -36,6 +36,7 @@ type Response struct {
 	TraceID         string         `json:"traceId,omitempty"`
 	Metrics         map[string]any `json:"metrics,omitempty"`
 	Error           *Error         `json:"error,omitempty"`
+	Internal        map[string]any `json:"-"`
 }
 
 type Error struct {
@@ -140,7 +141,6 @@ func isKnownIntent(intent string) bool {
 		"light.color_temperature.adjust",
 		"light.color.set",
 		"lighting.experience.apply",
-		"behavior.execute",
 		"scene.execute",
 		"room.create",
 		"room.rename",
@@ -255,7 +255,11 @@ func isKnownIntent(intent string) bool {
 		"memory.pause",
 		"memory.resume",
 		"recommendation.list",
+		"recommendation.record",
 		"recommendation.feedback",
+		"operation.lesson.record",
+		"operation.lesson.list",
+		"intent.explain",
 		"operation.batch.configure":
 		return true
 	default:

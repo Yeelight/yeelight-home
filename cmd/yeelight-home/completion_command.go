@@ -15,6 +15,7 @@ var nativeCompletionCommands = map[string][]string{
 	"config":     {"get", "list", "set", "unset"},
 	"doctor":     {},
 	"home":       {"list", "select"},
+	"intent":     {"explain"},
 	"invoke":     {},
 	"profile":    {"delete", "list", "show", "use"},
 	"version":    {},

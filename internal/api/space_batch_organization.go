@@ -24,13 +24,14 @@ type SpaceBatchOrganizationRequest struct {
 }
 
 type SpaceBatchOrganizationResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	Capability string `json:"capability"`
-	ItemCount  int    `json:"itemCount"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	Capability       string           `json:"capability"`
+	ItemCount        int              `json:"itemCount"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type SpaceBatchOrganizationClient struct {
@@ -74,7 +75,7 @@ func (client SpaceBatchOrganizationClient) Run(ctx context.Context, request Spac
 		return SpaceBatchOrganizationResult{}, err
 	}
 	apiCalls++
-	ok, calls, err := client.verifyDeviceRoomBatch(ctx, houseID, items, credentials, request.VerifyAttempts, request.VerifyInterval)
+	ok, verifiedEntities, calls, err := client.verifyDeviceRoomBatch(ctx, houseID, items, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += calls
 	if err != nil {
 		return SpaceBatchOrganizationResult{}, err
@@ -83,13 +84,14 @@ func (client SpaceBatchOrganizationClient) Run(ctx context.Context, request Spac
 		return SpaceBatchOrganizationResult{}, fmt.Errorf("%s write verification mismatch", request.Kind)
 	}
 	return SpaceBatchOrganizationResult{
-		Region:     client.endpoint.Region,
-		HouseID:    houseID,
-		Capability: string(request.Kind),
-		ItemCount:  len(items),
-		Verified:   true,
-		VerifiedBy: "entity.list",
-		APICalls:   apiCalls,
+		Region:           client.endpoint.Region,
+		HouseID:          houseID,
+		Capability:       string(request.Kind),
+		ItemCount:        len(items),
+		Verified:         true,
+		VerifiedBy:       "entity.list",
+		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 
@@ -122,7 +124,7 @@ func (client SpaceBatchOrganizationClient) writeDeviceRoomBatch(ctx context.Cont
 	return nil
 }
 
-func (client SpaceBatchOrganizationClient) verifyDeviceRoomBatch(ctx context.Context, houseID string, items map[string]string, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
+func (client SpaceBatchOrganizationClient) verifyDeviceRoomBatch(ctx context.Context, houseID string, items map[string]string, credentials requestCredentials, attempts int, interval time.Duration) (bool, EntityListResult, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -134,20 +136,20 @@ func (client SpaceBatchOrganizationClient) verifyDeviceRoomBatch(ctx context.Con
 		entities, readCalls, err := client.listEntities(ctx, houseID, credentials)
 		calls += readCalls
 		if err != nil {
-			return false, calls, err
+			return false, entities, calls, err
 		}
 		if deviceRoomBatchMatches(items, entities) || attempt == attempts-1 {
-			return deviceRoomBatchMatches(items, entities), calls, nil
+			return deviceRoomBatchMatches(items, entities), entities, calls, nil
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return false, calls, ctx.Err()
+			return false, entities, calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return false, calls, nil
+	return false, EntityListResult{}, calls, nil
 }
 
 func deviceRoomBatchItems(payload map[string]any) (map[string]string, error) {

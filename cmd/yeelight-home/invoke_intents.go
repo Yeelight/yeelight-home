@@ -60,7 +60,6 @@ func isImplementedInvokeIntent(intent string) bool {
 		"light.color_temperature.adjust",
 		"light.color.set",
 		"lighting.experience.apply",
-		"behavior.execute",
 		"diagnose.device",
 		"diagnose.gateway",
 		"diagnose.scene",
@@ -172,9 +171,32 @@ func isImplementedInvokeIntent(intent string) bool {
 		"memory.resume",
 		"memory.forget",
 		"recommendation.list",
+		"recommendation.record",
 		"recommendation.feedback",
+		"operation.lesson.record",
+		"operation.lesson.list",
+		"intent.explain",
 		"operation.batch.configure",
 		"lighting.design.apply":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLocalOnlyInvokeIntent(intent string) bool {
+	switch intent {
+	case "memory.remember",
+		"memory.list",
+		"memory.pause",
+		"memory.resume",
+		"memory.forget",
+		"recommendation.list",
+		"recommendation.record",
+		"recommendation.feedback",
+		"operation.lesson.record",
+		"operation.lesson.list",
+		"intent.explain":
 		return true
 	default:
 		return false

@@ -67,8 +67,8 @@ func (app *app) executeDeviceUnbind(ctx context.Context, request contract.Reques
 	result, err := api.NewDeviceUnbindClient(endpoint, nil).Run(ctx, api.DeviceUnbindRequest{
 		HouseID:          record.HouseID,
 		DeviceID:         valueIDString(record.Payload["deviceId"]),
-		ClearMac:         boolFromPlanPayload(record.Payload["clearMac"]),
-		UnbindRelDevices: boolFromPlanPayload(record.Payload["unbindRelDevices"]),
+		ClearMac:         boolFromExecutionPayload(record.Payload["clearMac"]),
+		UnbindRelDevices: boolFromExecutionPayload(record.Payload["unbindRelDevices"]),
 		VerifyAttempts:   5,
 		VerifyInterval:   time.Second,
 		Credentials: api.DeviceUnbindCredentials{
@@ -82,7 +82,7 @@ func (app *app) executeDeviceUnbind(ctx context.Context, request contract.Reques
 	return deviceUnbindExecuteResponse(request, record, result), nil
 }
 
-func boolFromPlanPayload(value any) bool {
+func boolFromExecutionPayload(value any) bool {
 	typed, ok := value.(bool)
 	return ok && typed
 }

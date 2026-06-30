@@ -89,42 +89,50 @@ Advanced payload shape:
 	case "lighting.design.import", "device.slot.create":
 		return `
 Advanced payload shape:
-  lighting.design.import materializes design metadata: rooms, future-device slots,
-  caller-authored groups, scene metadata, and automation metadata. Design slots
-  are not paired online devices. Runtime validates and adapts the payload; it
-  does not decide whether same-type slots should be grouped.
+  lighting.design.import posts HouseMeta to /v1/meta/import. Use it for a new
+  home, an empty or lightly configured home, or an explicit full metadata import.
+  For a busy existing home, prefer dedicated room/group/scene/automation update
+  intents unless the caller explicitly wants a full import/replace.
 
-  Natural topology:
-    rooms[].name                          required room name
-    rooms[].items[]                       slot families; aliases slots/devices
-    rooms[].items[].name                  required slot display name
-    rooms[].items[].quantity              optional, default 1
-    rooms[].items[].category/color/installStyle/beamAngle/series
-    rooms[].items[].materialCode/pid/pcId/productName/productSku/productSpu/modelNo
-    rooms[].items[].connectType/namePattern/groupKey/notes
-    groups[]                              optional caller-authored alias for named groups
-    groups[].name                         desired group name
-    groups[].roomName                     imported room name to match
-    groups[].match                        category/name/series/productName/materialCode/groupKey
+  Runtime is a thin adapter here. The caller or Skill must select products,
+  expand quantities into explicit deviceList rows, decide same-type groups, and
+  author scene/automation recipes. Runtime only validates references, fills
+  small deterministic defaults, expands compact keys, and compacts params JSON.
 
-  scenes[] rows:
-    name, optional localId, optional details[] using scene.create details item
-    shape. If executable targets are not known, use params as design metadata
-    and do not claim the scene can run.
-  automations[] rows:
-    name, startTime, endTime, repeatType, repeatValue, optional localId,
-    params using automation.create condition shape, actions[] using automation
-    action item shape. If targets are future slots, treat as design metadata.
+  Top-level HouseMeta:
+    houseId                              optional if supplied by --house-id/profile
+    tempId/name/version                  optional temp home id, design name, metadata version
+    gateway                              required GatewayMeta
+    areaList[]                           optional imported areas
+    sceneList[]                          optional imported scenes
+    automationList[]                     optional imported automations
 
-  Normalized topology alternative:
-    gateways[]: localId, localName, optional id, pid, pcId, mac, role
-    rooms[]: localId, localName, gatewayIds[], optional id, areaId, cloudAreaId
-    devices[]: localId, localName, gatewayDeviceId or cloudGatewayDeviceId,
-      roomId or cloudRoomId, addr, pid, optional pcId, mac, connectType, attrs
-    deviceGroups[]: localId, localName, optional id, roomId, deviceIds[]
-    source-backed operation words: add, modify, remove, bind, unbind. Use them
-      only when Runtime payloadShape accepts them; design slots are metadata,
-      not paired online devices.
+  gateway:
+    tempId/name/pid                      gateway temp id, display name, product id
+    gatewayDeviceId                      optional existing gateway id
+    roomList[]                           required rooms under the gateway
+
+  gateway.roomList[]:
+    tempId/name/icon                     room temp id, display name, icon
+    deviceList[]                         explicit design slots; each needs tempId, name, pid
+    deviceList[].extraMeta               optional product/material code, productName, notes, and installer metadata
+    groupList[]                          explicit groups; each needs tempId, name, componentId, deviceTempIdList[]
+
+  sceneList[].details[] and automationList[].actions[]:
+    typeId                               1=room, 2=device slot, 4=group, 5=home, 6=imported scene
+    tempId                               tempId of an imported resource; not cloud resId
+    resName                              optional, Runtime can backfill from tempId
+    rank/action/params                   order, optional scene action code, light params object
+    params                               object preferred; Runtime compacts it to the backend JSON string
+
+  automationList[].params:
+    condition object such as {"type":"and","conditions":[{"type":"alarm","clock":"09:00:00"}]}.
+    Short-key compatibility is accepted: tid/n/rl/dl/gl/al/sl/atl, tpid/rn/ap/rk,
+    ps/tp/cs/c, as/ds, s, i, v, rt/rv/st/et.
+
+  Do not send natural rooms/items/groups payloads, autoGroup, future-* ids,
+  clearAll, overwrite, or resId-based design-import actions. Those belonged to
+  the removed legacy normalizer and are rejected for /v1/meta/import.
 `
 	case "panel.button.configure":
 		return `

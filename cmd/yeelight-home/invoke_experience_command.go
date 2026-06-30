@@ -9,10 +9,10 @@ import (
 	"github.com/yeelight/yeelight-home/internal/contract"
 )
 
-func (app *app) invokeSceneTest(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) invokeSceneTest(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	forwarded := request
 	forwarded.Intent = "scene.execute"
-	response, err := app.invoke(ctx, forwarded)
+	response, err := app.invokeSceneExecute(ctx, forwarded, endpoint, profile, region, houseID, authorization, clientID)
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -27,7 +27,43 @@ func (app *app) invokeSceneTest(ctx context.Context, request contract.Request, e
 	return response, nil
 }
 
-func (app *app) invokeLightingExperienceApply(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) invokeSceneExecute(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
+	target := entityGetTargetFromRequest(request)
+	if target.id == "" && target.name == "" {
+		return sceneExecuteClarificationResponse(request, "missing_target", target, nil, 0), nil
+	}
+	if requestHouseID := requestHouseID(request); requestHouseID != "" {
+		houseID = requestHouseID
+	}
+	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
+	if err != nil {
+		return contract.Response{}, err
+	}
+	match, candidates, _ := findEntity(target, entities.Entities)
+	if match.ID == "" {
+		return sceneExecuteClarificationResponse(request, "scene_not_found", target, candidates, entityListAPICalls(entities)), nil
+	}
+	if len(candidates) > 1 && target.id == "" {
+		return sceneExecuteClarificationResponse(request, "ambiguous_target", target, candidates, entityListAPICalls(entities)), nil
+	}
+	if match.Type != "scene" {
+		return sceneExecuteClarificationResponse(request, "target_not_scene", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
+	}
+	execution, err := api.NewSceneExecuteClient(endpoint, nil).Run(ctx, api.SceneExecuteRequest{
+		HouseID: houseID,
+		SceneID: match.ID,
+		Credentials: api.SceneExecuteCredentials{
+			Authorization: authorization,
+			ClientID:      clientID,
+		},
+	})
+	if err != nil {
+		return contract.Response{}, err
+	}
+	return sceneExecuteResponse(request, entities, match, execution), nil
+}
+
+func (app *app) invokeLightingExperienceApply(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	target := entityGetTargetFromRequest(request)
 	if target.id == "" && target.name == "" {
 		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
@@ -42,7 +78,7 @@ func (app *app) invokeLightingExperienceApply(ctx context.Context, request contr
 	for key, value := range action.parameters {
 		forwarded.Parameters[key] = value
 	}
-	response, err := routeExperienceLightAction(app, ctx, forwarded, endpoint, houseID, authorization, clientID, action.intent)
+	response, err := routeExperienceLightAction(app, ctx, forwarded, endpoint, profile, region, houseID, authorization, clientID, action.intent)
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -94,14 +130,14 @@ func explicitExperienceAction(request contract.Request) (experienceLightAction, 
 	return experienceLightAction{}, false
 }
 
-func routeExperienceLightAction(app *app, ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, intent string) (contract.Response, error) {
+func routeExperienceLightAction(app *app, ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, intent string) (contract.Response, error) {
 	switch intent {
 	case "light.brightness.set":
-		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, authorization, clientID, lightBrightnessSpec())
+		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, authorization, clientID, lightBrightnessSpec())
 	case "light.color_temperature.set":
-		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, authorization, clientID, lightColorTemperatureSpec())
+		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, authorization, clientID, lightColorTemperatureSpec())
 	case "light.color.set":
-		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, authorization, clientID, lightColorSpec())
+		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, authorization, clientID, lightColorSpec())
 	default:
 		return experienceBlockedResponse(request, "experience_action_not_supported", "该体验动作尚未纳入当前 Runtime 语义能力。"), nil
 	}

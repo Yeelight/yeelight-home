@@ -16,7 +16,7 @@ import (
 func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	flags, err := parseFlags(args)
 	if err != nil || !invokeFlagsAllowed(flags) || !flags.bool("stdin") {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id <id>] [--dry-run|--preview-only|--plan-only]")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home invoke --stdin [--profile <name>] [--region <region>] [--house-id <id>] [--dry-run|--preview-only]")
 		return exitInvalidInput
 	}
 	data, err := io.ReadAll(stdin)
@@ -49,7 +49,7 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 func invokeFlagsAllowed(flags cliFlags) bool {
 	for name := range flags.values {
 		switch name {
-		case "stdin", "profile", "region", "house-id", "dry-run", "preview-only", "plan-only":
+		case "stdin", "profile", "region", "house-id", "dry-run", "preview-only":
 		default:
 			return false
 		}
@@ -122,6 +122,7 @@ func (app *app) executeTransientPreparedOperation(ctx context.Context, request c
 	if err != nil {
 		return contract.Response{}, err
 	}
+	response = app.refreshTopologyCacheAfterWrite(ctx, context.Endpoint, record, context.AccessToken, context.ClientID, response)
 	return response, nil
 }
 
@@ -145,11 +146,11 @@ func isPreparedExecutionResponse(response contract.Response) bool {
 }
 
 func shouldReturnPreviewOnly(request contract.Request, flags cliFlags) bool {
-	if flags.bool("dry-run") || flags.bool("preview-only") || flags.bool("plan-only") {
+	if flags.bool("dry-run") || flags.bool("preview-only") {
 		return true
 	}
 	for _, source := range []map[string]any{request.Options, request.Parameters} {
-		if requestBool(source, "planOnly", "exec_only", "previewOnly", "preview_only", "dryRun", "dry_run") {
+		if requestBool(source, "previewOnly", "preview_only", "dryRun", "dry_run") {
 			return true
 		}
 	}
@@ -163,7 +164,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	if request.Options == nil {
 		request.Options = map[string]any{}
 	}
-	for _, name := range []string{"dry-run", "preview-only", "plan-only"} {
+	for _, name := range []string{"dry-run", "preview-only"} {
 		if flags.bool(name) {
 			request.Options[strings.ReplaceAll(name, "-", "")] = true
 		}
@@ -183,7 +184,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return contract.Response{}, err
 	}
 	profile := context.Profile
-	if !context.TokenPresent {
+	if !context.TokenPresent && !isLocalOnlyInvokeIntent(request.Intent) {
 		return localruntime.NewEngine(false).Invoke(request), nil
 	}
 	if !isImplementedInvokeIntent(request.Intent) {
@@ -197,7 +198,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	}
 	endpoint := context.Endpoint
 	accessToken := context.AccessToken
-	if !isHouseIndependentInvokeIntent(request.Intent) && requestHouseID(request) == "" {
+	if !isHouseIndependentInvokeIntent(request.Intent) && !isLocalOnlyInvokeIntent(request.Intent) && requestHouseID(request) == "" {
 		resolvedHouseID, resolveErr := app.resolveRequestHouseID(ctx, request, endpoint, accessToken, clientID)
 		if resolveErr != nil {
 			return contract.Response{}, resolveErr
@@ -212,11 +213,13 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if err != nil {
 			return
 		}
-		if observeErr := app.observeMemorySignal(request, profile, houseID, response); observeErr != nil {
+		if observeErr := app.observeMemorySignal(request, profile, region, houseID, response); observeErr != nil {
 			err = observeErr
 		}
 	}()
 	switch request.Intent {
+	case "intent.explain":
+		return invokeIntentExplain(request), nil
 	case "account.info":
 		return app.invokeAccountInfo(ctx, request, endpoint, accessToken, clientID)
 	case "home.member.list":
@@ -342,13 +345,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
 		}
-		entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-			HouseID: houseID,
-			Credentials: api.EntityListCredentials{
-				Authorization: accessToken,
-				ClientID:      clientID,
-			},
-		})
+		entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, accessToken, clientID, entityLoadOptions{Refresh: true})
 		if err != nil {
 			return contract.Response{}, err
 		}
@@ -361,13 +358,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
 		}
-		entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-			HouseID: houseID,
-			Credentials: api.EntityListCredentials{
-				Authorization: accessToken,
-				ClientID:      clientID,
-			},
-		})
+		entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, accessToken, clientID, entityLoadOptions{PreferCache: true})
 		if err != nil {
 			return contract.Response{}, err
 		}
@@ -387,13 +378,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
 		}
-		entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-			HouseID: houseID,
-			Credentials: api.EntityListCredentials{
-				Authorization: accessToken,
-				ClientID:      clientID,
-			},
-		})
+		entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, accessToken, clientID, entityLoadOptions{PreferCache: true})
 		if err != nil {
 			return contract.Response{}, err
 		}
@@ -427,13 +412,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
 		}
-		entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-			HouseID: houseID,
-			Credentials: api.EntityListCredentials{
-				Authorization: accessToken,
-				ClientID:      clientID,
-			},
-		})
+		entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, accessToken, clientID, entityLoadOptions{PreferCache: true})
 		if err != nil {
 			return contract.Response{}, err
 		}
@@ -475,63 +454,23 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		}
 		return stateQueryResponse(request, entities, match, state), nil
 	case "scene.execute":
-		target := entityGetTargetFromRequest(request)
-		if target.id == "" && target.name == "" {
-			return sceneExecuteClarificationResponse(request, "missing_target", target, nil, 0), nil
-		}
-		if requestHouseID := requestHouseID(request); requestHouseID != "" {
-			houseID = requestHouseID
-		}
-		entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-			HouseID: houseID,
-			Credentials: api.EntityListCredentials{
-				Authorization: accessToken,
-				ClientID:      clientID,
-			},
-		})
-		if err != nil {
-			return contract.Response{}, err
-		}
-		match, candidates, _ := findEntity(target, entities.Entities)
-		if match.ID == "" {
-			return sceneExecuteClarificationResponse(request, "scene_not_found", target, candidates, entityListAPICalls(entities)), nil
-		}
-		if len(candidates) > 1 && target.id == "" {
-			return sceneExecuteClarificationResponse(request, "ambiguous_target", target, candidates, entityListAPICalls(entities)), nil
-		}
-		if match.Type != "scene" {
-			return sceneExecuteClarificationResponse(request, "target_not_scene", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
-		}
-		execution, err := api.NewSceneExecuteClient(endpoint, nil).Run(ctx, api.SceneExecuteRequest{
-			HouseID: houseID,
-			SceneID: match.ID,
-			Credentials: api.SceneExecuteCredentials{
-				Authorization: accessToken,
-				ClientID:      clientID,
-			},
-		})
-		if err != nil {
-			return contract.Response{}, err
-		}
-		return sceneExecuteResponse(request, entities, match, execution), nil
+		return app.invokeSceneExecute(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "scene.test":
-		return app.invokeSceneTest(ctx, request, endpoint, houseID, accessToken, clientID)
+		return app.invokeSceneTest(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "light.power.set":
-		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, accessToken, clientID, lightPowerSpec())
+		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightPowerSpec())
 	case "light.brightness.set":
-		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, accessToken, clientID, lightBrightnessSpec())
+		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightBrightnessSpec())
 	case "light.brightness.adjust":
-		return app.invokeLightPropertyAdjust(ctx, request, endpoint, houseID, accessToken, clientID, lightBrightnessAdjustSpec())
+		return app.invokeLightPropertyAdjust(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightBrightnessAdjustSpec())
 	case "light.color_temperature.set":
-		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, accessToken, clientID, lightColorTemperatureSpec())
+		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightColorTemperatureSpec())
 	case "light.color_temperature.adjust":
-		return app.invokeLightPropertyAdjust(ctx, request, endpoint, houseID, accessToken, clientID, lightColorTemperatureAdjustSpec())
+		return app.invokeLightPropertyAdjust(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightColorTemperatureAdjustSpec())
 	case "light.color.set":
-		return app.invokeLightPropertySet(ctx, request, endpoint, houseID, accessToken, clientID, lightColorSpec())
-	case "behavior.execute":
-		return app.invokeBehaviorExecute(ctx, request, endpoint, houseID, accessToken, clientID)
+		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightColorSpec())
 	case "lighting.experience.apply":
-		return app.invokeLightingExperienceApply(ctx, request, endpoint, houseID, accessToken, clientID)
+		return app.invokeLightingExperienceApply(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "diagnose.device":
 		return app.invokeDiagnoseDevice(ctx, request, endpoint, houseID, accessToken, clientID)
 	case "diagnose.gateway":
@@ -671,17 +610,23 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	case "memory.remember":
 		return app.invokeMemoryRemember(request, profile, region, houseID)
 	case "memory.list":
-		return app.invokeMemoryList(request, profile, houseID)
+		return app.invokeMemoryList(request, profile, region, houseID)
 	case "memory.pause":
-		return app.invokeMemoryPauseResume(request, profile, houseID, true)
+		return app.invokeMemoryPauseResume(request, profile, region, houseID, true)
 	case "memory.resume":
-		return app.invokeMemoryPauseResume(request, profile, houseID, false)
+		return app.invokeMemoryPauseResume(request, profile, region, houseID, false)
 	case "memory.forget":
-		return app.invokeMemoryForget(request, profile, houseID)
+		return app.invokeMemoryForget(request, profile, region, houseID)
 	case "recommendation.list":
-		return app.invokeRecommendationList(request, profile, houseID)
+		return app.invokeRecommendationList(request, profile, region, houseID)
+	case "recommendation.record":
+		return app.invokeRecommendationRecord(request, profile, region, houseID)
 	case "recommendation.feedback":
-		return app.invokeRecommendationFeedback(request, profile, houseID)
+		return app.invokeRecommendationFeedback(request, profile, region, houseID)
+	case "operation.lesson.record":
+		return app.invokeOperationLessonRecord(request, profile, region, houseID)
+	case "operation.lesson.list":
+		return app.invokeOperationLessonList(request, profile, region, houseID)
 	case "operation.batch.configure":
 		return app.prepareOperationBatchConfigure(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	default:

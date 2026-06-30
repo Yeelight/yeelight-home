@@ -25,7 +25,7 @@ type lightAdjustSpec struct {
 	resolveDelta    func(contract.Request) (int, bool)
 }
 
-func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, spec lightPropertySpec) (contract.Response, error) {
+func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec lightPropertySpec) (contract.Response, error) {
 	target := entityGetTargetFromRequest(request)
 	if target.id == "" && target.name == "" {
 		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
@@ -37,13 +37,7 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
-	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-		HouseID: houseID,
-		Credentials: api.EntityListCredentials{
-			Authorization: authorization,
-			ClientID:      clientID,
-		},
-	})
+	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -85,7 +79,7 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 	return lightNumericSetResponse(request, entities, match, execution, verification, expectedValue, spec.messageTemplate, spec.traceID), nil
 }
 
-func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, spec lightAdjustSpec) (contract.Response, error) {
+func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec lightAdjustSpec) (contract.Response, error) {
 	target := entityGetTargetFromRequest(request)
 	if target.id == "" && target.name == "" {
 		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
@@ -97,13 +91,7 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
-	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-		HouseID: houseID,
-		Credentials: api.EntityListCredentials{
-			Authorization: authorization,
-			ClientID:      clientID,
-		},
-	})
+	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
 	if err != nil {
 		return contract.Response{}, err
 	}

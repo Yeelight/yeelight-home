@@ -38,6 +38,7 @@ type app struct {
 	metadataStore     credential.FileMetadataStore
 	preparedOperation *operation.Prepared
 	memoryStore       storage.JSONStore
+	topologyCache     topologyCache
 	sleep             func(context.Context, time.Duration) error
 }
 
@@ -48,6 +49,7 @@ func newAppFromEnv() *app {
 		tokenStore:    credential.NewFallbackStore(credential.NewSystemStore("yeelight-home"), fileTokenStore),
 		metadataStore: credential.NewFileMetadataStore(filepath.Join(paths.ConfigDir, "profiles.json")),
 		memoryStore:   storage.NewJSONStore(filepath.Join(paths.DataDir, "memory.json")),
+		topologyCache: newTopologyCache(filepath.Join(paths.CacheDir, "topology.json")),
 	}
 	return app
 }
@@ -63,6 +65,8 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 		return printVersion(args[1:], stdout, stderr)
 	}
 	switch args[0] {
+	case "explain":
+		return runExplainAlias(args[1:], stdout, stderr)
 	case "api":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "api")
@@ -95,6 +99,11 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 			return printCommandHelp(stdout, stderr, "invoke")
 		}
 		return app.runInvoke(args[1:], stdin, stdout, stderr)
+	case "intent":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "intent")
+		}
+		return runIntent(args[1:], stdout, stderr)
 	case "profile":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "profile")

@@ -32,13 +32,14 @@ type HomeSpaceConfigurationRequest struct {
 }
 
 type HomeSpaceConfigurationResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	Capability string `json:"capability"`
-	ItemCount  int    `json:"itemCount,omitempty"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	Capability       string           `json:"capability"`
+	ItemCount        int              `json:"itemCount,omitempty"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type HomeSpaceConfigurationClient struct {
@@ -73,7 +74,7 @@ func (client HomeSpaceConfigurationClient) Run(ctx context.Context, request Home
 	if err != nil {
 		return HomeSpaceConfigurationResult{}, err
 	}
-	ok, calls, err := client.verifyAfterWrite(ctx, request.Kind, houseID, request.Payload, credentials, request.VerifyAttempts, request.VerifyInterval)
+	ok, verifiedEntities, calls, err := client.verifyAfterWrite(ctx, request.Kind, houseID, request.Payload, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += calls
 	if err != nil {
 		return HomeSpaceConfigurationResult{}, err
@@ -82,13 +83,14 @@ func (client HomeSpaceConfigurationClient) Run(ctx context.Context, request Home
 		return HomeSpaceConfigurationResult{}, fmt.Errorf("%s write verification mismatch", request.Kind)
 	}
 	return HomeSpaceConfigurationResult{
-		Region:     client.endpoint.Region,
-		HouseID:    houseID,
-		Capability: string(request.Kind),
-		ItemCount:  homeSpaceConfigurationItemCount(request.Kind, request.Payload),
-		Verified:   true,
-		VerifiedBy: homeSpaceConfigurationVerifyWith(request.Kind),
-		APICalls:   apiCalls,
+		Region:           client.endpoint.Region,
+		HouseID:          houseID,
+		Capability:       string(request.Kind),
+		ItemCount:        homeSpaceConfigurationItemCount(request.Kind, request.Payload),
+		Verified:         true,
+		VerifiedBy:       homeSpaceConfigurationVerifyWith(request.Kind),
+		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 
@@ -170,7 +172,7 @@ func (client HomeSpaceConfigurationClient) write(ctx context.Context, kind HomeS
 	}
 }
 
-func (client HomeSpaceConfigurationClient) verifyAfterWrite(ctx context.Context, kind HomeSpaceConfigurationKind, houseID string, payload map[string]any, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
+func (client HomeSpaceConfigurationClient) verifyAfterWrite(ctx context.Context, kind HomeSpaceConfigurationKind, houseID string, payload map[string]any, credentials requestCredentials, attempts int, interval time.Duration) (bool, EntityListResult, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -180,31 +182,32 @@ func (client HomeSpaceConfigurationClient) verifyAfterWrite(ctx context.Context,
 	calls := 0
 	for attempt := 0; attempt < attempts; attempt++ {
 		var ok bool
+		var entities EntityListResult
 		var readCalls int
 		var err error
 		switch kind {
 		case HomeSpaceHomeUpdate:
 			ok, readCalls, err = client.verifyHomeUpdate(ctx, houseID, payload, credentials)
 		case HomeSpaceRoomBatchCreate, HomeSpaceRoomBatchUpdate:
-			ok, readCalls, err = client.verifyRooms(ctx, houseID, payload, credentials)
+			ok, entities, readCalls, err = client.verifyRooms(ctx, houseID, payload, credentials)
 		case HomeSpaceRoomAreaConfigure:
-			ok, readCalls, err = client.verifyRoomAreaAccessible(ctx, houseID, payload, credentials)
+			ok, entities, readCalls, err = client.verifyRoomAreaAccessible(ctx, houseID, payload, credentials)
 		default:
-			return false, calls, fmt.Errorf("unsupported home space configuration kind %q", kind)
+			return false, EntityListResult{}, calls, fmt.Errorf("unsupported home space configuration kind %q", kind)
 		}
 		calls += readCalls
 		if err != nil || ok || attempt == attempts-1 {
-			return ok, calls, err
+			return ok, entities, calls, err
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return false, calls, ctx.Err()
+			return false, entities, calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return false, calls, nil
+	return false, EntityListResult{}, calls, nil
 }
 
 func (client HomeSpaceConfigurationClient) listEntities(ctx context.Context, houseID string, credentials requestCredentials) (EntityListResult, int, error) {
@@ -244,38 +247,38 @@ func (client HomeSpaceConfigurationClient) verifyHomeUpdate(ctx context.Context,
 	return firstAnyString(detail, "id", "houseId") == houseID || len(detail) > 0, calls, nil
 }
 
-func (client HomeSpaceConfigurationClient) verifyRooms(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, int, error) {
+func (client HomeSpaceConfigurationClient) verifyRooms(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, EntityListResult, int, error) {
 	entities, calls, err := client.listEntities(ctx, houseID, credentials)
 	if err != nil {
-		return false, calls, err
+		return false, entities, calls, err
 	}
 	rooms, err := homeSpaceRoomItems(payload)
 	if err != nil {
-		return false, calls, err
+		return false, entities, calls, err
 	}
 	for _, room := range rooms {
 		if !homeSpaceRoomMatches(room, entities) {
-			return false, calls, nil
+			return false, entities, calls, nil
 		}
 	}
-	return true, calls, nil
+	return true, entities, calls, nil
 }
 
-func (client HomeSpaceConfigurationClient) verifyRoomAreaAccessible(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, int, error) {
+func (client HomeSpaceConfigurationClient) verifyRoomAreaAccessible(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, EntityListResult, int, error) {
 	entities, calls, err := client.listEntities(ctx, houseID, credentials)
 	if err != nil {
-		return false, calls, err
+		return false, entities, calls, err
 	}
 	roomID := strings.TrimSpace(stringFromAny(payload["roomId"]))
 	if _, ok := findSpaceEntity(entities, "room", roomID); !ok {
-		return false, calls, nil
+		return false, entities, calls, nil
 	}
 	for _, areaID := range append(homeSpaceIDList(payload["addAreaList"]), homeSpaceIDList(payload["removeAreaList"])...) {
 		if _, ok := findSpaceEntity(entities, "area", areaID); !ok {
-			return false, calls, nil
+			return false, entities, calls, nil
 		}
 	}
-	return true, calls, nil
+	return true, entities, calls, nil
 }
 
 func validateHomeSpaceConfigurationReferences(kind HomeSpaceConfigurationKind, payload map[string]any, entities EntityListResult) error {

@@ -24,15 +24,16 @@ type DeviceUnbindRequest struct {
 }
 
 type DeviceUnbindResult struct {
-	Region           string `json:"region"`
-	HouseID          string `json:"houseId"`
-	DeviceID         string `json:"deviceId"`
-	Name             string `json:"name,omitempty"`
-	ClearMac         bool   `json:"clearMac"`
-	UnbindRelDevices bool   `json:"unbindRelDevices"`
-	Verified         bool   `json:"verified"`
-	VerifiedBy       string `json:"verifiedBy,omitempty"`
-	APICalls         int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	DeviceID         string           `json:"deviceId"`
+	Name             string           `json:"name,omitempty"`
+	ClearMac         bool             `json:"clearMac"`
+	UnbindRelDevices bool             `json:"unbindRelDevices"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type DeviceUnbindClient struct {
@@ -60,7 +61,7 @@ func (client DeviceUnbindClient) Run(ctx context.Context, request DeviceUnbindRe
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return DeviceUnbindResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
-	before, calls, err := client.findDevice(ctx, houseID, deviceID, credentials)
+	before, _, calls, err := client.findDevice(ctx, houseID, deviceID, credentials)
 	apiCalls := calls
 	if err != nil {
 		return DeviceUnbindResult{}, err
@@ -79,7 +80,7 @@ func (client DeviceUnbindClient) Run(ctx context.Context, request DeviceUnbindRe
 	if !isBusinessOK(response) {
 		return DeviceUnbindResult{}, fmt.Errorf("device.unbind returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
-	ok, verifiedBy, calls, err := client.verifyDeviceUnbound(ctx, houseID, deviceID, credentials, request.VerifyAttempts, request.VerifyInterval)
+	ok, verifiedBy, verifiedEntities, calls, err := client.verifyDeviceUnbound(ctx, houseID, deviceID, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += calls
 	if err != nil {
 		return DeviceUnbindResult{}, err
@@ -97,10 +98,11 @@ func (client DeviceUnbindClient) Run(ctx context.Context, request DeviceUnbindRe
 		Verified:         true,
 		VerifiedBy:       verifiedBy,
 		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 
-func (client DeviceUnbindClient) findDevice(ctx context.Context, houseID string, deviceID string, credentials requestCredentials) (EntitySummary, int, error) {
+func (client DeviceUnbindClient) findDevice(ctx context.Context, houseID string, deviceID string, credentials requestCredentials) (EntitySummary, EntityListResult, int, error) {
 	result, err := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
 		HouseID: houseID,
 		Credentials: EntityListCredentials{
@@ -109,17 +111,17 @@ func (client DeviceUnbindClient) findDevice(ctx context.Context, houseID string,
 		},
 	})
 	if err != nil {
-		return EntitySummary{}, result.APICalls, err
+		return EntitySummary{}, result, result.APICalls, err
 	}
 	for _, entity := range result.Entities {
 		if entity.Type == "device" && entity.ID == deviceID {
-			return entity, result.APICalls, nil
+			return entity, result, result.APICalls, nil
 		}
 	}
-	return EntitySummary{}, result.APICalls, nil
+	return EntitySummary{}, result, result.APICalls, nil
 }
 
-func (client DeviceUnbindClient) verifyDeviceUnbound(ctx context.Context, houseID string, deviceID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, string, int, error) {
+func (client DeviceUnbindClient) verifyDeviceUnbound(ctx context.Context, houseID string, deviceID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, string, EntityListResult, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -128,27 +130,27 @@ func (client DeviceUnbindClient) verifyDeviceUnbound(ctx context.Context, houseI
 	}
 	calls := 0
 	for attempt := 0; attempt < attempts; attempt++ {
-		entity, readCalls, err := client.findDevice(ctx, houseID, deviceID, credentials)
+		entity, entities, readCalls, err := client.findDevice(ctx, houseID, deviceID, credentials)
 		calls += readCalls
 		if err != nil {
-			return false, "", calls, err
+			return false, "", entities, calls, err
 		}
 		if entity.ID == "" {
-			return true, "entity.list:missing", calls, nil
+			return true, "entity.list:missing", entities, calls, nil
 		}
 		if entity.Bind != nil && !*entity.Bind {
-			return true, "entity.list:bind=false", calls, nil
+			return true, "entity.list:bind=false", entities, calls, nil
 		}
 		if attempt == attempts-1 {
-			return false, "", calls, nil
+			return false, "", entities, calls, nil
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return false, "", calls, ctx.Err()
+			return false, "", entities, calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return false, "", calls, nil
+	return false, "", EntityListResult{}, calls, nil
 }

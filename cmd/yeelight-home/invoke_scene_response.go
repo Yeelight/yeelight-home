@@ -24,7 +24,7 @@ func sceneExecuteResponse(request contract.Request, entities api.EntityListResul
 		TraceID:  "scene-execute-command",
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(entities) + sceneExecuteAPICalls(execution),
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(entities),
 		},
 	}
 }

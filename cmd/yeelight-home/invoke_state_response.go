@@ -35,7 +35,7 @@ func stateQueryResponse(request contract.Request, entities api.EntityListResult,
 		TraceID:         "state-query-readonly",
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(entities) + stateQueryAPICalls(state),
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(entities),
 		},
 	}
 }

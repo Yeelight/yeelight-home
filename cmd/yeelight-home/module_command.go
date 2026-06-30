@@ -162,6 +162,7 @@ func moduleParameterFlags() map[string]string {
 		"res-name":           "resName",
 		"room-id":            "roomId",
 		"room-ids":           "roomIds",
+		"room-name":          "roomName",
 		"scene-id":           "sceneId",
 		"scene-ids":          "sceneIds",
 		"schema-id":          "schemaId",
@@ -171,6 +172,8 @@ func moduleParameterFlags() map[string]string {
 		"status":             "status",
 		"target":             "target",
 		"target-name":        "name",
+		"target-room-id":     "targetRoomId",
+		"target-room-name":   "targetRoomName",
 		"type":               "type",
 		"type-id":            "typeId",
 		"user-role":          "userRole",
@@ -183,7 +186,7 @@ func moduleTargets(spec moduleCommandSpec, parameters map[string]any) []map[stri
 		return nil
 	}
 	target := map[string]any{"entityType": spec.EntityType}
-	for _, key := range []string{"deviceId", "roomId", "sceneId", "automationId", "groupId", "areaId", "gatewayId", "entityId", "id"} {
+	for _, key := range moduleTargetIDParameterKeys(spec.EntityType) {
 		if value := requestString(parameters[key]); value != "" {
 			target["id"] = value
 			break
@@ -192,7 +195,31 @@ func moduleTargets(spec moduleCommandSpec, parameters map[string]any) []map[stri
 	if value := requestString(parameters["name"]); value != "" {
 		target["name"] = value
 	}
+	for _, key := range []string{"roomId", "targetRoomId", "roomName", "targetRoomName"} {
+		if value := requestString(parameters[key]); value != "" {
+			target[key] = value
+		}
+	}
 	return []map[string]any{target}
+}
+
+func moduleTargetIDParameterKeys(entityType string) []string {
+	switch entityType {
+	case "device":
+		return []string{"deviceId", "gatewayId", "panelId", "knobId", "sensorId", "meshgroupId", "entityId", "id"}
+	case "room":
+		return []string{"roomId", "entityId", "id"}
+	case "scene":
+		return []string{"sceneId", "entityId", "id"}
+	case "automation":
+		return []string{"automationId", "entityId", "id"}
+	case "group":
+		return []string{"groupId", "meshgroupId", "entityId", "id"}
+	case "area":
+		return []string{"areaId", "entityId", "id"}
+	default:
+		return []string{"entityId", "id"}
+	}
 }
 
 func targetParameterName(keys []string) string {

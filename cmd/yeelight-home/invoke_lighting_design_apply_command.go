@@ -228,7 +228,7 @@ func (app *app) executeLightingDesignApply(ctx context.Context, request contract
 	results := []any{}
 	apiCalls := entityListAPICalls(entities)
 	for _, action := range actions {
-		result, calls, err := app.commitLightingDesignAction(ctx, endpoint, record.HouseID, entities, action, authorization, clientID)
+		result, calls, err := app.executeLightingDesignAction(ctx, endpoint, record.HouseID, entities, action, authorization, clientID)
 		apiCalls += calls
 		if err != nil {
 			return contract.Response{}, err
@@ -238,7 +238,7 @@ func (app *app) executeLightingDesignApply(ctx context.Context, request contract
 	return lightingDesignApplyExecuteResponse(request, record, entities, results, apiCalls), nil
 }
 
-func (app *app) commitLightingDesignAction(ctx context.Context, endpoint api.Endpoint, houseID string, entities api.EntityListResult, action map[string]any, authorization string, clientID string) (map[string]any, int, error) {
+func (app *app) executeLightingDesignAction(ctx context.Context, endpoint api.Endpoint, houseID string, entities api.EntityListResult, action map[string]any, authorization string, clientID string) (map[string]any, int, error) {
 	deviceID := strings.TrimSpace(requestString(action["deviceId"]))
 	propertyName := strings.TrimSpace(requestString(action["propertyName"]))
 	value, ok := lightingDesignActionValue(propertyName, action["value"])

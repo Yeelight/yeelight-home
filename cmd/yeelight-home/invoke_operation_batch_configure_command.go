@@ -130,7 +130,7 @@ func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent con
 	if _, exists := stepRequest.Parameters["houseId"]; !exists {
 		stepRequest.Parameters["houseId"] = houseID
 	}
-	payload, preconditions, summary, preview, calls, reason, err := app.buildOperationBatchStepPlanPayload(ctx, stepRequest, endpoint, profile, region, houseID, authorization, clientID, entities)
+	payload, preconditions, summary, preview, calls, reason, err := app.buildOperationBatchStepPreparedPayload(ctx, stepRequest, endpoint, profile, region, houseID, authorization, clientID, entities)
 	if err != nil || reason != "" {
 		return operationBatchStep{}, reason, err
 	}
@@ -147,12 +147,13 @@ func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent con
 }
 
 func (app *app) executeOperationBatchConfigure(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
-	steps, reason := operationBatchStepsFromPlan(record.Payload)
+	steps, reason := operationBatchStepsFromPreparedPayload(record.Payload)
 	if reason != "" {
 		return executionBlockedResponse(request, reason, "批量配置载荷无效，未执行。"), nil
 	}
 	results := make([]any, 0, len(steps))
 	totalAPICalls := 0
+	var verifiedTopology api.EntityListResult
 	for index, step := range steps {
 		stepRecord := record
 		stepRecord.Intent = step.Intent
@@ -168,12 +169,15 @@ func (app *app) executeOperationBatchConfigure(ctx context.Context, request cont
 			return contract.Response{}, err
 		}
 		if response.Status != "success" {
-			return operationBatchPartialResponse(request, record, results, step, response, totalAPICalls), nil
+			return responseWithVerifiedTopology(operationBatchPartialResponse(request, record, results, step, response, totalAPICalls), verifiedTopology), nil
+		}
+		if entities, ok := response.Internal["verifiedTopology"].(api.EntityListResult); ok && entities.Total > 0 {
+			verifiedTopology = entities
 		}
 		results = append(results, operationBatchStepResult(index+1, step, response))
 		totalAPICalls += responseMetricInt(response, "apiCalls")
 	}
-	return operationBatchExecuteResponse(request, record, results, totalAPICalls), nil
+	return responseWithVerifiedTopology(operationBatchExecuteResponse(request, record, results, totalAPICalls), verifiedTopology), nil
 }
 
 func operationBatchStepsPayload(steps []operationBatchStep) []any {
@@ -206,7 +210,7 @@ func operationBatchStepsPreview(steps []operationBatchStep) []any {
 	return result
 }
 
-func operationBatchStepsFromPlan(payload map[string]any) ([]operationBatchStep, string) {
+func operationBatchStepsFromPreparedPayload(payload map[string]any) ([]operationBatchStep, string) {
 	rawSteps, ok := payload["steps"].([]any)
 	if !ok || len(rawSteps) == 0 || len(rawSteps) > maxOperationBatchConfigureSteps {
 		return nil, "invalid_operation_batch_payload"

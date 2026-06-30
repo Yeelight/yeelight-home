@@ -86,7 +86,7 @@ func TestInvokeHomeCreateExecutesDirectlyAndVerifies(t *testing.T) {
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
-		t.Fatalf("commit exit code = %d, stderr = %s", code, stderr.String())
+		t.Fatalf("execute exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
 	if response["status"] != "success" {

@@ -17,6 +17,8 @@ Commands:
   profile    List, show, activate, and delete profiles
   config     Read and update non-secret profile configuration
   completion Generate shell completion scripts
+  intent     Explain Runtime intents and complex payload contracts
+  explain    Print a machine-readable schema for one Runtime intent
   invoke     Execute one Skill Runtime request from stdin
   api        Run account-scoped API smoke checks
   doctor     Print local installation and auth diagnostics
@@ -49,6 +51,9 @@ Common examples:
   yeelight-home device detail --device-id <id> --json
   yeelight-home product search --keyword 青空灯 --json
   yeelight-home product search --product-model YP-0117 --json
+  yeelight-home intent explain --intent scene.update --json
+  yeelight-home intent schema --intent scene.update --json
+  yeelight-home explain lighting.design.import --json
   yeelight-home scene execute --scene-id <id> --json
   yeelight-home light on --device-id <id> --json
   yeelight-home automation enable --automation-id <id> --json
@@ -62,7 +67,6 @@ var moduleCommandDescriptions = map[string]string{
 	"ai-voice":       "Inspect AI voice account and product support",
 	"area":           "List, search, create, update, or delete areas",
 	"automation":     "List, explain, create, update, enable, disable, or delete automations",
-	"behavior":       "Execute source-backed device behaviors",
 	"device":         "List, inspect, diagnose, move, rename, remove, unbind devices, or create design slots",
 	"entity":         "List and inspect unified home entities",
 	"favorite":       "List, plan, add, update, or delete home favorites",
@@ -76,10 +80,11 @@ var moduleCommandDescriptions = map[string]string{
 	"meshgroup":      "Inspect mesh group details",
 	"message":        "List home messages",
 	"node":           "Inspect node sorting and property configuration",
+	"operation":      "Run composite helpers and inspect learned operation lessons",
 	"panel":          "List, inspect, and configure panels, screens, and buttons",
 	"product":        "Search Yeelight product pedia records, manuals, FAQ candidates, and attachments",
 	"progress":       "Inspect async operation progress",
-	"recommendation": "List and provide feedback on recommendations",
+	"recommendation": "Record, list, and provide feedback on local recommendations",
 	"room":           "List, search, create, update, rename, move, or delete rooms",
 	"scene":          "List, search, execute, create, update, test, or delete scenes",
 	"schedule":       "List schedule jobs",
@@ -94,8 +99,7 @@ var moduleCommandExamples = map[string][]string{
 	"ai-voice":       {"yeelight-home ai-voice products --json", "yeelight-home ai-voice list --json"},
 	"area":           {"yeelight-home area detail --area-id <id> --json", "yeelight-home area search --name <keyword> --json"},
 	"automation":     {"yeelight-home automation list --json", "yeelight-home automation detail --automation-id <id> --json", "yeelight-home automation enable --automation-id <id> --json"},
-	"behavior":       {"yeelight-home behavior execute --device-id <id> --params-json '<json>' --json"},
-	"device":         {"yeelight-home device list --json", "yeelight-home device detail --device-id <id> --json", "yeelight-home device slot-create --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"黑色格栅灯\",\"quantity\":2}]}]}' --json"},
+	"device":         {"yeelight-home device list --json", "yeelight-home device detail --device-id <id> --json", "yeelight-home device slot-create --house-id <id> --params-json '{\"name\":\"灯位设计\",\"gateway\":{\"tempId\":\"gw1\",\"name\":\"默认网关\",\"roomList\":[{\"tempId\":\"rm1\",\"name\":\"客厅\",\"deviceList\":[{\"tempId\":\"dv1\",\"name\":\"黑色格栅灯1\",\"pid\":198666,\"materialCode\":\"1-000002044\"}]}]}}' --json"},
 	"entity":         {"yeelight-home entity list --json", "yeelight-home entity get --entity-id <id> --json"},
 	"favorite":       {"yeelight-home favorite list --json", "yeelight-home favorite add --set typeId=2,resId=<id>,rank=1 --json"},
 	"gateway":        {"yeelight-home gateway list --json", "yeelight-home gateway detail --gateway-id <id> --json", "yeelight-home gateway diagnose --gateway-id <id> --json"},
@@ -103,15 +107,16 @@ var moduleCommandExamples = map[string][]string{
 	"home":           {"yeelight-home home list --json", "yeelight-home home summary --house-id <id> --json", "yeelight-home home sort --house-id <id> --json"},
 	"knob":           {"yeelight-home knob detail --knob-id <id> --json", "yeelight-home knob configure --knob-id <id> --params-json '<json>' --json"},
 	"light":          {"yeelight-home light on --device-id <id> --json", "yeelight-home light brightness --device-id <id> --brightness 60 --json", "yeelight-home light ct --device-id <id> --ct 4000 --json"},
-	"lighting":       {"yeelight-home lighting plan --house-id <id> --params-json '<json>' --json", "yeelight-home lighting import --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"黑色格栅灯\",\"quantity\":2}]}]}' --json", "yeelight-home lighting apply --params-json '{\"actions\":[{\"deviceId\":\"<id>\",\"propertyName\":\"power\",\"value\":true}]}' --json"},
+	"lighting":       {"yeelight-home lighting plan --house-id <id> --params-json '<json>' --json", "yeelight-home lighting import --house-id <id> --params-json '{\"name\":\"全屋照明设计\",\"gateway\":{\"tempId\":\"gw1\",\"name\":\"默认网关\",\"roomList\":[{\"tempId\":\"rm1\",\"name\":\"客厅\",\"deviceList\":[{\"tempId\":\"dv1\",\"name\":\"黑色格栅灯1\",\"pid\":198666,\"materialCode\":\"1-000002044\"}],\"groupList\":[{\"tempId\":\"gp1\",\"name\":\"客厅格栅灯组\",\"componentId\":4,\"deviceTempIdList\":[\"dv1\"]}]}]}}' --json", "yeelight-home lighting apply --params-json '{\"actions\":[{\"deviceId\":\"<id>\",\"propertyName\":\"power\",\"value\":true}]}' --json"},
 	"memory":         {"yeelight-home memory list --json", "yeelight-home memory remember --set key=value --json"},
 	"meshgroup":      {"yeelight-home meshgroup detail --meshgroup-id <id> --json"},
 	"message":        {"yeelight-home message list --json"},
 	"node":           {"yeelight-home node sorted-devices --node-id <id> --json", "yeelight-home node property-config --node-id <id> --json"},
+	"operation":      {"yeelight-home operation batch-configure --params-json '<json>' --json", "yeelight-home operation lesson-list --set intent=scene.update --json", "yeelight-home operation lesson-record --params-json '<json>' --json"},
 	"panel":          {"yeelight-home panel list --json", "yeelight-home panel detail --panel-id <id> --json", "yeelight-home panel button-configure --panel-id <id> --params-json '<json>' --json"},
 	"product":        {"yeelight-home product search --keyword 青空灯 --json", "yeelight-home product search --product-model YP-0117 --json", "yeelight-home product pedia --material-code 1-000003268 --json"},
 	"progress":       {"yeelight-home progress get --progress-id <id> --json"},
-	"recommendation": {"yeelight-home recommendation list --json", "yeelight-home recommendation feedback --params-json '<json>' --json"},
+	"recommendation": {"yeelight-home recommendation record --params-json '<json>' --json", "yeelight-home recommendation list --json", "yeelight-home recommendation feedback --params-json '<json>' --json"},
 	"room":           {"yeelight-home room list --json", "yeelight-home room detail --room-id <id> --json", "yeelight-home room rename --room-id <id> --name <new-name> --json"},
 	"scene":          {"yeelight-home scene list --json", "yeelight-home scene detail --scene-id <id> --json", "yeelight-home scene execute --scene-id <id> --json"},
 	"schedule":       {"yeelight-home schedule jobs --json"},
@@ -204,6 +209,11 @@ Clears selected non-secret metadata fields from a profile.
 
 Prints a shell completion script to stdout.
 `,
+	"explain": `Usage:
+  yeelight-home explain <intent> [--json]
+
+Shortcut for yeelight-home intent schema --intent <intent>. Prints the machine-readable SkillRequest schema, nested payload shape, examples, and nextStep for one semantic intent.
+`,
 	"dev": `Usage:
   yeelight-home dev <seed-house|seed-room|seed-scene|seed-automation> --json --region dev --allow-write-dev ...
 
@@ -237,6 +247,22 @@ Lists homes visible to the selected account. It is account-scoped and does not r
 
 Stores a default home id for later house-scoped commands. It does not change the token.
 `,
+	"intent": `Usage:
+  yeelight-home intent explain --intent <intent> [--json]
+  yeelight-home intent schema --intent <intent> [--json]
+
+Prints the local Runtime contract for one semantic intent. This is offline and does not require a token.
+`,
+	"intent explain": `Usage:
+  yeelight-home intent explain --intent <intent> [--json]
+
+Returns accepted parameter fields, nested payloadShape, examples, and nextStep when the intent accepts a complex JSON payload.
+`,
+	"intent schema": `Usage:
+  yeelight-home intent schema --intent <intent> [--json]
+
+Returns the machine-readable SkillRequest schema for one Runtime intent, including parameters, nested payload fields, examples, and nextStep. This is offline and does not require a token.
+`,
 	"area":       moduleHelpText("area"),
 	"automation": moduleHelpText("automation"),
 	"device":     moduleHelpText("device"),
@@ -251,6 +277,7 @@ Stores a default home id for later house-scoped commands. It does not change the
 home list is account-scoped and requires only a token. houseId is optional until a house-scoped command is used.
 Use yeelight-home help home <action> for resource action flags.
 `,
+	"lighting":       moduleHelpText("lighting"),
 	"light":          moduleHelpText("light"),
 	"memory":         moduleHelpText("memory"),
 	"panel":          moduleHelpText("panel"),

@@ -51,23 +51,23 @@ func TestInvokeMemoryRememberWritesDirectlyAndDeduplicates(t *testing.T) {
 	if duplicateMemory["created"] != false || duplicateMemory["merged"] != true {
 		t.Fatalf("duplicate memory = %#v", duplicateMemory)
 	}
-	list, err := app.memoryStore.ListPreferences("default", "house-1")
+	list, err := app.memoryStore.ListPreferences("default", "dev", "house-1")
 	if err != nil {
 		t.Fatalf("ListPreferences error: %v", err)
 	}
 	if len(list) != 1 || list[0].PreferenceValue != "45" {
 		t.Fatalf("list = %#v", list)
 	}
-	recommendations, err := app.memoryStore.ListRecommendations("default", "house-1", time.Now().Unix(), 1)
+	recommendations, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 1)
 	if err != nil {
 		t.Fatalf("ListRecommendations error: %v", err)
 	}
-	if len(recommendations) != 1 || recommendations[0].Type != "preference_based" {
+	if len(recommendations) != 0 {
 		t.Fatalf("recommendations = %#v", recommendations)
 	}
 }
 
-func TestInvokeMemoryRememberExtractsExplicitUtterancePreference(t *testing.T) {
+func TestInvokeMemoryRememberRequiresStructuredPreference(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
 	input := `{"contractVersion":"1.0","requestId":"req-memory-nl","locale":"zh-CN","utterance":"记住以后卧室默认柔和暖光，不要太亮","intent":"memory.remember","parameters":{"houseId":"house-1"}}`
 
@@ -81,33 +81,68 @@ func TestInvokeMemoryRememberExtractsExplicitUtterancePreference(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid remember response: %v", err)
 	}
-	if response["status"] != "success" {
+	if response["status"] != "clarification_required" {
 		t.Fatalf("response = %#v", response)
 	}
 
-	list, err := app.memoryStore.ListPreferences("default", "house-1")
+	list, err := app.memoryStore.ListPreferences("default", "dev", "house-1")
+	if err != nil {
+		t.Fatalf("ListPreferences error: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("list = %#v", list)
+	}
+}
+
+func TestInvokeMemoryRememberStoresSkillStructuredBatchPreferences(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
+	input := `{"contractVersion":"1.0","requestId":"req-memory-batch","locale":"zh-CN","utterance":"记住我喜欢喜欢浪漫的色调还有高端奢华","intent":"memory.remember","parameters":{"houseId":"house-1","preferences":[{"scopeType":"home","preferenceType":"ambience","preferenceValue":"prefer_romantic_warm","evidence":"用户明确要求记住喜欢浪漫色调"},{"scopeType":"home","preferenceType":"product_preference","preferenceValue":"prefer_premium_luxury","evidence":"用户明确要求记住高端奢华产品定位"}]}}`
+
+	for attempt := 0; attempt < 2; attempt++ {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("remember attempt %d exit code = %d, stderr = %s", attempt, code, stderr.String())
+		}
+		var response map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+			t.Fatalf("invalid remember response: %v", err)
+		}
+		if response["status"] != "success" {
+			t.Fatalf("response = %#v", response)
+		}
+		memory := response["memory"].(map[string]any)
+		if memory["count"] != float64(2) {
+			t.Fatalf("memory = %#v", memory)
+		}
+		if attempt == 0 && (memory["createdCount"] != float64(2) || memory["mergedCount"] != float64(0)) {
+			t.Fatalf("first memory = %#v", memory)
+		}
+		if attempt == 1 && (memory["createdCount"] != float64(0) || memory["mergedCount"] != float64(2)) {
+			t.Fatalf("second memory = %#v", memory)
+		}
+	}
+
+	list, err := app.memoryStore.ListPreferences("default", "dev", "house-1")
 	if err != nil {
 		t.Fatalf("ListPreferences error: %v", err)
 	}
 	if len(list) != 2 {
 		t.Fatalf("list = %#v", list)
 	}
-	values := map[string]bool{}
+	valuesByType := map[string]string{}
 	for _, item := range list {
-		if item.ScopeRef != "卧室" {
+		if item.ScopeType != "home" || item.ScopeRef != "" {
 			t.Fatalf("list = %#v", list)
 		}
-		values[item.PreferenceValue] = true
+		valuesByType[item.PreferenceType] = item.PreferenceValue
 	}
-	if !values["prefer_warm"] || !values["prefer_dimmer"] {
-		t.Fatalf("list = %#v", list)
+	if valuesByType["ambience"] != "prefer_romantic_warm" {
+		t.Fatalf("ambience memory missing: %#v", list)
 	}
-	recommendations, err := app.memoryStore.ListRecommendations("default", "house-1", time.Now().Unix(), 2)
-	if err != nil {
-		t.Fatalf("ListRecommendations error: %v", err)
-	}
-	if len(recommendations) != 2 || recommendations[0].Type != "preference_based" {
-		t.Fatalf("recommendations = %#v", recommendations)
+	if valuesByType["product_preference"] != "prefer_premium_luxury" {
+		t.Fatalf("product preference memory missing: %#v", list)
 	}
 }
 
@@ -116,6 +151,7 @@ func TestInvokeMemoryListPauseAndForget(t *testing.T) {
 	if err := app.memoryStore.SavePreference(storage.PreferenceRecord{
 		ID:              "pref-1",
 		Profile:         "default",
+		Region:          "dev",
 		HouseID:         "house-1",
 		ScopeType:       "room",
 		ScopeRef:        "客厅",
@@ -141,6 +177,10 @@ func TestInvokeMemoryListPauseAndForget(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("response = %#v", response)
 	}
+	namespace := response["memory"].(map[string]any)["namespace"].(map[string]any)
+	if namespace["profile"] != "default" || namespace["region"] != "dev" || namespace["houseId"] != "house-1" || namespace["dataType"] != "memory" {
+		t.Fatalf("memory namespace = %#v", namespace)
+	}
 
 	stdout.Reset()
 	stderr.Reset()
@@ -161,7 +201,7 @@ func TestInvokeMemoryListPauseAndForget(t *testing.T) {
 	if !strings.Contains(stdout.String(), `"deletedCount":1`) {
 		t.Fatalf("forget stdout = %s", stdout.String())
 	}
-	list, err := app.memoryStore.ListPreferences("default", "house-1")
+	list, err := app.memoryStore.ListPreferences("default", "dev", "house-1")
 	if err != nil {
 		t.Fatalf("ListPreferences error: %v", err)
 	}
@@ -188,7 +228,7 @@ func TestInvokeMemoryDefaultsLearningAndRecommendationEnabled(t *testing.T) {
 		t.Fatalf("memory = %#v", memory)
 	}
 
-	consent, ok, err := app.memoryStore.Consent("default", "house-1")
+	consent, ok, err := app.memoryStore.Consent("default", "dev", "house-1")
 	if err != nil || !ok {
 		t.Fatalf("Consent ok=%v err=%v", ok, err)
 	}
@@ -207,7 +247,7 @@ func TestInvokeMemoryDefaultsLearningAndRecommendationEnabled(t *testing.T) {
 	}
 }
 
-func TestInvokeMemorySignalCreatesImplicitRecommendationAfterRepeatedCorrection(t *testing.T) {
+func TestInvokeMemorySignalDoesNotInferPreferenceOrRecommendation(t *testing.T) {
 	stateReadCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -246,18 +286,24 @@ func TestInvokeMemorySignalCreatesImplicitRecommendationAfterRepeatedCorrection(
 			t.Fatalf("signal run %d exit code = %d, stderr = %s stdout=%s", index, code, stderr.String(), stdout.String())
 		}
 	}
-	signals, err := app.memoryStore.ListInteractionSignals("default", "house-1")
+	signals, err := app.memoryStore.ListInteractionSignals("default", "dev", "house-1")
 	if err != nil {
 		t.Fatalf("ListInteractionSignals error: %v", err)
 	}
-	if len(signals) != 1 || signals[0].Count != 2 || signals[0].SignalType != "preference_hint" {
+	if len(signals) != 1 || signals[0].Count != 2 || signals[0].SignalType != "interaction" {
 		t.Fatalf("signals = %#v", signals)
 	}
-	recommendations, err := app.memoryStore.ListRecommendations("default", "house-1", time.Now().Unix(), 1)
+	if signals[0].SignalKey != "light.brightness.adjust|interaction" {
+		t.Fatalf("runtime should store only coarse interaction signal: %#v", signals)
+	}
+	if strings.Contains(signals[0].Evidence, "客厅") || strings.Contains(signals[0].Evidence, "太亮") || signals[0].Evidence != "intent=light.brightness.adjust; status=success" {
+		t.Fatalf("runtime should not store user utterance as signal evidence: %#v", signals)
+	}
+	recommendations, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 1)
 	if err != nil {
 		t.Fatalf("ListRecommendations error: %v", err)
 	}
-	if len(recommendations) != 1 || recommendations[0].Type != "implicit_candidate" {
+	if len(recommendations) != 0 {
 		t.Fatalf("recommendations = %#v", recommendations)
 	}
 }
@@ -266,8 +312,8 @@ func TestInvokeRecommendationListReturnsAtMostOneItem(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
 	now := time.Now().Unix()
 	for _, record := range []storage.RecommendationRecord{
-		{ID: "rec-1", Profile: "default", HouseID: "house-1", Type: "scene", Explanation: "晚上常调暗客厅灯", Evidence: "脱敏 evidence 3 次", Status: "pending", CreatedAt: now, UpdatedAt: now},
-		{ID: "rec-2", Profile: "default", HouseID: "house-1", Type: "automation", Explanation: "睡前常关灯", Evidence: "脱敏 evidence 2 次", Status: "pending", CreatedAt: now, UpdatedAt: now},
+		{ID: "rec-1", Profile: "default", Region: "dev", HouseID: "house-1", Type: "scene", Explanation: "晚上常调暗客厅灯", Evidence: "脱敏 evidence 3 次", Status: "pending", Priority: 10, Confidence: "medium", CreatedAt: now, UpdatedAt: now},
+		{ID: "rec-2", Profile: "default", Region: "dev", HouseID: "house-1", Type: "automation", Explanation: "睡前常关灯", Evidence: "脱敏 evidence 2 次", Status: "pending", Priority: 90, Confidence: "high", CreatedAt: now, UpdatedAt: now},
 	} {
 		if err := app.memoryStore.SaveRecommendation(record); err != nil {
 			t.Fatalf("SaveRecommendation error: %v", err)
@@ -289,52 +335,118 @@ func TestInvokeRecommendationListReturnsAtMostOneItem(t *testing.T) {
 	if len(items) != 1 || recommendation["sessionLimit"] != float64(1) {
 		t.Fatalf("recommendation = %#v", recommendation)
 	}
+	if items[0].(map[string]any)["id"] != "rec-2" {
+		t.Fatalf("recommendation should return highest ranked item first: %#v", recommendation)
+	}
+	namespace := recommendation["namespace"].(map[string]any)
+	if namespace["profile"] != "default" || namespace["region"] != "dev" || namespace["houseId"] != "house-1" {
+		t.Fatalf("recommendation namespace = %#v", namespace)
+	}
 }
 
-func TestInvokeRecommendationListGeneratesFromSavedPreference(t *testing.T) {
+func TestInvokeRecommendationRecordStoresSkillAuthoredCandidate(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
-	if err := app.memoryStore.SavePreference(storage.PreferenceRecord{
-		ID:              "pref-brightness-living",
-		Profile:         "default",
-		HouseID:         "house-1",
-		ScopeType:       "room",
-		ScopeRef:        "客厅",
-		PreferenceType:  "brightness",
-		PreferenceValue: "45",
-		Kind:            "explicit",
-		Evidence:        "用户明确说明",
-		CreatedAt:       123,
-		UpdatedAt:       123,
-	}); err != nil {
-		t.Fatalf("SavePreference error: %v", err)
-	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-rec-generated","locale":"zh-CN","utterance":"有什么建议","intent":"recommendation.list","parameters":{"houseId":"house-1"}}`), &stdout, &stderr)
+	input := `{"contractVersion":"1.0","requestId":"req-rec-record","locale":"zh-CN","utterance":"记录一个建议","intent":"recommendation.record","parameters":{"houseId":"house-1","type":"automation","source":"ai_skill","targetIntent":"automation.create","scopeType":"room","scopeRef":"主卧","priority":80,"confidence":"high","explanation":"可以把浪漫暖光做成主卧晚间自动化。","evidence":"本地记忆 ambience=prefer_romantic_warm","actionHint":{"label":"创建主卧晚间自动化"},"parametersHint":{"roomName":"主卧","tone":"warm_romantic"}}}`
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
-		t.Fatalf("recommendation exit code = %d, stderr = %s", code, stderr.String())
+		t.Fatalf("recommendation record exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid recommendation record response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "recommendation-record-local" {
+		t.Fatalf("response = %#v", response)
+	}
+	recommendation := response["recommendation"].(map[string]any)
+	item := recommendation["item"].(map[string]any)
+	if item["type"] != "automation" || item["targetIntent"] != "automation.create" || item["scopeRef"] != "主卧" || item["created"] != true {
+		t.Fatalf("item = %#v", item)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-rec-list-recorded","locale":"zh-CN","utterance":"有什么建议","intent":"recommendation.list","parameters":{"houseId":"house-1"}}`), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("recommendation list exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid recommendation list response: %v", err)
+	}
+	items := response["recommendation"].(map[string]any)["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["source"] != "ai_skill" {
+		t.Fatalf("recommendation response = %#v", response)
+	}
+}
+
+func TestInvokeRecommendationRecordRequiresStructuredFields(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	input := `{"contractVersion":"1.0","requestId":"req-rec-invalid","locale":"zh-CN","utterance":"给个建议","intent":"recommendation.record","parameters":{"houseId":"house-1","type":"automation","explanation":"可以创建自动化"}}`
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("recommendation record exit code = %d, stderr = %s", code, stderr.String())
 	}
 	var response map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid recommendation response: %v", err)
 	}
-	items := response["recommendation"].(map[string]any)["items"].([]any)
-	if len(items) != 1 {
-		t.Fatalf("recommendation response = %#v", response)
+	if response["status"] != "clarification_required" {
+		t.Fatalf("response = %#v", response)
 	}
-	item := items[0].(map[string]any)
-	if item["id"] != "pref-pref-brightness-living" || item["type"] != "preference_based" || !strings.Contains(item["explanation"].(string), "brightness=45") {
-		t.Fatalf("recommendation item = %#v", item)
+	list, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 1)
+	if err != nil {
+		t.Fatalf("ListRecommendations error: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("list = %#v", list)
 	}
 }
 
-func TestInvokeRecommendationListDoesNotReviveRejectedPreferenceRecommendation(t *testing.T) {
+func TestInvokeRecommendationRecordMergesDuplicateCandidate(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
+	input := `{"contractVersion":"1.0","requestId":"req-rec-merge","locale":"zh-CN","utterance":"记录建议","intent":"recommendation.record","parameters":{"houseId":"house-1","type":"automation","source":"ai_skill","targetIntent":"automation.create","scopeType":"room","scopeRef":"主卧","explanation":"可以把浪漫暖光做成主卧晚间自动化。","evidence":"第一次证据"}}`
+	duplicate := `{"contractVersion":"1.0","requestId":"req-rec-merge-2","locale":"zh-CN","utterance":"重复记录建议","intent":"recommendation.record","parameters":{"houseId":"house-1","type":"automation","source":"ai_skill","targetIntent":"automation.create","scopeType":"room","scopeRef":"主卧","explanation":"可以把浪漫暖光做成主卧晚间自动化。","evidence":"第二次证据"}}`
+	for index, raw := range []string{input, duplicate} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(raw), &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("record %d exit code = %d, stderr = %s", index, code, stderr.String())
+		}
+		var response map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+			t.Fatalf("invalid record %d response: %v", index, err)
+		}
+		item := response["recommendation"].(map[string]any)["item"].(map[string]any)
+		if index == 0 && item["created"] != true {
+			t.Fatalf("first item = %#v", item)
+		}
+		if index == 1 && (item["created"] != false || item["merged"] != true) {
+			t.Fatalf("second item = %#v", item)
+		}
+	}
+	list, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 10)
+	if err != nil {
+		t.Fatalf("ListRecommendations error: %v", err)
+	}
+	if len(list) != 1 || !strings.Contains(list[0].Evidence, "第一次证据") || !strings.Contains(list[0].Evidence, "第二次证据") {
+		t.Fatalf("list = %#v", list)
+	}
+}
+
+func TestInvokeRecommendationListDoesNotMaterializePreferenceAutomatically(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
 	now := time.Now().Unix()
 	if err := app.memoryStore.SavePreference(storage.PreferenceRecord{
 		ID:              "pref-brightness-living",
 		Profile:         "default",
+		Region:          "dev",
 		HouseID:         "house-1",
 		ScopeType:       "room",
 		ScopeRef:        "客厅",
@@ -345,23 +457,9 @@ func TestInvokeRecommendationListDoesNotReviveRejectedPreferenceRecommendation(t
 	}); err != nil {
 		t.Fatalf("SavePreference error: %v", err)
 	}
-	if err := app.memoryStore.SaveRecommendation(storage.RecommendationRecord{
-		ID:          "pref-pref-brightness-living",
-		Profile:     "default",
-		HouseID:     "house-1",
-		Type:        "preference_based",
-		Explanation: "旧推荐",
-		Evidence:    "用户已拒绝",
-		Status:      "rejected",
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}); err != nil {
-		t.Fatalf("SaveRecommendation error: %v", err)
-	}
-
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-rec-not-revived","locale":"zh-CN","utterance":"有什么建议","intent":"recommendation.list","parameters":{"houseId":"house-1"}}`), &stdout, &stderr)
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-rec-not-generated","locale":"zh-CN","utterance":"有什么建议","intent":"recommendation.list","parameters":{"houseId":"house-1"}}`), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("recommendation exit code = %d, stderr = %s", code, stderr.String())
 	}
@@ -381,6 +479,7 @@ func TestInvokeRecommendationFeedbackRejectsLocalRecommendation(t *testing.T) {
 	if err := app.memoryStore.SaveRecommendation(storage.RecommendationRecord{
 		ID:          "rec-1",
 		Profile:     "default",
+		Region:      "dev",
 		HouseID:     "house-1",
 		Type:        "scene",
 		Explanation: "晚上常调暗客厅灯",
@@ -410,7 +509,7 @@ func TestInvokeRecommendationFeedbackRejectsLocalRecommendation(t *testing.T) {
 	if recommendation["status"] != "rejected" || recommendation["feedbackRecorded"] != true {
 		t.Fatalf("recommendation = %#v", recommendation)
 	}
-	list, err := app.memoryStore.ListRecommendations("default", "house-1", time.Now().Unix(), 1)
+	list, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 1)
 	if err != nil {
 		t.Fatalf("ListRecommendations error: %v", err)
 	}
@@ -425,6 +524,7 @@ func TestInvokeRecommendationFeedbackCooldownKeepsRecommendationPending(t *testi
 	if err := app.memoryStore.SaveRecommendation(storage.RecommendationRecord{
 		ID:          "rec-1",
 		Profile:     "default",
+		Region:      "dev",
 		HouseID:     "house-1",
 		Type:        "scene",
 		Explanation: "晚上常调暗客厅灯",
@@ -454,7 +554,7 @@ func TestInvokeRecommendationFeedbackCooldownKeepsRecommendationPending(t *testi
 	if recommendation["status"] != "pending" || recommendation["cooldownUntil"] == float64(0) {
 		t.Fatalf("recommendation = %#v", recommendation)
 	}
-	list, err := app.memoryStore.ListRecommendations("default", "house-1", time.Now().Unix(), 1)
+	list, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 1)
 	if err != nil {
 		t.Fatalf("ListRecommendations error: %v", err)
 	}

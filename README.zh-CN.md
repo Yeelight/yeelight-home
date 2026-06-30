@@ -162,6 +162,16 @@ yeelight-home help scene execute
 yeelight-home help light brightness
 ```
 
+查看机器可读 intent 契约：
+
+```sh
+yeelight-home intent explain --intent scene.update --json
+yeelight-home intent schema --intent lighting.design.import --json
+yeelight-home explain lighting.design.import --json
+```
+
+这些命令离线运行，不需要 token。它们会输出 SkillRequest 外层结构、可接受参数、复杂嵌套 payload shape、examples 和 nextStep，方便 Skill 或传统程序直接生成 HouseMeta、情景 `details`、自动化 `params`、面板事件、批量操作等大 JSON 字段。
+
 传递不常用参数时，不需要手写完整 SkillRequest，可以用 `--set` 或 `--params-json`：
 
 ```sh
@@ -189,13 +199,17 @@ yeelight-home product search --product-model YP-0117 --json
 
 ```sh
 yeelight-home memory remember --house-id <house-id> --set scopeType=room,scopeRef=客厅,preferenceType=brightness,preferenceValue=45 --json
+yeelight-home memory remember --house-id <house-id> --params-json '{"preferences":[{"scopeType":"profile","preferenceType":"ambience","preferenceValue":"prefer_romantic_warm","evidence":"用户明确要求记住喜欢浪漫色调"},{"scopeType":"profile","preferenceType":"product_preference","preferenceValue":"prefer_premium_luxury","evidence":"用户明确要求记住高端奢华产品定位"}]}' --json
+yeelight-home recommendation record --house-id <house-id> --params-json '{"type":"automation","source":"ai_skill","targetIntent":"automation.create","scopeType":"room","scopeRef":"主卧","explanation":"可以把已保存的浪漫暖光偏好做成主卧晚间自动化。","evidence":"本地记忆 ambience=prefer_romantic_warm"}' --json
 yeelight-home recommendation list --house-id <house-id> --json
 yeelight-home recommendation feedback --house-id <house-id> --params-json '{"recommendationId":"<id>","feedback":"cooldown","cooldownHours":24}' --json
 ```
 
-本地记忆和推荐默认对每个 profile + 家庭范围开启。`memory pause` 是明确的退出开关，`memory resume` 会重新开启本地学习。`memory remember` 会直接 upsert 本地偏好，合并含义相近的重复记忆，并可能生成一条基于偏好的推荐。`recommendation list` 只返回 Runtime 本地生成或保存的推荐，不由模型临时编造。`accepted`、`dismissed`、`rejected` 和 `cooldown` 等反馈会被本地保存，并影响后续推荐展示。
+本地记忆和推荐默认对每个 `profile + region + houseId` 范围开启。`memory pause` 是明确的退出开关，`memory resume` 会重新开启本地学习。`memory remember` 会直接 upsert 单条结构化本地偏好，也支持通过 `parameters.preferences[]` 一次写入多条结构化偏好。`recommendation record` 会直接 upsert 调用方已经组织好的结构化推荐候选；Runtime 只负责校验、保存、去重、排序、列表和反馈记录。推荐判断属于调用方/Skill，不属于 Runtime。`accepted`、`dismissed`、`rejected` 和 `cooldown` 等反馈会被本地保存，并影响后续推荐展示。
 
-Runtime 不会把完整对话日志当作记忆保存。它只保存用户明确要求记录的偏好状态。对于“记住以后卧室默认柔和暖光”这类明确自然语言，Runtime 会保守提取偏好候选，并把“柔和暖光/偏暖一点”“夜里别太亮/暗一点”等近义偏好合并为同一条记忆。
+Runtime 不会把完整对话日志当作记忆保存，也不解释主观自然语言偏好。Skill 或其他调用方必须传入 `scopeType`、`scopeRef`、`preferenceType`、`preferenceValue`、`evidence` 等结构化字段。如果调用方希望“柔和暖光”和“偏暖一点”视为同一条记忆，应先在调用方侧归一成同一个 canonical `preferenceValue`；Runtime 只负责合并完全相同的结构化偏好和证据。
+
+记忆 JSON 会按 `~/.yeelight-home/data/memory/<profile>/<region>/<houseId>.json` 分片保存，每个分片和导出结果都会携带 `accountProfile`、`profile`、`region`、`houseId`、`dataType` 组成的 namespace 元数据。交互信号只保存 `intent` 和响应 `status` 这类粗粒度客观证据，不保存用户原话。已接受、忽略或拒绝的推荐证据和交互信号会按本地保留窗口压缩；显式偏好会保留到用户主动 forget。
 
 默认本地数据目录是：
 

@@ -23,7 +23,7 @@ func (app *app) prepareLightingDesignImport(ctx context.Context, request contrac
 	}
 	normalized, err := api.NormalizeLightingDesignImportPayload(houseID, payload)
 	if err != nil {
-		return configureClarificationResponseWithGuide(request, "invalid_lighting_design_import_payload", []string{"parameters.houseId", "parameters.rooms", "parameters.rooms[].items", "parameters.slots", "parameters.items"}, lightingDesignImportPayloadGuide()), nil
+		return configureClarificationResponseWithGuide(request, "invalid_lighting_design_import_payload", lightingDesignImportAcceptedFields(), lightingDesignImportPayloadGuide()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -42,33 +42,54 @@ func (app *app) prepareLightingDesignImport(ctx context.Context, request contrac
 	}
 	preconditions := []string{
 		"执行前重新读取家庭实体列表",
-		"只使用 Runtime 归一化后的房间、网关槽位、设备槽位和可选设备组结构",
+		"只使用 Runtime 归一化后的 HouseMeta: gateway.roomList、deviceList、groupList、sceneList、automationList",
 		"设备槽位代表照明设计占位，不代表设备已配网或可被真实控制",
 		"执行后通过家庭实体列表验证房间和设备槽位可见",
 	}
 	risk := operation.RiskR2
-	if lightingDesignImportWipesHome(normalized) {
-		risk = operation.RiskR3
-		preconditions = append(preconditions, "该操作会覆盖/清空家庭设计元数据，调用方应在调用 Runtime 前完成用户确认")
-	}
 	record, err := operation.NewPreparedWithRisk(profile, region, houseID, intent, request.RequestID, summary, risk, normalized, preconditions, time.Now())
 	if err != nil {
 		return contract.Response{}, err
 	}
 	app.preparedOperation = &record
 	preview := map[string]any{
-		"mode":                           "design_sync_metadata",
-		"counts":                         lightingDesignImportPlanCounts(normalized),
+		"mode":                           "house_meta_import",
+		"counts":                         lightingDesignImportPayloadCounts(normalized),
 		"productResolution":              lightingDesignProductResolutionPreview(normalized),
 		"persistentWrites":               true,
 		"createsDeviceSlots":             true,
 		"deviceSlotsArePhysicalBindings": false,
 	}
-	if lightingDesignImportWipesHome(normalized) {
-		preview["clearAll"] = true
-		preview["riskNote"] = "会覆盖家庭现有设计元数据"
-	}
 	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
+}
+
+func lightingDesignImportAcceptedFields() []string {
+	return []string{
+		"parameters.houseId",
+		"parameters.tempId",
+		"parameters.name",
+		"parameters.gateway",
+		"parameters.gateway.tempId",
+		"parameters.gateway.name",
+		"parameters.gateway.gatewayDeviceId",
+		"parameters.gateway.roomList",
+		"parameters.gateway.roomList[].tempId",
+		"parameters.gateway.roomList[].name",
+		"parameters.gateway.roomList[].deviceList",
+		"parameters.gateway.roomList[].deviceList[].tempId",
+		"parameters.gateway.roomList[].deviceList[].name",
+		"parameters.gateway.roomList[].deviceList[].pid",
+		"parameters.gateway.roomList[].deviceList[].roomTempId",
+		"parameters.gateway.roomList[].groupList",
+		"parameters.gateway.roomList[].groupList[].componentId",
+		"parameters.gateway.roomList[].groupList[].deviceTempIdList",
+		"parameters.areaList",
+		"parameters.sceneList",
+		"parameters.sceneList[].details",
+		"parameters.automationList",
+		"parameters.automationList[].params",
+		"parameters.automationList[].actions",
+	}
 }
 
 func (app *app) executeLightingDesignImport(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
@@ -90,73 +111,96 @@ func (app *app) executeLightingDesignImport(ctx context.Context, request contrac
 }
 
 func lightingDesignProductResolutionPreview(payload map[string]any) map[string]any {
-	devices, ok := payload["devices"].([]any)
+	gateway, ok := payload["gateway"].(map[string]any)
 	if !ok {
 		return nil
 	}
 	matched := 0
 	unresolved := 0
 	samples := []any{}
-	for _, raw := range devices {
-		device, ok := raw.(map[string]any)
+	rooms, _ := gateway["roomList"].([]any)
+	for _, rawRoom := range rooms {
+		room, ok := rawRoom.(map[string]any)
 		if !ok {
 			continue
 		}
-		attrs, _ := device["attrs"].(map[string]any)
-		item := map[string]any{
-			"localName": device["localName"],
-			"pid":       device["pid"],
-		}
-		if value, ok := attrs["materialCode"]; ok {
-			item["materialCode"] = value
-		}
-		if value, ok := attrs["productName"]; ok {
-			item["productName"] = value
-		}
-		if value, ok := attrs["productMatchConfidence"]; ok {
-			item["confidence"] = value
-		}
-		if _, ok := attrs["materialCode"]; ok {
-			matched++
-		} else {
-			unresolved++
-		}
-		if len(samples) < 8 {
-			samples = append(samples, item)
+		devices, _ := room["deviceList"].([]any)
+		for _, rawDevice := range devices {
+			device, ok := rawDevice.(map[string]any)
+			if !ok {
+				continue
+			}
+			extra, _ := device["extraMeta"].(map[string]any)
+			item := map[string]any{
+				"name":       device["name"],
+				"pid":        device["pid"],
+				"roomTempId": device["roomTempId"],
+			}
+			if value, ok := extra["materialCode"]; ok {
+				item["materialCode"] = value
+			}
+			if value, ok := extra["productName"]; ok {
+				item["productName"] = value
+			}
+			if device["pid"] != nil {
+				matched++
+			} else {
+				unresolved++
+			}
+			if len(samples) < 8 {
+				samples = append(samples, item)
+			}
 		}
 	}
 	return map[string]any{
 		"matchedDeviceSlots":    matched,
 		"unresolvedDeviceSlots": unresolved,
-		"catalog":               "runtime_builtin_lighting_design_products",
+		"catalog":               "skill_selected_house_meta_products",
 		"samples":               samples,
 	}
 }
 
-func lightingDesignImportPlanCounts(payload map[string]any) map[string]int {
-	counts := map[string]int{}
-	for output, key := range map[string]string{
-		"gateways":    "gateways",
-		"rooms":       "rooms",
-		"devices":     "devices",
-		"groups":      "deviceGroups",
-		"scenes":      "scenes",
-		"automations": "automations",
-	} {
-		if items, ok := payload[key].([]any); ok {
-			counts[output] = len(items)
+func lightingDesignImportPayloadCounts(payload map[string]any) map[string]int {
+	counts := map[string]int{
+		"gateways":    0,
+		"rooms":       0,
+		"devices":     0,
+		"groups":      0,
+		"areas":       0,
+		"scenes":      0,
+		"automations": 0,
+	}
+	if areas, ok := payload["areaList"].([]any); ok {
+		counts["areas"] = len(areas)
+	}
+	if scenes, ok := payload["sceneList"].([]any); ok {
+		counts["scenes"] = len(scenes)
+	}
+	if automations, ok := payload["automationList"].([]any); ok {
+		counts["automations"] = len(automations)
+	}
+	gateway, ok := payload["gateway"].(map[string]any)
+	if !ok {
+		return counts
+	}
+	counts["gateways"] = 1
+	rooms, _ := gateway["roomList"].([]any)
+	counts["rooms"] = len(rooms)
+	for _, rawRoom := range rooms {
+		room, ok := rawRoom.(map[string]any)
+		if !ok {
+			continue
 		}
+		devices, _ := room["deviceList"].([]any)
+		groups, _ := room["groupList"].([]any)
+		counts["devices"] += len(devices)
+		counts["groups"] += len(groups)
 	}
 	return counts
 }
 
-func lightingDesignImportWipesHome(payload map[string]any) bool {
-	value, ok := payload["clearAll"].(bool)
-	return ok && value
-}
-
 func lightingDesignImportExecuteResponse(request contract.Request, record operation.Prepared, result api.LightingDesignImportResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -168,11 +212,11 @@ func lightingDesignImportExecuteResponse(request contract.Request, record operat
 			"mode":                           result.Mode,
 			"counts":                         result.Counts,
 			"mappings":                       result.Mappings,
+			"requestKey":                     result.RequestKey,
 			"verified":                       result.Verified,
 			"verifiedBy":                     result.VerifiedBy,
 			"persistentWrites":               true,
 			"deviceSlotsArePhysicalBindings": false,
-			"clearAll":                       result.ClearAll,
 		},
 		Execution: map[string]any{
 			"intent": record.Intent,
@@ -184,5 +228,5 @@ func lightingDesignImportExecuteResponse(request contract.Request, record operat
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }

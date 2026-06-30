@@ -83,9 +83,9 @@ func moduleActionFlagHelp(resource string, action string, spec moduleCommandSpec
 		lines = append(lines, "  --name <slot-name>")
 		lines = append(lines, "  --room-id <id>")
 		lines = append(lines, "  --room-name <name>")
-		lines = append(lines, "  --params-json <json>   Supports rooms[].items[] with name, quantity, category, color, installStyle, beamAngle, series, materialCode, pid.")
+		lines = append(lines, "  --params-json <json>   Requires HouseMeta gateway.roomList[].deviceList[]; Skill/caller expands quantities and selects products first.")
 	case "lighting.design.import":
-		lines = append(lines, "  --params-json <json>   Supports rooms, items/slots/devices, caller-authored groups[], scenes, automations, clearAll/overwrite. Fuzzy slots may return product candidates; explicit product identity must come from the caller.")
+		lines = append(lines, "  --params-json <json>   Requires HouseMeta for /v1/meta/import: gateway.roomList, deviceList, groupList, sceneList, automationList. Natural rooms/items/groups is rejected.")
 	case "scene.update":
 		lines = append(lines, "  --params-json <json>   Requires sceneId, name, and complete details[]. Use scene detail first for editablePayload.")
 	case "automation.update":
@@ -168,9 +168,9 @@ func moduleActionExamples(resource string, action string, spec moduleCommandSpec
 	case "device.rename":
 		return "  yeelight-home device rename --device-id <id> --name <new-name> --json\n"
 	case "device.slot.create":
-		return "  yeelight-home device slot-create --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"黑色格栅灯\",\"quantity\":2,\"category\":\"格栅灯\",\"color\":\"黑色\"}]}]}' --json\n"
+		return "  yeelight-home device slot-create --house-id <id> --params-json '{\"name\":\"灯位设计\",\"gateway\":{\"tempId\":\"gw1\",\"name\":\"默认网关\",\"roomList\":[{\"tempId\":\"rm1\",\"name\":\"客厅\",\"deviceList\":[{\"tempId\":\"dv1\",\"name\":\"黑色格栅灯1\",\"pid\":198666,\"materialCode\":\"1-000002044\"},{\"tempId\":\"dv2\",\"name\":\"黑色格栅灯2\",\"pid\":198666,\"materialCode\":\"1-000002044\"}]}]}}' --json\n"
 	case "lighting.design.import":
-		return "  yeelight-home lighting import --house-id <id> --params-json '{\"rooms\":[{\"name\":\"客厅\",\"items\":[{\"name\":\"吸顶灯\"},{\"name\":\"黑色格栅灯\",\"quantity\":2},{\"name\":\"36°射灯\",\"quantity\":4}]}],\"groups\":[{\"name\":\"客厅格栅灯组\",\"roomName\":\"客厅\",\"match\":{\"name\":\"黑色格栅灯\"}}]}' --json\n"
+		return "  yeelight-home lighting import --house-id <id> --params-json '{\"name\":\"全屋照明设计\",\"gateway\":{\"tempId\":\"gw1\",\"name\":\"默认网关\",\"roomList\":[{\"tempId\":\"rm1\",\"name\":\"客厅\",\"deviceList\":[{\"tempId\":\"dv1\",\"name\":\"黑色格栅灯1\",\"pid\":198666,\"materialCode\":\"1-000002044\"},{\"tempId\":\"dv2\",\"name\":\"黑色格栅灯2\",\"pid\":198666,\"materialCode\":\"1-000002044\"}],\"groupList\":[{\"tempId\":\"gp1\",\"name\":\"客厅格栅灯组\",\"componentId\":4,\"deviceTempIdList\":[\"dv1\",\"dv2\"]}]}]},\"sceneList\":[{\"tempId\":\"sc1\",\"name\":\"客厅回家模式\",\"details\":[{\"typeId\":4,\"tempId\":\"gp1\",\"params\":{\"set\":{\"p\":true,\"l\":60,\"ct\":3000}}}]}]}' --json\n"
 	case "lighting.design.apply":
 		return "  yeelight-home lighting apply --house-id <id> --params-json '{\"actions\":[{\"deviceId\":\"50018330\",\"propertyName\":\"p\",\"value\":true},{\"deviceId\":\"50018330\",\"propertyName\":\"ct\",\"value\":3000},{\"deviceId\":\"50018330\",\"propertyName\":\"l\",\"value\":60}]}' --json\n"
 	case "operation.batch.configure":

@@ -10,7 +10,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/operation"
 )
 
-func (app *app) buildOperationBatchStepPlanPayload(ctx context.Context, request contract.Request, endpoint api.Endpoint, _ string, _ string, houseID string, authorization string, clientID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
+func (app *app) buildOperationBatchStepPreparedPayload(ctx context.Context, request contract.Request, endpoint api.Endpoint, _ string, _ string, houseID string, authorization string, clientID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
 	switch {
 	case request.Intent == "room.create":
 		return operationBatchRoomCreatePayload(request, houseID, entities)
@@ -75,7 +75,7 @@ func operationBatchMetadataCreatePayload(request contract.Request, houseID strin
 	if reason := validateConfigureCreatePayload(spec.entityType, payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	name := planPayloadString(payload, "name")
+	name := executionPayloadString(payload, "name")
 	for _, entity := range entities.Entities {
 		if entity.Type == spec.entityType && entity.Name == name {
 			return nil, nil, "", nil, 0, fmt.Sprintf("%s_name_already_exists", spec.entityType), nil
@@ -144,7 +144,7 @@ func operationBatchSceneUpdatePayload(request contract.Request, houseID string, 
 	if reason := validateSceneUpdatePayload(payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	name := firstNonEmptyString(planPayloadString(payload, "name"), valueIDString(payload["sceneId"]))
+	name := firstNonEmptyString(executionPayloadString(payload, "name"), valueIDString(payload["sceneId"]))
 	return payload, nil, fmt.Sprintf("更新情景 %s", name), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
@@ -160,7 +160,7 @@ func operationBatchAutomationUpdatePayload(request contract.Request, houseID str
 	if reason := validateAutomationUpdatePayload(payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	name := firstNonEmptyString(planPayloadString(payload, "name"), automation.Name)
+	name := firstNonEmptyString(executionPayloadString(payload, "name"), automation.Name)
 	return payload, nil, fmt.Sprintf("更新自动化 %s", name), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
@@ -203,13 +203,10 @@ func operationBatchLightingDesignImportPayload(request contract.Request, houseID
 	if err != nil {
 		return nil, nil, "", nil, 0, "invalid_lighting_design_import_payload", nil
 	}
-	if lightingDesignImportWipesHome(normalized) {
-		return nil, nil, "", nil, 0, "operation_batch_contains_r3_lighting_design_import", nil
-	}
 	summary := "导入照明设计并预建设备槽位"
 	if request.Intent == "device.slot.create" {
 		summary = "创建设备预留槽位"
 	}
-	preview := map[string]any{"counts": lightingDesignImportPlanCounts(normalized), "createsDeviceSlots": true, "deviceSlotsArePhysicalBindings": false}
+	preview := map[string]any{"counts": lightingDesignImportPayloadCounts(normalized), "createsDeviceSlots": true, "deviceSlotsArePhysicalBindings": false}
 	return normalized, nil, summary, preview, 0, "", nil
 }

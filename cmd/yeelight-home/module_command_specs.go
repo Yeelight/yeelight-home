@@ -34,9 +34,6 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 		"supported-v2": {Intent: "automation.supported.v2.list", Utterance: "查看 v2 自动化支持能力"},
 		"update":       {Intent: "automation.update", Utterance: "更新自动化", EntityType: "automation", TargetIDKeys: []string{"automation-id", "automationId", "id"}, TargetName: true},
 	},
-	"behavior": {
-		"execute": {Intent: "behavior.execute", Utterance: "执行设备行为", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
-	},
 	"device": {
 		"attrs":           {Intent: "device.attr.list", Utterance: "列出设备属性", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
 		"capabilities":    {Intent: "entity.capabilities", Utterance: "查看设备能力", EntityType: "device", TargetIDKeys: []string{"device-id", "deviceId", "id"}, TargetName: true},
@@ -148,6 +145,8 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 	},
 	"operation": {
 		"batch-configure": {Intent: "operation.batch.configure", Utterance: "批量配置添加或修改操作"},
+		"lesson-list":     {Intent: "operation.lesson.list", Utterance: "查询能力实操经验"},
+		"lesson-record":   {Intent: "operation.lesson.record", Utterance: "记录能力实操经验"},
 	},
 	"knob": {
 		"configure": {Intent: "knob.configure", Utterance: "配置旋钮", EntityType: "device", TargetIDKeys: []string{"knob-id", "knobId", "device-id", "deviceId", "id"}, TargetName: true},
@@ -174,6 +173,7 @@ var moduleCommands = map[string]map[string]moduleCommandSpec{
 	"recommendation": {
 		"feedback": {Intent: "recommendation.feedback", Utterance: "反馈推荐"},
 		"list":     {Intent: "recommendation.list", Utterance: "列出推荐"},
+		"record":   {Intent: "recommendation.record", Utterance: "保存推荐候选"},
 	},
 	"room": {
 		"area-configure": {Intent: "room.area.configure", Utterance: "调整房间区域", EntityType: "room", TargetIDKeys: []string{"room-id", "roomId", "id"}, TargetName: true},

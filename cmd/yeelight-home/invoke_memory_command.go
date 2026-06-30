@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -11,7 +10,7 @@ import (
 
 const memoryConsentVersion = "memory-v1"
 
-func (app *app) invokeMemoryRemember(request contract.Request, profile string, _ string, houseID string) (contract.Response, error) {
+func (app *app) invokeMemoryRemember(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -23,26 +22,28 @@ func (app *app) invokeMemoryRemember(request contract.Request, profile string, _
 		return memoryClarificationResponse(request, "missing_preference"), nil
 	}
 	now := time.Now().Unix()
-	consent, err := app.ensureMemoryConsent(profile, houseID, now)
+	consent, err := app.ensureMemoryConsent(profile, region, houseID, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
 	if consent.Paused {
 		return memoryBlockedResponse(request, "memory_paused", "本地学习已暂停，未写入新记忆。"), nil
 	}
-	var firstUpsert storage.PreferenceUpsertResult
-	for index, candidate := range candidates {
+	upserts := make([]storage.PreferenceUpsertResult, 0, len(candidates))
+	for _, candidate := range candidates {
 		if candidate.preferenceType == "" || candidate.preferenceValue == "" {
 			continue
 		}
 		memoryRecord := storage.PreferenceRecord{
 			Profile:         profile,
+			Region:          region,
 			HouseID:         houseID,
 			ScopeType:       candidate.scopeType,
 			ScopeRef:        candidate.scopeRef,
 			PreferenceType:  candidate.preferenceType,
 			PreferenceValue: candidate.preferenceValue,
 			Kind:            candidate.kind,
+			Status:          candidate.status,
 			Evidence:        candidate.evidence,
 			CreatedAt:       now,
 			UpdatedAt:       now,
@@ -51,20 +52,15 @@ func (app *app) invokeMemoryRemember(request contract.Request, profile string, _
 		if err != nil {
 			return contract.Response{}, err
 		}
-		if index == 0 {
-			firstUpsert = upsert
-		}
-		if err := app.ensurePreferenceRecommendation(upsert.Record, now); err != nil {
-			return contract.Response{}, err
-		}
+		upserts = append(upserts, upsert)
 	}
-	if strings.TrimSpace(firstUpsert.Record.ID) == "" {
+	if len(upserts) == 0 || strings.TrimSpace(upserts[0].Record.ID) == "" {
 		return memoryClarificationResponse(request, "missing_preference"), nil
 	}
-	return memoryRememberResponse(request, firstUpsert), nil
+	return memoryRememberResponse(request, upserts), nil
 }
 
-func (app *app) invokeMemoryList(request contract.Request, profile string, houseID string) (contract.Response, error) {
+func (app *app) invokeMemoryList(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -72,31 +68,32 @@ func (app *app) invokeMemoryList(request contract.Request, profile string, house
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
 	now := time.Now().Unix()
-	preferences, err := app.memoryStore.ListPreferences(profile, houseID)
+	preferences, err := app.memoryStore.ListPreferences(profile, region, houseID)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	consent, err := app.ensureMemoryConsent(profile, houseID, now)
+	consent, err := app.ensureMemoryConsent(profile, region, houseID, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
 	return memoryListResponse(request, houseID, consent, preferences), nil
 }
 
-func (app *app) invokeMemoryPauseResume(request contract.Request, profile string, houseID string, paused bool) (contract.Response, error) {
+func (app *app) invokeMemoryPauseResume(request contract.Request, profile string, region string, houseID string, paused bool) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
-	consent, ok, err := app.memoryStore.Consent(profile, houseID)
+	consent, ok, err := app.memoryStore.Consent(profile, region, houseID)
 	if err != nil {
 		return contract.Response{}, err
 	}
 	if !ok {
-		consent = storage.ConsentRecord{Profile: profile, HouseID: houseID, ConsentVersion: memoryConsentVersion, LearningEnabled: true}
+		consent = storage.ConsentRecord{Profile: profile, Region: region, HouseID: houseID, ConsentVersion: memoryConsentVersion, LearningEnabled: true}
 	}
+	consent.Region = region
 	consent.LearningEnabled = true
 	consent.Paused = paused
 	consent.UpdatedAt = time.Now().Unix()
@@ -106,24 +103,24 @@ func (app *app) invokeMemoryPauseResume(request contract.Request, profile string
 	return memoryPauseResumeResponse(request, consent), nil
 }
 
-func (app *app) invokeMemoryForget(request contract.Request, profile string, houseID string) (contract.Response, error) {
+func (app *app) invokeMemoryForget(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
-	exported, err := app.memoryStore.Export(profile, houseID)
+	exported, err := app.memoryStore.Export(profile, region, houseID)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if err := app.memoryStore.DeleteProfileHouse(profile, houseID); err != nil {
+	if err := app.memoryStore.DeleteProfileHouse(profile, region, houseID); err != nil {
 		return contract.Response{}, err
 	}
 	return memoryForgetResponse(request, houseID, exported), nil
 }
 
-func (app *app) invokeRecommendationList(request contract.Request, profile string, houseID string) (contract.Response, error) {
+func (app *app) invokeRecommendationList(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -131,26 +128,35 @@ func (app *app) invokeRecommendationList(request contract.Request, profile strin
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
 	now := time.Now().Unix()
-	if _, err := app.ensureMemoryConsent(profile, houseID, now); err != nil {
+	if _, err := app.ensureMemoryConsent(profile, region, houseID, now); err != nil {
 		return contract.Response{}, err
 	}
-	recommendations, err := app.memoryStore.ListRecommendations(profile, houseID, now, 1)
+	recommendations, err := app.memoryStore.ListRecommendations(profile, region, houseID, now, 1)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if len(recommendations) == 0 {
-		if err := app.ensurePreferenceRecommendations(profile, houseID, now); err != nil {
-			return contract.Response{}, err
-		}
-		recommendations, err = app.memoryStore.ListRecommendations(profile, houseID, now, 1)
-		if err != nil {
-			return contract.Response{}, err
-		}
-	}
-	return recommendationListResponse(request, houseID, recommendations), nil
+	return recommendationListResponse(request, profile, region, houseID, recommendations), nil
 }
 
-func (app *app) invokeRecommendationFeedback(request contract.Request, profile string, houseID string) (contract.Response, error) {
+func (app *app) invokeRecommendationRecord(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
+	if requestHouseID := requestHouseID(request); requestHouseID != "" {
+		houseID = requestHouseID
+	}
+	if houseID == "" {
+		return memoryClarificationResponse(request, "missing_house_id"), nil
+	}
+	record, ok := recommendationRecordFromRequest(request, profile, region, houseID, time.Now().Unix())
+	if !ok {
+		return memoryClarificationResponse(request, "missing_recommendation_candidate"), nil
+	}
+	upsert, err := app.memoryStore.UpsertRecommendation(record)
+	if err != nil {
+		return contract.Response{}, err
+	}
+	return recommendationRecordResponse(request, houseID, upsert), nil
+}
+
+func (app *app) invokeRecommendationFeedback(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
@@ -171,21 +177,22 @@ func (app *app) invokeRecommendationFeedback(request contract.Request, profile s
 		update.Status = "pending"
 		update.CooldownUntil = now + recommendationCooldownSeconds(request)
 	}
-	record, err := app.memoryStore.ApplyRecommendationFeedback(profile, houseID, recommendationID, update)
+	record, err := app.memoryStore.ApplyRecommendationFeedback(profile, region, houseID, recommendationID, update)
 	if err != nil {
 		return recommendationFeedbackBlockedResponse(request, recommendationID, "recommendation_not_found", "未找到要更新的本地推荐。"), nil
 	}
 	return recommendationFeedbackResponse(request, houseID, record), nil
 }
 
-func (app *app) ensureMemoryConsent(profile string, houseID string, now int64) (storage.ConsentRecord, error) {
-	consent, ok, err := app.memoryStore.Consent(profile, houseID)
+func (app *app) ensureMemoryConsent(profile string, region string, houseID string, now int64) (storage.ConsentRecord, error) {
+	consent, ok, err := app.memoryStore.Consent(profile, region, houseID)
 	if err != nil {
 		return storage.ConsentRecord{}, err
 	}
 	if !ok {
 		consent = storage.ConsentRecord{
 			Profile:         profile,
+			Region:          region,
 			HouseID:         houseID,
 			ConsentVersion:  memoryConsentVersion,
 			LearningEnabled: true,
@@ -197,6 +204,10 @@ func (app *app) ensureMemoryConsent(profile string, houseID string, now int64) (
 		return consent, nil
 	}
 	changed := false
+	if strings.TrimSpace(consent.Region) == "" || consent.Region != region {
+		consent.Region = region
+		changed = true
+	}
 	if strings.TrimSpace(consent.ConsentVersion) == "" {
 		consent.ConsentVersion = memoryConsentVersion
 		changed = true
@@ -237,59 +248,37 @@ func recommendationCooldownSeconds(request contract.Request) int64 {
 	return int64(value * 60 * 60)
 }
 
-func (app *app) ensurePreferenceRecommendations(profile string, houseID string, now int64) error {
-	preferences, err := app.memoryStore.ListPreferences(profile, houseID)
-	if err != nil {
-		return err
+func recommendationRecordFromRequest(request contract.Request, profile string, region string, houseID string, now int64) (storage.RecommendationRecord, bool) {
+	source := request.Parameters
+	if nested := requestMap(request.Parameters["recommendation"]); nested != nil {
+		source = nested
 	}
-	for _, preference := range preferences {
-		if err := app.ensurePreferenceRecommendation(preference, now); err != nil {
-			return err
-		}
+	recommendationType := firstRequestString(source, "type", "recommendationType")
+	explanation := firstRequestString(source, "explanation", "reason", "summary")
+	evidence := firstRequestString(source, "evidence")
+	if recommendationType == "" || explanation == "" || evidence == "" {
+		return storage.RecommendationRecord{}, false
 	}
-	return nil
-}
-
-func (app *app) ensurePreferenceRecommendation(preference storage.PreferenceRecord, now int64) error {
-	if strings.TrimSpace(preference.ID) == "" || strings.TrimSpace(preference.Profile) == "" || strings.TrimSpace(preference.HouseID) == "" {
-		return nil
+	priority, _ := requestInteger(source["priority"])
+	record := storage.RecommendationRecord{
+		ID:             firstRequestString(source, "recommendationId", "id"),
+		Profile:        profile,
+		Region:         region,
+		HouseID:        houseID,
+		Type:           recommendationType,
+		Source:         firstRequestString(source, "source", "sourceType"),
+		TargetIntent:   firstRequestString(source, "targetIntent", "intent"),
+		ScopeType:      firstRequestString(source, "scopeType"),
+		ScopeRef:       firstRequestString(source, "scopeRef", "target", "targetName"),
+		Priority:       priority,
+		Confidence:     firstRequestString(source, "confidence"),
+		ActionHint:     requestMap(source["actionHint"]),
+		ParametersHint: requestMap(source["parametersHint"]),
+		Explanation:    explanation,
+		Evidence:       evidence,
+		Status:         firstRequestString(source, "status"),
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
-	recommendationID := preferenceRecommendationID(preference.ID)
-	if _, ok, err := app.memoryStore.Recommendation(preference.Profile, preference.HouseID, recommendationID); err != nil || ok {
-		return err
-	}
-	return app.memoryStore.SaveRecommendation(storage.RecommendationRecord{
-		ID:          recommendationID,
-		Profile:     preference.Profile,
-		HouseID:     preference.HouseID,
-		Type:        "preference_based",
-		Explanation: preferenceRecommendationExplanation(preference),
-		Evidence:    preferenceRecommendationEvidence(preference),
-		Status:      "pending",
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	})
-}
-
-func preferenceRecommendationID(preferenceID string) string {
-	return "pref-" + strings.TrimSpace(preferenceID)
-}
-
-func preferenceRecommendationExplanation(preference storage.PreferenceRecord) string {
-	scope := strings.TrimSpace(preference.ScopeRef)
-	if scope == "" {
-		scope = strings.TrimSpace(preference.ScopeType)
-	}
-	if scope == "" {
-		scope = "当前家庭"
-	}
-	return fmt.Sprintf("可以按你保存的偏好调整 %s 的默认建议：%s=%s。", scope, preference.PreferenceType, preference.PreferenceValue)
-}
-
-func preferenceRecommendationEvidence(preference storage.PreferenceRecord) string {
-	evidence := strings.TrimSpace(preference.Evidence)
-	if evidence == "" {
-		evidence = "本地已确认偏好"
-	}
-	return fmt.Sprintf("来源：%s；scope=%s/%s；kind=%s", evidence, preference.ScopeType, preference.ScopeRef, preference.Kind)
+	return record, true
 }

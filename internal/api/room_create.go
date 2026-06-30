@@ -25,14 +25,15 @@ type RoomCreateRequest struct {
 }
 
 type RoomCreateResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	RoomID     string `json:"roomId"`
-	Name       string `json:"name"`
-	Created    bool   `json:"created"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	RoomID           string           `json:"roomId"`
+	Name             string           `json:"name"`
+	Created          bool             `json:"created"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type RoomCreateClient struct {
@@ -65,7 +66,7 @@ func (client RoomCreateClient) Run(ctx context.Context, request RoomCreateReques
 		return RoomCreateResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
 	apiCalls := 0
-	verifyCalls, err := client.verifyHouseScopedEntityList(ctx, houseID, credentials)
+	preflightEntities, verifyCalls, err := client.verifyHouseScopedEntityList(ctx, houseID, credentials)
 	if err != nil {
 		return RoomCreateResult{}, fmt.Errorf("verify house before room create: %w", err)
 	}
@@ -84,6 +85,12 @@ func (client RoomCreateClient) Run(ctx context.Context, request RoomCreateReques
 			Verified:   true,
 			VerifiedBy: existing.Source,
 			APICalls:   apiCalls,
+			VerifiedEntities: upsertEntityListSummary(preflightEntities, EntitySummary{
+				Type:    "room",
+				ID:      existing.ID,
+				Name:    existing.Name,
+				HouseID: houseID,
+			}),
 		}, nil
 	}
 	created, err := client.createRoom(ctx, RoomCreateRequest{
@@ -113,10 +120,16 @@ func (client RoomCreateClient) Run(ctx context.Context, request RoomCreateReques
 		Verified:   true,
 		VerifiedBy: verified.Source,
 		APICalls:   apiCalls,
+		VerifiedEntities: upsertEntityListSummary(preflightEntities, EntitySummary{
+			Type:    "room",
+			ID:      verified.ID,
+			Name:    verified.Name,
+			HouseID: houseID,
+		}),
 	}, nil
 }
 
-func (client RoomCreateClient) verifyHouseScopedEntityList(ctx context.Context, houseID string, credentials requestCredentials) (int, error) {
+func (client RoomCreateClient) verifyHouseScopedEntityList(ctx context.Context, houseID string, credentials requestCredentials) (EntityListResult, int, error) {
 	result, err := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
 		HouseID: houseID,
 		Credentials: EntityListCredentials{
@@ -125,12 +138,12 @@ func (client RoomCreateClient) verifyHouseScopedEntityList(ctx context.Context, 
 		},
 	})
 	if err != nil {
-		return result.APICalls, err
+		return result, result.APICalls, err
 	}
 	if result.APICalls > 0 {
-		return result.APICalls, nil
+		return result, result.APICalls, nil
 	}
-	return houseScopedEntityListCallCount, nil
+	return result, houseScopedEntityListCallCount, nil
 }
 
 func (client RoomCreateClient) verifyRoomByNameWithCallCount(ctx context.Context, houseID string, name string, credentials requestCredentials, attempts int, interval time.Duration) (roomSummary, int, error) {

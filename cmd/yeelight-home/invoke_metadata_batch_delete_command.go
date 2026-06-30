@@ -166,7 +166,7 @@ func metadataBatchDeleteClarificationResponse(request contract.Request, reason s
 }
 
 func (app *app) executeMetadataBatchDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.MetadataBatchDeleteKind) (contract.Response, error) {
-	items, err := metadataBatchDeleteItemsFromPlan(record.Payload)
+	items, err := metadataBatchDeleteItemsFromPreparedPayload(record.Payload)
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -187,7 +187,7 @@ func (app *app) executeMetadataBatchDelete(ctx context.Context, request contract
 	return metadataBatchDeleteExecuteResponse(request, record, result), nil
 }
 
-func metadataBatchDeleteItemsFromPlan(payload map[string]any) ([]api.MetadataBatchDeleteItem, error) {
+func metadataBatchDeleteItemsFromPreparedPayload(payload map[string]any) ([]api.MetadataBatchDeleteItem, error) {
 	rawItems, ok := payload["items"].([]any)
 	if !ok || len(rawItems) == 0 {
 		return nil, fmt.Errorf("batch delete items are required")

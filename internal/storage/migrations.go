@@ -42,19 +42,6 @@ create table if not exists explicit_preferences (
   updated_at integer not null
 );
 
-create table if not exists implicit_preference_candidates (
-  id text primary key,
-  profile text not null,
-  house_id text not null,
-  candidate_type text not null,
-  candidate_value text not null,
-  score real not null default 0,
-  evidence_ref text not null,
-  status text not null default 'candidate',
-  created_at integer not null,
-  updated_at integer not null
-);
-
 create table if not exists interaction_events (
   id text primary key,
   profile text not null,

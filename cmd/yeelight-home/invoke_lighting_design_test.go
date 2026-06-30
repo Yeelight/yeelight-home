@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestInvokeLightingDesignPlanBuildsLocalPlan(t *testing.T) {
+func TestInvokeLightingDesignPlanBuildsLocalDesignEvidence(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)

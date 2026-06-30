@@ -34,16 +34,17 @@ type SpaceOrganizationRequest struct {
 }
 
 type SpaceOrganizationResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	Capability string `json:"capability"`
-	EntityType string `json:"entityType"`
-	EntityID   string `json:"entityId"`
-	Name       string `json:"name,omitempty"`
-	RoomID     string `json:"roomId,omitempty"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	Capability       string           `json:"capability"`
+	EntityType       string           `json:"entityType"`
+	EntityID         string           `json:"entityId"`
+	Name             string           `json:"name,omitempty"`
+	RoomID           string           `json:"roomId,omitempty"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type SpaceOrganizationClient struct {
@@ -99,7 +100,7 @@ func (client SpaceOrganizationClient) Run(ctx context.Context, request SpaceOrga
 		return SpaceOrganizationResult{}, err
 	}
 	apiCalls++
-	verified, verifyCalls, err := client.verifyAfterWrite(ctx, spec, houseID, entityID, request.Payload, credentials, request.VerifyAttempts, request.VerifyInterval)
+	verified, verifiedEntities, verifyCalls, err := client.verifyAfterWrite(ctx, spec, houseID, entityID, request.Payload, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += verifyCalls
 	if err != nil {
 		return SpaceOrganizationResult{}, err
@@ -108,16 +109,17 @@ func (client SpaceOrganizationClient) Run(ctx context.Context, request SpaceOrga
 		return SpaceOrganizationResult{}, fmt.Errorf("%s write verification mismatch", request.Kind)
 	}
 	return SpaceOrganizationResult{
-		Region:     client.endpoint.Region,
-		HouseID:    houseID,
-		Capability: string(request.Kind),
-		EntityType: spec.entityType,
-		EntityID:   verified.ID,
-		Name:       verified.Name,
-		RoomID:     verified.RoomID,
-		Verified:   true,
-		VerifiedBy: "entity.list",
-		APICalls:   apiCalls,
+		Region:           client.endpoint.Region,
+		HouseID:          houseID,
+		Capability:       string(request.Kind),
+		EntityType:       spec.entityType,
+		EntityID:         verified.ID,
+		Name:             verified.Name,
+		RoomID:           verified.RoomID,
+		Verified:         true,
+		VerifiedBy:       "entity.list",
+		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 
@@ -200,7 +202,7 @@ func (client SpaceOrganizationClient) write(ctx context.Context, spec spaceOrgan
 	return nil
 }
 
-func (client SpaceOrganizationClient) verifyAfterWrite(ctx context.Context, spec spaceOrganizationSpec, houseID string, entityID string, payload map[string]any, credentials requestCredentials, attempts int, interval time.Duration) (EntitySummary, int, error) {
+func (client SpaceOrganizationClient) verifyAfterWrite(ctx context.Context, spec spaceOrganizationSpec, houseID string, entityID string, payload map[string]any, credentials requestCredentials, attempts int, interval time.Duration) (EntitySummary, EntityListResult, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -209,40 +211,44 @@ func (client SpaceOrganizationClient) verifyAfterWrite(ctx context.Context, spec
 	}
 	calls := 0
 	for attempt := 0; attempt < attempts; attempt++ {
-		entity, readCalls, err := client.findEntityAfterSpaceWrite(ctx, spec, houseID, entityID, credentials)
+		entity, entities, readCalls, err := client.findEntityAfterSpaceWrite(ctx, spec, houseID, entityID, credentials)
 		calls += readCalls
 		if err != nil {
-			return EntitySummary{}, calls, err
+			return EntitySummary{}, entities, calls, err
 		}
 		if entityMatchesSpacePayload(entity, spec, payload) || attempt == attempts-1 {
 			if entityMatchesSpacePayload(entity, spec, payload) {
-				return entity, calls, nil
+				return entity, entities, calls, nil
 			}
-			return EntitySummary{}, calls, nil
+			return EntitySummary{}, entities, calls, nil
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return EntitySummary{}, calls, ctx.Err()
+			return EntitySummary{}, entities, calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return EntitySummary{}, calls, nil
+	return EntitySummary{}, EntityListResult{}, calls, nil
 }
 
-func (client SpaceOrganizationClient) findEntityAfterSpaceWrite(ctx context.Context, spec spaceOrganizationSpec, houseID string, entityID string, credentials requestCredentials) (EntitySummary, int, error) {
+func (client SpaceOrganizationClient) findEntityAfterSpaceWrite(ctx context.Context, spec spaceOrganizationSpec, houseID string, entityID string, credentials requestCredentials) (EntitySummary, EntityListResult, int, error) {
 	if spec.kind == SpaceOrganizationGroupUpdate {
 		entity, calls, err := client.findGroupDetailEntity(ctx, houseID, entityID, credentials)
 		if err == nil && entity.ID != "" {
-			return entity, calls, nil
+			entities, listCalls, listErr := client.listEntities(ctx, houseID, credentials)
+			if listErr != nil {
+				return entity, entities, calls + listCalls, nil
+			}
+			return entity, upsertEntityListSummary(entities, entity), calls + listCalls, nil
 		}
 		if err != nil {
-			fallback, fallbackCalls, fallbackErr := client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
+			fallback, entities, fallbackCalls, fallbackErr := client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
 			if fallbackErr != nil {
-				return EntitySummary{}, calls + fallbackCalls, err
+				return EntitySummary{}, entities, calls + fallbackCalls, err
 			}
-			return fallback, calls + fallbackCalls, nil
+			return fallback, entities, calls + fallbackCalls, nil
 		}
 	}
 	return client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
@@ -281,13 +287,13 @@ func groupDetailItem(data any) map[string]any {
 	}
 }
 
-func (client SpaceOrganizationClient) findEntity(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials) (EntitySummary, int, error) {
+func (client SpaceOrganizationClient) findEntity(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials) (EntitySummary, EntityListResult, int, error) {
 	result, calls, err := client.listEntities(ctx, houseID, credentials)
 	if err != nil {
-		return EntitySummary{}, calls, err
+		return EntitySummary{}, result, calls, err
 	}
 	entity, _ := findSpaceEntity(result, entityType, entityID)
-	return entity, calls, nil
+	return entity, result, calls, nil
 }
 
 func (client SpaceOrganizationClient) listEntities(ctx context.Context, houseID string, credentials requestCredentials) (EntityListResult, int, error) {

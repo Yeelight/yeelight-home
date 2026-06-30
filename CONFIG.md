@@ -136,10 +136,10 @@ Resource groups exposed by the CLI:
 | Space and entities | `room list`, `room batch-create`, `area update`, `group structure`, `entity list`, `entity rename-batch` |
 | Devices and gateways | `device detail`, `device attrs`, `device move-room-batch`, `gateway thread`, `gateway stats`, `meshgroup detail` |
 | Scenes and automations | `scene execute`, `scene batch-delete`, `automation supported-v2`, `automation enable`, `schedule jobs` |
-| Lighting and controls | `light on`, `light brightness-adjust`, `lighting plan`, `lighting apply`, `behavior execute` |
+| Lighting and controls | `light on`, `light brightness-adjust`, `light ct`, `light color`, `lighting plan`, `lighting apply` |
 | Panels and sensors | `panel screen-controls`, `panel button-event-update`, `knob configure`, `sensor events`, `screen controls` |
 | Knowledge and maintenance | `thing products`, `thing schema-get`, `thing faqs`, `upgrade files`, `progress get`, `message list` |
-| Local intelligence | `memory remember`, `memory list`, `recommendation feedback`, `ai-voice products` |
+| Local intelligence | `memory remember`, `memory list`, `recommendation record`, `recommendation feedback`, `ai-voice products` |
 
 For less common intent fields, use `--params-json` or `--set key=value`:
 

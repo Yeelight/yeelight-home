@@ -40,7 +40,7 @@ func lightPropertySetResponse(request contract.Request, entities api.EntityListR
 			TraceID:         strings.TrimSuffix(traceID, "-command") + "-verification-mismatch",
 			Metrics: map[string]any{
 				"apiCalls":  entityListAPICalls(entities) + devicePropertySetAPICalls(execution) + stateQueryAPICalls(verification),
-				"cacheHits": 0,
+				"cacheHits": topologyCacheHits(entities),
 			},
 			Error: &contract.Error{
 				Code:    "write_verification_mismatch",
@@ -58,7 +58,7 @@ func lightPropertySetResponse(request contract.Request, entities api.EntityListR
 		TraceID:         traceID,
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(entities) + devicePropertySetAPICalls(execution) + stateQueryAPICalls(verification),
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(entities),
 		},
 	}
 }
@@ -89,7 +89,7 @@ func lightAdjustResponse(request contract.Request, entities api.EntityListResult
 			TraceID:         strings.TrimSuffix(traceID, "-command") + "-verification-mismatch",
 			Metrics: map[string]any{
 				"apiCalls":  entityListAPICalls(entities) + stateQueryAPICalls(before) + devicePropertyAdjustAPICalls(execution) + stateQueryAPICalls(verification),
-				"cacheHits": 0,
+				"cacheHits": topologyCacheHits(entities),
 			},
 			Error: &contract.Error{
 				Code:    "write_verification_mismatch",
@@ -107,7 +107,7 @@ func lightAdjustResponse(request contract.Request, entities api.EntityListResult
 		TraceID:         traceID,
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(entities) + stateQueryAPICalls(before) + devicePropertyAdjustAPICalls(execution) + stateQueryAPICalls(verification),
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(entities),
 		},
 	}
 }
@@ -130,7 +130,7 @@ func lightAdjustUnsupportedStateResponse(request contract.Request, entities api.
 		TraceID:  strings.TrimSuffix(traceID, "-command") + "-unsupported-state",
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(entities) + stateQueryAPICalls(before),
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(entities),
 		},
 		Error: &contract.Error{
 			Code:    "non_numeric_state",

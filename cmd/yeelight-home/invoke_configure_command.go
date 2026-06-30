@@ -83,7 +83,7 @@ func (app *app) prepareMetadataCreate(ctx context.Context, request contract.Requ
 	if reason := validateConfigureCreatePayload(spec.entityType, payload, entities); reason != "" {
 		return configureClarificationResponseWithGuide(request, reason, spec.acceptedFields, payloadGuideForIntent(request.Intent)), nil
 	}
-	name := planPayloadString(payload, "name")
+	name := executionPayloadString(payload, "name")
 	for _, entity := range entities.Entities {
 		if entity.Type == spec.entityType && entity.Name == name {
 			return metadataCreateAlreadyExistsResponse(request, entities, entity, spec.entityLabel), nil
@@ -251,12 +251,12 @@ func (app *app) executePreparedExecution(ctx context.Context, request contract.R
 }
 
 func (app *app) executeRoomCreate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
-	roomName := planPayloadString(record.Payload, "name")
+	roomName := executionPayloadString(record.Payload, "name")
 	result, err := api.NewRoomCreateClient(endpoint, nil).Run(ctx, api.RoomCreateRequest{
 		HouseID:        record.HouseID,
 		Name:           roomName,
-		Description:    planPayloadString(record.Payload, "desc"),
-		Icon:           planPayloadString(record.Payload, "icon"),
+		Description:    executionPayloadString(record.Payload, "desc"),
+		Icon:           executionPayloadString(record.Payload, "icon"),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.RoomCreateCredentials{
@@ -310,7 +310,7 @@ func roomCreateName(request contract.Request) string {
 	return firstRequestString(request.Parameters, "name", "roomName", "room_name")
 }
 
-func planPayloadString(payload map[string]any, key string) string {
+func executionPayloadString(payload map[string]any, key string) string {
 	value, ok := payload[key]
 	if !ok {
 		return ""

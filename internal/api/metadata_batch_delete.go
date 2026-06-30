@@ -33,15 +33,16 @@ type MetadataBatchDeleteItem struct {
 }
 
 type MetadataBatchDeleteResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	Capability string `json:"capability"`
-	EntityType string `json:"entityType"`
-	ItemCount  int    `json:"itemCount"`
-	Results    []any  `json:"results"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	Capability       string           `json:"capability"`
+	EntityType       string           `json:"entityType"`
+	ItemCount        int              `json:"itemCount"`
+	Results          []any            `json:"results"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type MetadataBatchDeleteClient struct {
@@ -70,6 +71,7 @@ func (client MetadataBatchDeleteClient) Run(ctx context.Context, request Metadat
 	}
 	results := make([]any, 0, len(request.Items))
 	apiCalls := 0
+	var verifiedEntities EntityListResult
 	for _, item := range request.Items {
 		entityID := strings.TrimSpace(item.EntityID)
 		if entityID == "" {
@@ -87,6 +89,9 @@ func (client MetadataBatchDeleteClient) Run(ctx context.Context, request Metadat
 		if err != nil {
 			return MetadataBatchDeleteResult{}, err
 		}
+		if result.VerifiedEntities.Total > 0 {
+			verifiedEntities = result.VerifiedEntities
+		}
 		results = append(results, map[string]any{
 			"entityType": result.EntityType,
 			"entityId":   result.EntityID,
@@ -96,15 +101,16 @@ func (client MetadataBatchDeleteClient) Run(ctx context.Context, request Metadat
 		})
 	}
 	return MetadataBatchDeleteResult{
-		Region:     client.endpoint.Region,
-		HouseID:    houseID,
-		Capability: string(request.Kind),
-		EntityType: entityType,
-		ItemCount:  len(request.Items),
-		Results:    results,
-		Verified:   true,
-		VerifiedBy: "entity.list",
-		APICalls:   apiCalls,
+		Region:           client.endpoint.Region,
+		HouseID:          houseID,
+		Capability:       string(request.Kind),
+		EntityType:       entityType,
+		ItemCount:        len(request.Items),
+		Results:          results,
+		Verified:         true,
+		VerifiedBy:       "entity.list",
+		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 

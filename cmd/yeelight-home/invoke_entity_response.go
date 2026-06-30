@@ -50,7 +50,7 @@ func entityGetResponse(request contract.Request, result api.EntityListResult, en
 		TraceID:  "entity-get-readonly",
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(result),
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(result),
 		},
 	}
 }
@@ -109,7 +109,7 @@ func entityCapabilitiesResponse(request contract.Request, result api.EntityListR
 		TraceID:  "entity-capabilities-readonly",
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(result),
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(result),
 		},
 	}
 }
@@ -141,7 +141,7 @@ func entityDeviceCapabilitiesResponse(request contract.Request, result api.Entit
 		TraceID:  "entity-capabilities-readonly",
 		Metrics: map[string]any{
 			"apiCalls":  entityListAPICalls(result) + 1,
-			"cacheHits": 0,
+			"cacheHits": topologyCacheHits(result),
 		},
 	}
 }
@@ -297,6 +297,9 @@ func addString(item map[string]any, key string, value string) {
 }
 
 func entityListAPICalls(result api.EntityListResult) int {
+	if topologyCacheHits(result) > 0 {
+		return 0
+	}
 	if result.APICalls > 0 {
 		return result.APICalls
 	}
@@ -320,6 +323,8 @@ type entityGetTarget struct {
 	id         string
 	name       string
 	entityType string
+	roomID     string
+	roomName   string
 }
 
 func (target entityGetTarget) toMap() map[string]any {
@@ -333,29 +338,108 @@ func (target entityGetTarget) toMap() map[string]any {
 	if target.entityType != "" {
 		result["entityType"] = target.entityType
 	}
+	if target.roomID != "" {
+		result["roomId"] = target.roomID
+	}
+	if target.roomName != "" {
+		result["roomName"] = target.roomName
+	}
 	return result
 }
 
 func entityGetTargetFromRequest(request contract.Request) entityGetTarget {
+	targetEntityType := firstRequestString(request.Parameters, "entityType", "type")
+	if targetEntityType == "" {
+		targetEntityType = entityTypeFromIntent(request.Intent)
+	}
+	targetID := firstRequestString(request.Parameters,
+		"entityId", "entityID", "deviceId", "deviceID", "areaId", "areaID",
+		"groupId", "groupID", "sceneId", "sceneID", "automationId", "automationID", "gatewayId", "gatewayID", "id",
+	)
+	roomID := firstRequestString(request.Parameters, "targetRoomId", "targetRoomID", "roomId", "roomID")
+	if targetEntityType == "room" {
+		targetID = firstNonEmptyString(targetID, roomID)
+	}
+	targetName := firstRequestString(request.Parameters, "entityName", "deviceName", "areaName", "groupName", "sceneName", "automationName", "gatewayName", "name")
+	roomName := firstRequestString(request.Parameters, "targetRoomName", "roomName")
+	if targetEntityType == "room" {
+		targetName = firstNonEmptyString(targetName, roomName)
+	}
 	target := entityGetTarget{
-		id: firstRequestString(request.Parameters,
-			"entityId", "entityID", "deviceId", "deviceID", "roomId", "roomID", "areaId", "areaID",
-			"groupId", "groupID", "sceneId", "sceneID", "automationId", "automationID", "gatewayId", "gatewayID", "id",
-		),
-		name:       firstRequestString(request.Parameters, "entityName", "deviceName", "roomName", "areaName", "groupName", "sceneName", "automationName", "gatewayName", "name"),
-		entityType: firstRequestString(request.Parameters, "entityType", "type"),
+		id:         targetID,
+		name:       targetName,
+		entityType: targetEntityType,
+		roomID:     roomID,
+		roomName:   roomName,
 	}
 	if target.entityType == "" {
 		target.entityType = entityTypeFromTargetParameters(request.Parameters)
 	}
+	if target.entityType == "" && target.name == "" && target.id == "" {
+		target.name = roomName
+		target.entityType = "room"
+	}
 	if len(request.Targets) == 0 {
 		return target
 	}
-	firstTarget := request.Targets[0]
+	firstTarget, roomTarget := selectEntityTarget(request.Targets, target.entityType)
+	if firstTarget == nil {
+		firstTarget = request.Targets[0]
+	}
+	if roomTarget != nil {
+		target.roomID = firstNonEmptyString(firstRequestString(roomTarget, "id", "entityId", "entityID", "roomId", "roomID"), target.roomID)
+		target.roomName = firstNonEmptyString(firstRequestString(roomTarget, "name", "entityName", "roomName"), target.roomName)
+	}
 	return entityGetTarget{
 		id:         firstNonEmptyString(firstRequestString(firstTarget, "id", "entityId", "entityID"), target.id),
 		name:       firstNonEmptyString(firstRequestString(firstTarget, "name", "entityName"), target.name),
 		entityType: firstNonEmptyString(firstRequestString(firstTarget, "entityType", "type"), target.entityType),
+		roomID:     firstNonEmptyString(firstRequestString(firstTarget, "roomId", "roomID", "targetRoomId", "targetRoomID"), target.roomID),
+		roomName:   firstNonEmptyString(firstRequestString(firstTarget, "roomName", "targetRoomName"), target.roomName),
+	}
+}
+
+func selectEntityTarget(targets []map[string]any, preferredType string) (map[string]any, map[string]any) {
+	var roomTarget map[string]any
+	var firstNonRoom map[string]any
+	for _, target := range targets {
+		entityType := firstRequestString(target, "entityType", "type")
+		if entityType == "room" {
+			if roomTarget == nil {
+				roomTarget = target
+			}
+			continue
+		}
+		if firstNonRoom == nil {
+			firstNonRoom = target
+		}
+		if preferredType != "" && entityType == preferredType {
+			return target, roomTarget
+		}
+	}
+	if preferredType == "room" && roomTarget != nil {
+		return roomTarget, roomTarget
+	}
+	return firstNonRoom, roomTarget
+}
+
+func entityTypeFromIntent(intent string) string {
+	switch intent {
+	case "state.query",
+		"light.power.set",
+		"light.brightness.set",
+		"light.brightness.adjust",
+		"light.color_temperature.set",
+		"light.color_temperature.adjust",
+		"light.color.set",
+		"lighting.experience.apply":
+		return "device"
+	case "scene.execute", "scene.test":
+		return "scene"
+	case "entity.get", "entity.capabilities":
+		return ""
+	default:
+		return ""
 	}
 }
 
@@ -365,7 +449,6 @@ func entityTypeFromTargetParameters(parameters map[string]any) string {
 		entityType string
 	}{
 		{[]string{"deviceId", "deviceID", "gatewayId", "gatewayID"}, "device"},
-		{[]string{"roomId", "roomID"}, "room"},
 		{[]string{"areaId", "areaID"}, "area"},
 		{[]string{"groupId", "groupID"}, "group"},
 		{[]string{"sceneId", "sceneID"}, "scene"},
@@ -384,25 +467,80 @@ func findEntity(target entityGetTarget, entities []api.EntitySummary) (api.Entit
 	candidates := make([]api.EntitySummary, 0)
 	if target.id != "" {
 		for _, entity := range entities {
-			if entity.ID == target.id && entityTypeMatches(target.entityType, entity.Type) {
+			if entity.ID == target.id && entityTypeMatches(target.entityType, entity.Type) && entityRoomMatches(target, entity, entities) {
 				return entity, []api.EntitySummary{entity}, "id"
 			}
 		}
 		return api.EntitySummary{}, candidates, "id"
 	}
 	for _, entity := range entities {
-		if entity.Name == target.name && entityTypeMatches(target.entityType, entity.Type) {
+		if entity.Name == target.name && entityTypeMatches(target.entityType, entity.Type) && entityRoomMatches(target, entity, entities) {
 			candidates = append(candidates, entity)
 		}
 	}
 	if len(candidates) == 1 {
 		return candidates[0], candidates, "name"
 	}
+	if target.name != "" && len(candidates) == 0 {
+		for _, entity := range entities {
+			if entityNameLooselyMatches(target.name, entity.Name) && entityTypeMatches(target.entityType, entity.Type) && entityRoomMatches(target, entity, entities) {
+				candidates = append(candidates, entity)
+			}
+		}
+		if len(candidates) == 1 {
+			return candidates[0], candidates, "fuzzy_name"
+		}
+	}
 	return api.EntitySummary{}, candidates, "name"
 }
 
 func entityTypeMatches(expected string, actual string) bool {
 	return expected == "" || expected == actual
+}
+
+func entityRoomMatches(target entityGetTarget, entity api.EntitySummary, entities []api.EntitySummary) bool {
+	if strings.TrimSpace(target.roomID) == "" && strings.TrimSpace(target.roomName) == "" {
+		return true
+	}
+	if entity.Type == "room" {
+		if target.roomID != "" {
+			return entity.ID == target.roomID
+		}
+		return entityNameLooselyMatches(target.roomName, entity.Name)
+	}
+	if target.roomID != "" {
+		return entity.RoomID == target.roomID
+	}
+	roomID := roomIDByName(target.roomName, entities)
+	return roomID != "" && entity.RoomID == roomID
+}
+
+func roomIDByName(roomName string, entities []api.EntitySummary) string {
+	matches := []api.EntitySummary{}
+	for _, entity := range entities {
+		if entity.Type == "room" && entityNameLooselyMatches(roomName, entity.Name) {
+			matches = append(matches, entity)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0].ID
+	}
+	return ""
+}
+
+func entityNameLooselyMatches(targetName string, entityName string) bool {
+	target := normalizeEntitySearchText(targetName)
+	name := normalizeEntitySearchText(entityName)
+	if target == "" || name == "" {
+		return false
+	}
+	return target == name || strings.Contains(name, target) || strings.Contains(target, name)
+}
+
+func normalizeEntitySearchText(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	replacer := strings.NewReplacer(" ", "", "\t", "", "\n", "", "_", "", "-", "", "的", "")
+	return replacer.Replace(value)
 }
 
 func firstRequestString(values map[string]any, keys ...string) string {

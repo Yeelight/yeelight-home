@@ -25,7 +25,7 @@ The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-
 | Area | Examples |
 | --- | --- |
 | Home topology | homes, rooms, areas, groups, gateways, panels, knobs, sensors, unified entities |
-| Device control | light power, brightness, color temperature, color, behavior execution, state query |
+| Device control | light power, brightness, color temperature, RGB color, state query |
 | Organization writes | room/device naming, room movement, favorites, home sorting, panel/knob configuration |
 | Scenes and automations | list, detail, execute, create/update/delete, enable/disable, verification |
 | Product knowledge | `product.pedia.search`, manuals and FAQ candidates, thing-model schema and product definitions |
@@ -163,6 +163,16 @@ yeelight-home help scene execute
 yeelight-home help light brightness
 ```
 
+For machine-readable intent contracts, use `intent schema` or the `explain` shortcut:
+
+```sh
+yeelight-home intent explain --intent scene.update --json
+yeelight-home intent schema --intent lighting.design.import --json
+yeelight-home explain lighting.design.import --json
+```
+
+These commands are offline. They print the SkillRequest envelope, accepted parameter keys, nested payload shape, examples, and nextStep hints so Skills and traditional programs do not need to guess large JSON fields such as HouseMeta, scene `details`, automation `params`, panel button events, or batch operations.
+
 For uncommon fields, pass advanced parameters without dropping to raw stdin:
 
 ```sh
@@ -190,13 +200,17 @@ yeelight-home product search --product-model YP-0117 --json
 
 ```sh
 yeelight-home memory remember --house-id <house-id> --set scopeType=room,scopeRef=客厅,preferenceType=brightness,preferenceValue=45 --json
+yeelight-home memory remember --house-id <house-id> --params-json '{"preferences":[{"scopeType":"profile","preferenceType":"ambience","preferenceValue":"prefer_romantic_warm","evidence":"user explicitly asked to remember romantic ambience"},{"scopeType":"profile","preferenceType":"product_preference","preferenceValue":"prefer_premium_luxury","evidence":"user explicitly asked to remember premium product positioning"}]}' --json
+yeelight-home recommendation record --house-id <house-id> --params-json '{"type":"automation","source":"ai_skill","targetIntent":"automation.create","scopeType":"room","scopeRef":"主卧","explanation":"Create a warm evening automation from the saved romantic ambience preference.","evidence":"Saved memory ambience=prefer_romantic_warm"}' --json
 yeelight-home recommendation list --house-id <house-id> --json
 yeelight-home recommendation feedback --params-json '{"recommendationId":"<id>","feedback":"cooldown","cooldownHours":24}' --json
 ```
 
-Local memory and recommendations are enabled by default for every profile and home scope. `memory pause` is the explicit opt-out switch, and `memory resume` turns local learning back on. `memory remember` directly upserts a local preference, merges near-duplicate meanings, and may materialize one preference-based recommendation. `recommendation list` returns only Runtime-backed recommendations. Feedback such as `accepted`, `dismissed`, `rejected`, or `cooldown` is stored locally and respected by later recommendation reads.
+Local memory and recommendations are enabled by default for every `profile + region + houseId` scope. `memory pause` is the explicit opt-out switch, and `memory resume` turns local learning back on. `memory remember` directly upserts one structured local preference or multiple structured preferences in `parameters.preferences[]`. `recommendation record` directly upserts a caller-authored structured candidate; the Runtime only validates, stores, deduplicates, ranks, lists, and records feedback. Recommendation judgment belongs to the caller/Skill, not the Runtime. Feedback such as `accepted`, `dismissed`, `rejected`, or `cooldown` is stored locally and respected by later recommendation reads.
 
-The Runtime does not store full conversation logs as memory. It stores only explicit local preferences, and it can extract conservative preference candidates from utterances such as "remember that I prefer warm dim light in the bedroom" when the Skill sends `memory.remember`. Near-duplicate preferences such as "warm soft light" and "warmer" are normalized and merged instead of duplicated.
+The Runtime does not store full conversation logs as memory and does not interpret subjective natural-language preferences. Callers such as Skills must pass structured fields such as `scopeType`, `scopeRef`, `preferenceType`, `preferenceValue`, and `evidence`. If callers want "warm soft light" and "warmer" to be the same memory, they should pass the same canonical `preferenceValue`; Runtime then merges exact same structured preferences and evidence instead of duplicating them.
+
+The JSON store is sharded under `~/.yeelight-home/data/memory/<profile>/<region>/<houseId>.json`. Each shard and export carries namespace metadata with `accountProfile`, `profile`, `region`, `houseId`, and `dataType`. Interaction signals are coarse counters with `intent` and response `status` evidence only; user utterances are not stored as signal evidence. Accepted, dismissed, or rejected recommendation evidence and interaction signals are compacted after the local retention window, while explicit preferences remain until the user forgets them.
 
 ### `doctor`
 

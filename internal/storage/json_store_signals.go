@@ -6,19 +6,16 @@ import (
 )
 
 type InteractionSignalRecord struct {
-	ID              string `json:"id"`
-	Profile         string `json:"profile"`
-	HouseID         string `json:"houseId"`
-	SignalType      string `json:"signalType"`
-	SignalKey       string `json:"signalKey"`
-	ScopeType       string `json:"scopeType,omitempty"`
-	ScopeRef        string `json:"scopeRef,omitempty"`
-	PreferenceType  string `json:"preferenceType,omitempty"`
-	PreferenceValue string `json:"preferenceValue,omitempty"`
-	Evidence        string `json:"evidence,omitempty"`
-	Count           int    `json:"count"`
-	FirstSeenAt     int64  `json:"firstSeenAt"`
-	LastSeenAt      int64  `json:"lastSeenAt"`
+	ID          string `json:"id"`
+	Profile     string `json:"profile"`
+	Region      string `json:"region,omitempty"`
+	HouseID     string `json:"houseId"`
+	SignalType  string `json:"signalType"`
+	SignalKey   string `json:"signalKey"`
+	Evidence    string `json:"evidence,omitempty"`
+	Count       int    `json:"count"`
+	FirstSeenAt int64  `json:"firstSeenAt"`
+	LastSeenAt  int64  `json:"lastSeenAt"`
 }
 
 func (store JSONStore) SaveInteractionSignal(record InteractionSignalRecord) (InteractionSignalRecord, error) {
@@ -28,10 +25,11 @@ func (store JSONStore) SaveInteractionSignal(record InteractionSignalRecord) (In
 	if strings.TrimSpace(record.ID) == "" || strings.TrimSpace(record.Profile) == "" || strings.TrimSpace(record.HouseID) == "" {
 		return InteractionSignalRecord{}, errors.New("interaction signal id, profile and houseId are required")
 	}
+	record.Region = normalizeStorageRegion(record.Region)
 	if record.Count <= 0 {
 		record.Count = 1
 	}
-	document, err := store.load()
+	document, err := store.loadScope(record.Profile, record.Region, record.HouseID)
 	if err != nil {
 		return InteractionSignalRecord{}, err
 	}
@@ -46,39 +44,29 @@ func (store JSONStore) SaveInteractionSignal(record InteractionSignalRecord) (In
 			record.Count = existing.Count + 1
 		}
 		document.Signals[index] = record
-		if err := store.save(document); err != nil {
+		if err := store.saveScope(record.Profile, record.Region, record.HouseID, document); err != nil {
 			return InteractionSignalRecord{}, err
 		}
 		return record, nil
 	}
 	document.Signals = append(document.Signals, record)
-	if err := store.save(document); err != nil {
+	if err := store.saveScope(record.Profile, record.Region, record.HouseID, document); err != nil {
 		return InteractionSignalRecord{}, err
 	}
 	return record, nil
 }
 
-func (store JSONStore) ListInteractionSignals(profile string, houseID string) ([]InteractionSignalRecord, error) {
-	document, err := store.load()
+func (store JSONStore) ListInteractionSignals(profile string, region string, houseID string) ([]InteractionSignalRecord, error) {
+	region = normalizeStorageRegion(region)
+	document, err := store.loadScope(profile, region, houseID)
 	if err != nil {
 		return nil, err
 	}
 	result := []InteractionSignalRecord{}
 	for _, record := range document.Signals {
-		if record.Profile == profile && record.HouseID == houseID {
+		if record.Profile == profile && sameStorageRegion(record.Region, region) && record.HouseID == houseID {
 			result = append(result, record)
 		}
 	}
 	return result, nil
-}
-
-func filterSignals(records []InteractionSignalRecord, profile string, houseID string) []InteractionSignalRecord {
-	result := []InteractionSignalRecord{}
-	for _, record := range records {
-		if record.Profile == profile && record.HouseID == houseID {
-			continue
-		}
-		result = append(result, record)
-	}
-	return result
 }

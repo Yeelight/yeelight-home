@@ -92,6 +92,10 @@ func TestInvokeOperationBatchConfigureExecutesDirectly(t *testing.T) {
 	if result["stepCount"] != float64(2) {
 		t.Fatalf("result = %#v", result)
 	}
+	metrics := response["metrics"].(map[string]any)
+	if metrics["topologyCacheRefreshApiCalls"] != float64(0) || metrics["topologyCacheWriteSource"] != "write_verification" {
+		t.Fatalf("metrics = %#v", metrics)
+	}
 }
 
 func TestInvokeOperationBatchConfigureRejectsStrictDeleteIntent(t *testing.T) {

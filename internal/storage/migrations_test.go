@@ -23,13 +23,15 @@ func TestMemoryMigrationsIncludePrivacyConsentAndPreferenceTables(t *testing.T) 
 	for _, table := range []string{
 		"privacy_consents",
 		"explicit_preferences",
-		"implicit_preference_candidates",
 		"interaction_events",
 		"recommendations",
 	} {
 		if !strings.Contains(sql, "create table if not exists "+table) {
 			t.Fatalf("missing table %s in migrations:\n%s", table, sql)
 		}
+	}
+	if strings.Contains(sql, "implicit_preference_candidates") {
+		t.Fatalf("runtime storage must not create subjective implicit memory candidate tables:\n%s", sql)
 	}
 }
 

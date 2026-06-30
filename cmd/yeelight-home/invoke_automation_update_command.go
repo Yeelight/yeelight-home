@@ -39,7 +39,7 @@ func (app *app) prepareAutomationUpdate(ctx context.Context, request contract.Re
 	if reason := validateAutomationUpdatePayload(payload, entities); reason != "" {
 		return automationUpdateClarificationResponse(request, reason), nil
 	}
-	summaryName := planPayloadString(payload, "name")
+	summaryName := executionPayloadString(payload, "name")
 	if summaryName == "" {
 		summaryName = automation.Name
 	}
@@ -129,7 +129,7 @@ func automationUpdateAcceptedFields() []string {
 func (app *app) executeAutomationUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewAutomationUpdateClient(endpoint, nil).Run(ctx, api.AutomationUpdateRequest{
 		HouseID:        record.HouseID,
-		AutomationID:   planPayloadString(record.Payload, "automationId"),
+		AutomationID:   executionPayloadString(record.Payload, "automationId"),
 		Payload:        record.Payload,
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,

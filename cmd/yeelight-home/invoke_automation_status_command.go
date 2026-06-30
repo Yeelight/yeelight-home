@@ -50,27 +50,18 @@ func (app *app) prepareAutomationStatus(ctx context.Context, request contract.Re
 }
 
 func automationStatusTarget(request contract.Request, entities api.EntityListResult) (api.EntitySummary, string) {
-	targetID := firstRequestString(request.Parameters, "automationId", "id", "entityId")
-	targetName := firstRequestString(request.Parameters, "name", "automationName")
-	if targetID == "" && targetName == "" {
+	target := entityGetTargetFromRequest(request)
+	if target.entityType == "" {
+		target.entityType = "automation"
+	}
+	if target.id == "" && target.name == "" {
 		return api.EntitySummary{}, "missing_automation_target"
 	}
-	matches := []api.EntitySummary{}
-	for _, entity := range entities.Entities {
-		if entity.Type != "automation" {
-			continue
-		}
-		if targetID != "" && entity.ID == targetID {
-			return entity, ""
-		}
-		if targetID == "" && targetName != "" && entity.Name == targetName {
-			matches = append(matches, entity)
-		}
+	match, candidates, _ := findEntity(target, entities.Entities)
+	if match.ID != "" {
+		return match, ""
 	}
-	if len(matches) == 1 {
-		return matches[0], ""
-	}
-	if len(matches) > 1 {
+	if len(candidates) > 1 && target.id == "" {
 		return api.EntitySummary{}, "ambiguous_automation_target"
 	}
 	return api.EntitySummary{}, "invalid_automation_reference"
@@ -98,7 +89,7 @@ func (app *app) executeAutomationStatus(ctx context.Context, request contract.Re
 	result, err := api.NewAutomationStatusClient(endpoint, nil).Run(ctx, api.AutomationStatusRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
-		AutomationID:   planPayloadString(record.Payload, "automationId"),
+		AutomationID:   executionPayloadString(record.Payload, "automationId"),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.AutomationStatusCredentials{

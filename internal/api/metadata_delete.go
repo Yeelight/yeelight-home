@@ -33,15 +33,16 @@ type MetadataDeleteRequest struct {
 }
 
 type MetadataDeleteResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	Capability string `json:"capability"`
-	EntityType string `json:"entityType"`
-	EntityID   string `json:"entityId"`
-	Name       string `json:"name,omitempty"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	Capability       string           `json:"capability"`
+	EntityType       string           `json:"entityType"`
+	EntityID         string           `json:"entityId"`
+	Name             string           `json:"name,omitempty"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type MetadataDeleteClient struct {
@@ -92,7 +93,7 @@ func (client MetadataDeleteClient) Run(ctx context.Context, request MetadataDele
 		return MetadataDeleteResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
 	apiCalls := 0
-	before, preflightCalls, err := client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
+	before, _, preflightCalls, err := client.findEntity(ctx, houseID, spec.entityType, entityID, credentials)
 	apiCalls += preflightCalls
 	if err != nil {
 		return MetadataDeleteResult{}, err
@@ -110,7 +111,7 @@ func (client MetadataDeleteClient) Run(ctx context.Context, request MetadataDele
 	if !isBusinessOK(response) {
 		return MetadataDeleteResult{}, fmt.Errorf("%s returned non-success business response: code=%s message=%s dataType=%s", spec.kind, responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
-	deleted, verifyCalls, err := client.verifyDeleted(ctx, houseID, spec.entityType, entityID, credentials, request.VerifyAttempts, request.VerifyInterval)
+	deleted, verifiedEntities, verifyCalls, err := client.verifyDeleted(ctx, houseID, spec.entityType, entityID, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += verifyCalls
 	if err != nil {
 		return MetadataDeleteResult{}, err
@@ -119,19 +120,20 @@ func (client MetadataDeleteClient) Run(ctx context.Context, request MetadataDele
 		return MetadataDeleteResult{}, fmt.Errorf("%s delete verification mismatch", spec.kind)
 	}
 	return MetadataDeleteResult{
-		Region:     client.endpoint.Region,
-		HouseID:    houseID,
-		Capability: string(spec.kind),
-		EntityType: spec.entityType,
-		EntityID:   before.ID,
-		Name:       before.Name,
-		Verified:   true,
-		VerifiedBy: "entity.list",
-		APICalls:   apiCalls,
+		Region:           client.endpoint.Region,
+		HouseID:          houseID,
+		Capability:       string(spec.kind),
+		EntityType:       spec.entityType,
+		EntityID:         before.ID,
+		Name:             before.Name,
+		Verified:         true,
+		VerifiedBy:       "entity.list",
+		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 
-func (client MetadataDeleteClient) findEntity(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials) (EntitySummary, int, error) {
+func (client MetadataDeleteClient) findEntity(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials) (EntitySummary, EntityListResult, int, error) {
 	result, err := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
 		HouseID: houseID,
 		Credentials: EntityListCredentials{
@@ -140,17 +142,17 @@ func (client MetadataDeleteClient) findEntity(ctx context.Context, houseID strin
 		},
 	})
 	if err != nil {
-		return EntitySummary{}, result.APICalls, err
+		return EntitySummary{}, result, result.APICalls, err
 	}
 	for _, entity := range result.Entities {
 		if entity.Type == entityType && entity.ID == entityID {
-			return entity, result.APICalls, nil
+			return entity, result, result.APICalls, nil
 		}
 	}
-	return EntitySummary{}, result.APICalls, nil
+	return EntitySummary{}, result, result.APICalls, nil
 }
 
-func (client MetadataDeleteClient) verifyDeleted(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
+func (client MetadataDeleteClient) verifyDeleted(ctx context.Context, houseID string, entityType string, entityID string, credentials requestCredentials, attempts int, interval time.Duration) (bool, EntityListResult, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -159,24 +161,24 @@ func (client MetadataDeleteClient) verifyDeleted(ctx context.Context, houseID st
 	}
 	calls := 0
 	for attempt := 0; attempt < attempts; attempt++ {
-		entity, readCalls, err := client.findEntity(ctx, houseID, entityType, entityID, credentials)
+		entity, entities, readCalls, err := client.findEntity(ctx, houseID, entityType, entityID, credentials)
 		calls += readCalls
 		if err != nil {
-			return false, calls, err
+			return false, entities, calls, err
 		}
 		if entity.ID == "" {
-			return true, calls, nil
+			return true, entities, calls, nil
 		}
 		if attempt == attempts-1 {
-			return false, calls, nil
+			return false, entities, calls, nil
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return false, calls, ctx.Err()
+			return false, entities, calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return false, calls, nil
+	return false, EntityListResult{}, calls, nil
 }

@@ -20,13 +20,14 @@ type EntityBatchRenameRequest struct {
 }
 
 type EntityBatchRenameResult struct {
-	Region     string `json:"region"`
-	HouseID    string `json:"houseId"`
-	Capability string `json:"capability"`
-	ItemCount  int    `json:"itemCount"`
-	Verified   bool   `json:"verified"`
-	VerifiedBy string `json:"verifiedBy,omitempty"`
-	APICalls   int    `json:"apiCalls"`
+	Region           string           `json:"region"`
+	HouseID          string           `json:"houseId"`
+	Capability       string           `json:"capability"`
+	ItemCount        int              `json:"itemCount"`
+	Verified         bool             `json:"verified"`
+	VerifiedBy       string           `json:"verifiedBy,omitempty"`
+	APICalls         int              `json:"apiCalls"`
+	VerifiedEntities EntityListResult `json:"-"`
 }
 
 type EntityBatchRenameClient struct {
@@ -67,7 +68,7 @@ func (client EntityBatchRenameClient) Run(ctx context.Context, request EntityBat
 		return EntityBatchRenameResult{}, err
 	}
 	apiCalls++
-	ok, calls, err := client.verify(ctx, houseID, items, credentials, request.VerifyAttempts, request.VerifyInterval)
+	ok, verifiedEntities, calls, err := client.verify(ctx, houseID, items, credentials, request.VerifyAttempts, request.VerifyInterval)
 	apiCalls += calls
 	if err != nil {
 		return EntityBatchRenameResult{}, err
@@ -76,13 +77,14 @@ func (client EntityBatchRenameClient) Run(ctx context.Context, request EntityBat
 		return EntityBatchRenameResult{}, fmt.Errorf("entity.rename.batch write verification mismatch")
 	}
 	return EntityBatchRenameResult{
-		Region:     client.endpoint.Region,
-		HouseID:    houseID,
-		Capability: "entity.rename.batch",
-		ItemCount:  len(items),
-		Verified:   true,
-		VerifiedBy: "entity.list",
-		APICalls:   apiCalls,
+		Region:           client.endpoint.Region,
+		HouseID:          houseID,
+		Capability:       "entity.rename.batch",
+		ItemCount:        len(items),
+		Verified:         true,
+		VerifiedBy:       "entity.list",
+		APICalls:         apiCalls,
+		VerifiedEntities: verifiedEntities,
 	}, nil
 }
 
@@ -212,7 +214,7 @@ func (client EntityBatchRenameClient) write(ctx context.Context, houseID string,
 	return nil
 }
 
-func (client EntityBatchRenameClient) verify(ctx context.Context, houseID string, items []entityBatchRenameItem, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
+func (client EntityBatchRenameClient) verify(ctx context.Context, houseID string, items []entityBatchRenameItem, credentials requestCredentials, attempts int, interval time.Duration) (bool, EntityListResult, int, error) {
 	if attempts <= 0 {
 		attempts = 3
 	}
@@ -224,20 +226,20 @@ func (client EntityBatchRenameClient) verify(ctx context.Context, houseID string
 		entities, readCalls, err := client.listEntities(ctx, houseID, credentials)
 		calls += readCalls
 		if err != nil {
-			return false, calls, err
+			return false, entities, calls, err
 		}
 		if entityBatchRenameMatches(items, entities) || attempt == attempts-1 {
-			return entityBatchRenameMatches(items, entities), calls, nil
+			return entityBatchRenameMatches(items, entities), entities, calls, nil
 		}
 		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return false, calls, ctx.Err()
+			return false, entities, calls, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return false, calls, nil
+	return false, EntityListResult{}, calls, nil
 }
 
 func (client EntityBatchRenameClient) listEntities(ctx context.Context, houseID string, credentials requestCredentials) (EntityListResult, int, error) {

@@ -35,6 +35,17 @@ func configureClarificationResponseWithGuide(request contract.Request, reason st
 	}
 }
 
+func responseWithVerifiedTopology(response contract.Response, entities api.EntityListResult) contract.Response {
+	if entities.Total == 0 {
+		return response
+	}
+	if response.Internal == nil {
+		response.Internal = map[string]any{}
+	}
+	response.Internal["verifiedTopology"] = entities
+	return response
+}
+
 func executionPreviewResponse(request contract.Request, record operation.Prepared, entities api.EntityListResult) contract.Response {
 	return executionPreviewResponseWithDetails(request, record, entities, nil, 0)
 }
@@ -253,7 +264,7 @@ func homeLockExecuteResponse(request contract.Request, record operation.Prepared
 }
 
 func entityBatchRenameExecuteResponse(request contract.Request, record operation.Prepared, result api.EntityBatchRenameResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -276,11 +287,11 @@ func entityBatchRenameExecuteResponse(request contract.Request, record operation
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func homeSpaceConfigurationExecuteResponse(request contract.Request, record operation.Prepared, result api.HomeSpaceConfigurationResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -303,7 +314,7 @@ func homeSpaceConfigurationExecuteResponse(request contract.Request, record oper
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func lightingDesignApplyExecuteResponse(request contract.Request, record operation.Prepared, entities api.EntityListResult, results []any, apiCalls int) contract.Response {
@@ -328,7 +339,7 @@ func lightingDesignApplyExecuteResponse(request contract.Request, record operati
 			Message: "one or more lighting design actions did not match expected values after write",
 		}
 	}
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          status,
@@ -354,7 +365,7 @@ func lightingDesignApplyExecuteResponse(request contract.Request, record operati
 			"cacheHits": 0,
 		},
 		Error: responseError,
-	}
+	}, entities)
 }
 
 func automationStatusExecuteResponse(request contract.Request, record operation.Prepared, result api.AutomationStatusResult) contract.Response {
@@ -454,7 +465,7 @@ func sceneUpdateExecuteResponse(request contract.Request, record operation.Prepa
 }
 
 func metadataDeleteExecuteResponse(request contract.Request, record operation.Prepared, result api.MetadataDeleteResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -479,11 +490,11 @@ func metadataDeleteExecuteResponse(request contract.Request, record operation.Pr
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func metadataBatchDeleteExecuteResponse(request contract.Request, record operation.Prepared, result api.MetadataBatchDeleteResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -508,11 +519,11 @@ func metadataBatchDeleteExecuteResponse(request contract.Request, record operati
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func destructiveDeleteExecuteResponse(request contract.Request, record operation.Prepared, result api.DestructiveDeleteResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -538,11 +549,11 @@ func destructiveDeleteExecuteResponse(request contract.Request, record operation
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func deviceUnbindExecuteResponse(request contract.Request, record operation.Prepared, result api.DeviceUnbindResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -566,11 +577,11 @@ func deviceUnbindExecuteResponse(request contract.Request, record operation.Prep
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func spaceOrganizationExecuteResponse(request contract.Request, record operation.Prepared, result api.SpaceOrganizationResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -596,7 +607,7 @@ func spaceOrganizationExecuteResponse(request contract.Request, record operation
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func gatewayConfigurationExecuteResponse(request contract.Request, record operation.Prepared, result api.GatewayConfigurationResult) contract.Response {
@@ -627,7 +638,7 @@ func gatewayConfigurationExecuteResponse(request contract.Request, record operat
 }
 
 func spaceBatchOrganizationExecuteResponse(request contract.Request, record operation.Prepared, result api.SpaceBatchOrganizationResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -650,7 +661,7 @@ func spaceBatchOrganizationExecuteResponse(request contract.Request, record oper
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func panelConfigurationExecuteResponse(request contract.Request, record operation.Prepared, result api.PanelConfigurationResult) contract.Response {
@@ -725,7 +736,7 @@ func metadataCreateAlreadyExistsResponse(request contract.Request, entities api.
 }
 
 func roomCreateExecuteResponse(request contract.Request, record operation.Prepared, result api.RoomCreateResult) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -749,11 +760,11 @@ func roomCreateExecuteResponse(request contract.Request, record operation.Prepar
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func metadataCreateExecuteResponse(request contract.Request, record operation.Prepared, result api.MetadataCreateResult, label string) contract.Response {
-	return contract.Response{
+	return responseWithVerifiedTopology(contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
@@ -778,7 +789,7 @@ func metadataCreateExecuteResponse(request contract.Request, record operation.Pr
 			"apiCalls":  result.APICalls,
 			"cacheHits": 0,
 		},
-	}
+	}, result.VerifiedEntities)
 }
 
 func executionBlockedResponse(request contract.Request, code string, message string) contract.Response {

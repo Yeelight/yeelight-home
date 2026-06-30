@@ -9,246 +9,76 @@ import (
 	"testing"
 )
 
-func TestNormalizeLightingDesignImportPayloadCreatesGatewayRoomsAndSlotsWithoutImplicitGroups(t *testing.T) {
-	payload, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
-		"rooms": []any{
-			map[string]any{
-				"name": "客厅",
-				"items": []any{
-					map[string]any{"name": "吸顶灯", "quantity": float64(1)},
-					map[string]any{"name": "黑色格栅灯", "quantity": float64(2), "color": "黑色", "category": "格栅灯"},
-				},
-			},
-		},
-	})
+func TestNormalizeLightingDesignImportPayloadAcceptsHouseMetaAndShortKeys(t *testing.T) {
+	payload, err := NormalizeLightingDesignImportPayload("200191", compactHouseMetaFixture())
 	if err != nil {
 		t.Fatalf("Normalize error: %v", err)
 	}
-	if payload["houseId"] != float64(200191) || payload["clearAll"] != false {
+	if payload["houseId"] != float64(200191) || payload["name"] != "粒粒的美丽家庭" || payload["version"] != 2 {
 		t.Fatalf("payload base fields = %#v", payload)
 	}
-	if got := len(payload["gateways"].([]any)); got != 1 {
-		t.Fatalf("gateways = %d", got)
+	gateway := payload["gateway"].(map[string]any)
+	rooms := gateway["roomList"].([]any)
+	if len(rooms) != 1 {
+		t.Fatalf("rooms=%#v", rooms)
 	}
-	if got := len(payload["rooms"].([]any)); got != 1 {
-		t.Fatalf("rooms = %d", got)
+	room := rooms[0].(map[string]any)
+	devices := room["deviceList"].([]any)
+	if len(devices) != 2 {
+		t.Fatalf("devices=%#v", devices)
 	}
-	devices := payload["devices"].([]any)
-	if len(devices) != 3 {
-		t.Fatalf("devices = %#v", devices)
+	firstDevice := devices[0].(map[string]any)
+	pid, _ := lightingDesignIntFromAny(firstDevice["pid"])
+	if firstDevice["roomTempId"] != "rm1" || pid != 198666 {
+		t.Fatalf("first device=%#v", firstDevice)
 	}
-	first := devices[0].(map[string]any)
-	if first["pid"] != int64(-1) || first["connectType"] != -1 {
-		t.Fatalf("function slot fields = %#v", first)
+	extra := firstDevice["extraMeta"].(map[string]string)
+	if extra["materialCode"] != "1-000002044" {
+		t.Fatalf("extraMeta=%#v", extra)
 	}
-	firstAttrs := first["attrs"].(map[string]any)
-	if _, ok := firstAttrs["materialCode"]; ok {
-		t.Fatalf("product attrs = %#v", firstAttrs)
+	groups := room["groupList"].([]any)
+	componentID, _ := lightingDesignIntFromAny(groups[0].(map[string]any)["componentId"])
+	if componentID != 4 {
+		t.Fatalf("groups=%#v", groups)
 	}
-	firstCandidates := firstAttrs["productCandidates"].([]any)
-	if len(firstCandidates) == 0 || firstCandidates[0].(map[string]any)["materialCode"] != "1-000000031" {
-		t.Fatalf("ceiling light candidates = %#v", firstAttrs)
+	scene := payload["sceneList"].([]any)[0].(map[string]any)
+	detail := scene["details"].([]any)[0].(map[string]any)
+	typeID, _ := lightingDesignIntFromAny(detail["typeId"])
+	action, _ := lightingDesignIntFromAny(detail["action"])
+	if typeID != 4 || detail["tempId"] != "gp1" || action != 0 {
+		t.Fatalf("scene detail=%#v", detail)
 	}
-	secondAttrs := devices[1].(map[string]any)["attrs"].(map[string]any)
-	if _, ok := secondAttrs["materialCode"]; ok {
-		t.Fatalf("fuzzy grid light should remain candidate-only without AI product selection: %#v", secondAttrs)
+	if detail["params"] != `{"delay":0,"set":{"ct":3000,"l":60,"p":true}}` {
+		t.Fatalf("scene detail params=%#v", detail["params"])
 	}
-	candidates := secondAttrs["productCandidates"].([]any)
-	if len(candidates) == 0 || candidates[0].(map[string]any)["materialCode"] != "1-000002044" {
-		t.Fatalf("grid light candidates = %#v", secondAttrs)
-	}
-	if groups, ok := payload["deviceGroups"]; ok {
-		t.Fatalf("Runtime must not auto-create groups without explicit groups[] or deviceGroups[]: %#v", groups)
-	}
-}
-
-func TestNormalizeLightingDesignImportPayloadConvertsExplicitNaturalGroups(t *testing.T) {
-	payload, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
-		"rooms": []any{
-			map[string]any{
-				"name": "客厅",
-				"items": []any{
-					map[string]any{"name": "吸顶灯", "quantity": float64(1), "category": "吸顶灯"},
-					map[string]any{"name": "黑色格栅灯", "quantity": float64(2), "category": "格栅灯", "color": "黑色"},
-					map[string]any{"name": "白色嵌入式射灯", "quantity": float64(2), "category": "筒射灯", "color": "白色", "installStyle": "嵌入式"},
-				},
-			},
-		},
-		"groups": []any{
-			map[string]any{
-				"name":     "客厅格栅灯组",
-				"roomName": "客厅",
-				"match":    map[string]any{"category": "格栅灯"},
-			},
-			map[string]any{
-				"name":     "客厅嵌入式射灯组",
-				"roomName": "客厅",
-				"match":    map[string]any{"name": "白色嵌入式射灯"},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Normalize error: %v", err)
-	}
-	groups := payload["deviceGroups"].([]any)
-	if len(groups) != 2 {
-		t.Fatalf("deviceGroups=%#v", groups)
-	}
-	assertGroup := func(name string, wantCount int) {
-		t.Helper()
-		for _, raw := range groups {
-			group := raw.(map[string]any)
-			if group["localName"] != name {
-				continue
-			}
-			deviceIDs := group["deviceIds"].([]any)
-			if len(deviceIDs) != wantCount || group["roomId"] == nil {
-				t.Fatalf("group %s = %#v", name, group)
-			}
-			return
-		}
-		t.Fatalf("group %s not found: %#v", name, groups)
-	}
-	assertGroup("客厅格栅灯组", 2)
-	assertGroup("客厅嵌入式射灯组", 2)
-	if _, ok := payload["groups"]; ok {
-		t.Fatalf("natural groups alias must not be sent to cloud: %#v", payload)
+	automation := payload["automationList"].([]any)[0].(map[string]any)
+	if automation["version"] != 2 || automation["params"] != `{"conditions":[{"clock":"09:00:00","type":"alarm"}],"type":"and"}` {
+		t.Fatalf("automation=%#v", automation)
 	}
 }
 
-func TestNormalizeLightingDesignImportPayloadEnrichesNaturalDesignSlotProducts(t *testing.T) {
-	payload, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
+func TestNormalizeLightingDesignImportPayloadRejectsNaturalTopology(t *testing.T) {
+	_, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
 		"rooms": []any{
-			map[string]any{
-				"name": "客厅",
-				"items": []any{
-					map[string]any{"name": "吸顶灯"},
-					map[string]any{"name": "黑色格栅灯", "quantity": float64(2)},
-					map[string]any{"name": "白色嵌入式射灯", "quantity": float64(2), "color": "白色", "installStyle": "嵌入式", "category": "射灯"},
-				},
-			},
-			map[string]any{
-				"name": "次卧",
-				"items": []any{
-					map[string]any{"name": "筒灯", "quantity": float64(4)},
-				},
-			},
-			map[string]any{
-				"name": "主卧",
-				"items": []any{
-					map[string]any{"name": "方形吸顶灯"},
-					map[string]any{"name": "36°射灯", "quantity": float64(4), "beamAngle": "36°", "category": "射灯"},
-					map[string]any{"name": "爱思系列筒射灯", "quantity": float64(3), "series": "爱思系列", "category": "筒射灯"},
-				},
-			},
-			map[string]any{
-				"name": "卫生间",
-				"items": []any{
-					map[string]any{"name": "夙夜版青空灯"},
-				},
-			},
+			map[string]any{"name": "客厅", "items": []any{map[string]any{"name": "吸顶灯"}}},
 		},
 	})
-	if err != nil {
-		t.Fatalf("Normalize error: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "requires HouseMeta payload") {
+		t.Fatalf("expected HouseMeta guidance error, got %v", err)
 	}
-	devices := payload["devices"].([]any)
-	if len(devices) != 18 {
-		t.Fatalf("devices=%d %#v", len(devices), devices)
-	}
-	assertCandidateOnly := func(name string, materialCode string) {
-		t.Helper()
-		for _, raw := range devices {
-			device := raw.(map[string]any)
-			if strings.Contains(device["localName"].(string), name) {
-				attrs := device["attrs"].(map[string]any)
-				if _, ok := attrs["materialCode"]; ok {
-					t.Fatalf("%s should remain candidate-only without AI-selected materialCode: %#v", name, attrs)
-				}
-				candidates := attrs["productCandidates"].([]any)
-				if len(candidates) == 0 {
-					t.Fatalf("%s should have product candidates: %#v", name, attrs)
-				}
-				first := candidates[0].(map[string]any)
-				if first["materialCode"] != materialCode {
-					t.Fatalf("%s first candidate=%#v attrs=%#v", name, first["materialCode"], attrs)
-				}
-				return
-			}
-		}
-		t.Fatalf("device %s not found in %#v", name, devices)
-	}
-	assertCandidateOnly("吸顶灯", "1-000000031")
-	assertCandidateOnly("黑色格栅灯", "1-000002044")
-	assertCandidateOnly("筒灯", "1-000003857")
-	assertCandidateOnly("36°射灯", "1-000005105")
-	assertCandidateOnly("爱思系列筒射灯", "1-000004861")
-	assertCandidateOnly("夙夜版青空灯", "1-000003810")
 }
 
-func TestNormalizeLightingDesignImportPayloadPreservesCallerSelectedProducts(t *testing.T) {
-	payload, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
-		"rooms": []any{
-			map[string]any{
-				"name": "主卧",
-				"items": []any{
-					map[string]any{
-						"name":         "36°射灯",
-						"quantity":     float64(4),
-						"materialCode": "1-000004714",
-						"notes":        "Skill 按主卧重点照明选择 S 系列 75 开孔 36° 15w 深空灰候选",
-					},
-					map[string]any{
-						"name":         "爱思系列筒射灯",
-						"quantity":     float64(3),
-						"materialCode": "1-000004861",
-						"notes":        "Skill 按用户爱思系列描述选择 S 系列 75 开孔 36° 12w 深空灰候选",
-					},
-				},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Normalize error: %v", err)
-	}
-	devices := payload["devices"].([]any)
-	if len(devices) != 7 {
-		t.Fatalf("devices=%d %#v", len(devices), devices)
-	}
-	for _, item := range []struct {
-		name         string
-		materialCode string
-	}{
-		{name: "36°射灯", materialCode: "1-000004714"},
-		{name: "爱思系列筒射灯", materialCode: "1-000004861"},
-	} {
-		for _, raw := range devices {
-			device := raw.(map[string]any)
-			if !strings.Contains(device["localName"].(string), item.name) {
-				continue
-			}
-			attrs := device["attrs"].(map[string]any)
-			if attrs["productMatchConfidence"] != "explicit" || attrs["materialCode"] != item.materialCode {
-				t.Fatalf("%s attrs=%#v", item.name, attrs)
-			}
-			if device["pid"] == int64(-1) || device["pcId"] != int64(4) {
-				t.Fatalf("%s product identity not applied to device: %#v", item.name, device)
-			}
-		}
+func TestNormalizeLightingDesignImportPayloadRejectsLegacyOverwriteFlags(t *testing.T) {
+	payload := compactHouseMetaFixture()
+	payload["clearAll"] = true
+	_, err := NormalizeLightingDesignImportPayload("200191", payload)
+	if err == nil || !strings.Contains(err.Error(), "clearAll/overwrite is not supported") {
+		t.Fatalf("expected clearAll rejection, got %v", err)
 	}
 }
 
 func TestNormalizeLightingDesignImportPayloadIsIdempotent(t *testing.T) {
-	normalized, err := NormalizeLightingDesignImportPayload("200191", map[string]any{
-		"rooms": []any{
-			map[string]any{
-				"name": "客厅",
-				"items": []any{
-					map[string]any{"name": "黑色格栅灯", "quantity": float64(2), "category": "格栅灯"},
-				},
-			},
-		},
-	})
+	normalized, err := NormalizeLightingDesignImportPayload("200191", compactHouseMetaFixture())
 	if err != nil {
 		t.Fatalf("Normalize error: %v", err)
 	}
@@ -256,40 +86,54 @@ func TestNormalizeLightingDesignImportPayloadIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Normalize normalized payload error: %v", err)
 	}
-	devices := renormalized["devices"].([]any)
-	if len(devices) != 2 {
-		t.Fatalf("renormalized devices=%#v", devices)
-	}
-	rooms := renormalized["rooms"].([]any)
-	if len(rooms) != 1 || rooms[0].(map[string]any)["localName"] != "客厅" {
-		t.Fatalf("renormalized rooms=%#v", rooms)
+	room := renormalized["gateway"].(map[string]any)["roomList"].([]any)[0].(map[string]any)
+	group := room["groupList"].([]any)[0].(map[string]any)
+	ids, ok := group["deviceTempIdList"].([]string)
+	if !ok || len(ids) != 2 || ids[0] != "dv1" {
+		t.Fatalf("renormalized group=%#v", group)
 	}
 }
 
-func TestLightingDesignImportClientSyncsMetadataAndVerifies(t *testing.T) {
-	var syncBody map[string]any
+func TestNormalizeLightingDesignImportPayloadValidatesReferences(t *testing.T) {
+	payload := compactHouseMetaFixture()
+	automation := payload["atl"].([]any)[0].(map[string]any)
+	action := automation["as"].([]any)[0].(map[string]any)
+	action["tid"] = "gp-missing"
+	_, err := NormalizeLightingDesignImportPayload("200191", payload)
+	if err == nil || !strings.Contains(err.Error(), "does not match an imported resource") {
+		t.Fatalf("expected reference validation error, got %v", err)
+	}
+}
+
+func TestLightingDesignImportClientUsesMetaImportAndVerifies(t *testing.T) {
+	var importBody map[string]any
 	var calls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		calls = append(calls, request.Method+" "+request.URL.Path)
 		writer.Header().Set("Content-Type", "application/json")
 		switch {
-		case request.URL.Path == "/apis/iot/v1/design/syncMetadata":
-			if err := json.NewDecoder(request.Body).Decode(&syncBody); err != nil {
-				t.Fatalf("decode sync body: %v", err)
+		case request.URL.Path == "/apis/iot/v1/meta/import":
+			if err := json.NewDecoder(request.Body).Decode(&importBody); err != nil {
+				t.Fatalf("decode import body: %v", err)
 			}
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"deviceLocalIdToCloudSlotIds":{"1003":5001},"roomLocalIdToCloudSlotIds":{"1002":4001}}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":"request-1"}`))
+		case request.URL.Path == "/apis/iot/v1/meta/status":
+			if request.URL.Query().Get("requestKey") != "request-1" {
+				t.Fatalf("requestKey=%s", request.URL.RawQuery)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"status":"1","houseId":"200191"}}`))
 		case strings.Contains(request.URL.Path, "/area/r/info/"):
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
 		case strings.Contains(request.URL.Path, "/room/r/info/"):
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":4001,"name":"客厅"}]}}`))
 		case strings.Contains(request.URL.Path, "/device/r/info/"):
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":5001,"name":"吸顶灯","roomId":4001}]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":5001,"name":"黑色格栅灯1","roomId":4001},{"id":5002,"name":"黑色格栅灯2","roomId":4001}]}}`))
 		case strings.Contains(request.URL.Path, "/group/r/info/"):
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":6001,"name":"客厅格栅灯组","roomId":4001}]}}`))
 		case strings.Contains(request.URL.Path, "/scene/r/info/"):
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":7001,"name":"客厅回家模式"}]}}`))
 		case strings.Contains(request.URL.Path, "/automations/r/list"):
-			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":8001,"name":"客厅每天9点"}]}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -297,13 +141,9 @@ func TestLightingDesignImportClientSyncsMetadataAndVerifies(t *testing.T) {
 	defer server.Close()
 
 	result, err := NewLightingDesignImportClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client()).Run(context.Background(), LightingDesignImportRequest{
-		HouseID: "200191",
-		Intent:  DeviceSlotCreateCapability,
-		Payload: map[string]any{
-			"rooms": []any{
-				map[string]any{"name": "客厅", "items": []any{map[string]any{"name": "吸顶灯"}}},
-			},
-		},
+		HouseID:        "200191",
+		Intent:         LightingDesignImportCapability,
+		Payload:        compactHouseMetaFixture(),
 		VerifyAttempts: 1,
 		Credentials: LightingDesignImportCredentials{
 			Authorization: "Bearer token-secret",
@@ -313,13 +153,60 @@ func TestLightingDesignImportClientSyncsMetadataAndVerifies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run error: %v calls=%#v", err, calls)
 	}
-	if !result.Verified || result.VerifiedBy != "entity.list" || result.Counts["devices"] != 1 {
-		t.Fatalf("result = %#v", result)
+	if result.RequestKey != "request-1" || result.Mode != "house_meta_import" || result.Counts["devices"] != 2 || result.Counts["groups"] != 1 || result.Counts["automations"] != 1 {
+		t.Fatalf("result=%#v", result)
 	}
-	if syncBody["clearAll"] != false || len(syncBody["devices"].([]any)) != 1 {
-		t.Fatalf("sync body = %#v", syncBody)
+	if importBody["gateway"] == nil || importBody["sceneList"] == nil || importBody["automationList"] == nil {
+		t.Fatalf("import body=%#v", importBody)
 	}
-	if result.APICalls != 7 {
+	if result.APICalls != 8 {
 		t.Fatalf("apiCalls=%d calls=%#v", result.APICalls, calls)
+	}
+}
+
+func compactHouseMetaFixture() map[string]any {
+	return map[string]any{
+		"tid": "hm1",
+		"n":   "粒粒的美丽家庭",
+		"gateway": map[string]any{
+			"tid": "gw1",
+			"n":   "默认网关",
+			"rl": []any{
+				map[string]any{
+					"tid": "rm1",
+					"n":   "客厅",
+					"dl": []any{
+						map[string]any{"tid": "dv1", "n": "黑色格栅灯1", "pid": 198666, "mc": "1-000002044", "productName": "P20 明装磁吸格栅灯"},
+						map[string]any{"tid": "dv2", "n": "黑色格栅灯2", "pid": 198666, "mc": "1-000002044", "productName": "P20 明装磁吸格栅灯"},
+					},
+					"gl": []any{
+						map[string]any{"tid": "gp1", "n": "客厅格栅灯组", "cid": 4, "dtids": []any{"dv1", "dv2"}},
+					},
+				},
+			},
+		},
+		"sl": []any{
+			map[string]any{
+				"tid": "sc1",
+				"n":   "客厅回家模式",
+				"ds": []any{
+					map[string]any{"tpid": 4, "tid": "gp1", "rn": "客厅格栅灯组", "rk": 0, "ap": map[string]any{"dl": 0, "s": map[string]any{"p": true, "l": 60, "ct": 3000}}},
+				},
+			},
+		},
+		"atl": []any{
+			map[string]any{
+				"tid": "at1",
+				"n":   "客厅每天9点",
+				"st":  "00:00:00",
+				"et":  "23:59:59",
+				"rt":  2,
+				"rv":  "0x7f",
+				"ps":  map[string]any{"tp": "and", "cs": []any{map[string]any{"tp": "alarm", "c": "09:00:00"}}},
+				"as": []any{
+					map[string]any{"tpid": 4, "tid": "gp1", "rn": "客厅格栅灯组", "rk": 0, "ap": map[string]any{"dl": 0, "s": map[string]any{"p": true}}},
+				},
+			},
+		},
 	}
 }

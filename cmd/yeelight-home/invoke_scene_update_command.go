@@ -35,7 +35,7 @@ func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request
 	if reason := validateSceneUpdatePayload(payload, entities); reason != "" {
 		return sceneUpdateClarificationResponse(request, reason), nil
 	}
-	name := planPayloadString(payload, "name")
+	name := executionPayloadString(payload, "name")
 	if name == "" {
 		name = valueIDString(payload["sceneId"])
 	}
@@ -126,7 +126,7 @@ func sceneUpdateAcceptedFields() []string {
 func (app *app) executeSceneUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewSceneUpdateClient(endpoint, nil).Run(ctx, api.SceneUpdateRequest{
 		HouseID:        record.HouseID,
-		SceneID:        planPayloadString(record.Payload, "sceneId"),
+		SceneID:        executionPayloadString(record.Payload, "sceneId"),
 		Payload:        record.Payload,
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,

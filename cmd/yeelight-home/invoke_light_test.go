@@ -68,6 +68,153 @@ func TestInvokeLightPowerSetWritesAndVerifiesDeviceProperty(t *testing.T) {
 	}
 }
 
+func TestInvokeLightPowerSetUsesTopologyCacheAfterWarmup(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-1","name":"主灯","roomId":"room-1","online":true}]}}`))
+		case "/apis/iot/v1/open/control/house/house-1/control/2/device-1/w/properties/p":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		case "/apis/iot/v1/controll/device/device-1/r/properties/p":
+			_, _ = writer.Write([]byte(`{"success":true,"data":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-secret", "client-light-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-light-power-cache","locale":"zh-CN","utterance":"打开主灯","intent":"light.power.set","targets":[{"entityType":"device","name":"主灯"}],"parameters":{"on":true}}`
+	for i := 0; i < 2; i++ {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+		if code != exitOK {
+			t.Fatalf("run %d exit code = %d, stderr = %s", i, code, stderr.String())
+		}
+		if i == 1 {
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("invalid json response: %v", err)
+			}
+			metrics := response["metrics"].(map[string]any)
+			if metrics["cacheHits"] != float64(1) || metrics["apiCalls"] != float64(2) {
+				t.Fatalf("metrics=%#v response=%#v", metrics, response)
+			}
+		}
+	}
+	listCalls := 0
+	for _, call := range gotCalls {
+		if strings.Contains(call, "/thing/manage/house/house-1/") || strings.Contains(call, "/automations/r/list") {
+			listCalls++
+		}
+	}
+	if listCalls != 6 {
+		t.Fatalf("second run should not repeat topology list calls, gotCalls=%#v", gotCalls)
+	}
+}
+
+func TestInvokeLightPowerSetResolvesDeviceWithinNamedRoom(t *testing.T) {
+	var writePath string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-kid","name":"孩子屋"},{"id":"room-living","name":"客厅"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-kid-ceiling","name":"吸顶灯","roomId":"room-kid","online":true},{"id":"device-living-ceiling","name":"吸顶灯","roomId":"room-living","online":true}]}}`))
+		case "/apis/iot/v1/open/control/house/house-1/control/2/device-kid-ceiling/w/properties/p":
+			writePath = request.URL.Path
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		case "/apis/iot/v1/controll/device/device-kid-ceiling/r/properties/p":
+			_, _ = writer.Write([]byte(`{"success":true,"data":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-room-secret", "client-light-room-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-light-room-name","locale":"zh-CN","utterance":"打开孩子屋的吸顶灯","intent":"light.power.set","parameters":{"roomName":"孩子屋","deviceName":"吸顶灯","on":true}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(writePath, "device-kid-ceiling") {
+		t.Fatalf("writePath = %s", writePath)
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	entity := result["entity"].(map[string]any)
+	if entity["id"] != "device-kid-ceiling" || entity["roomId"] != "room-kid" {
+		t.Fatalf("entity = %#v", entity)
+	}
+}
+
+func TestInvokeLightPowerSetUsesRoomTargetAsQualifier(t *testing.T) {
+	var writePath string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-kid","name":"孩子屋"},{"id":"room-living","name":"客厅"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-kid-ceiling","name":"吸顶灯","roomId":"room-kid","online":true},{"id":"device-living-ceiling","name":"吸顶灯","roomId":"room-living","online":true}]}}`))
+		case "/apis/iot/v1/open/control/house/house-1/control/2/device-kid-ceiling/w/properties/p":
+			writePath = request.URL.Path
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		case "/apis/iot/v1/controll/device/device-kid-ceiling/r/properties/p":
+			_, _ = writer.Write([]byte(`{"success":true,"data":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-target-secret", "client-light-target-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-light-two-targets","locale":"zh-CN","utterance":"打开孩子屋的吸顶灯","intent":"light.power.set","targets":[{"entityType":"room","name":"孩子屋"},{"entityType":"device","name":"吸顶灯"}],"parameters":{"on":true}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(writePath, "device-kid-ceiling") {
+		t.Fatalf("writePath = %s", writePath)
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+}
+
 func TestInvokeLightPowerSetReportsVerificationMismatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
