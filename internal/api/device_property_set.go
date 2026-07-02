@@ -66,10 +66,9 @@ func (client DevicePropertySetClient) Run(ctx context.Context, request DevicePro
 		return DevicePropertySetResult{}, fmt.Errorf("property name is required")
 	}
 	body := map[string]any{
-		"value":   request.Value,
-		"command": command,
+		"value": request.Value,
 	}
-	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/open/control/house/"+url.PathEscape(houseID)+"/control/"+nodeTypeDevice+"/"+url.PathEscape(deviceID)+"/w/properties/"+url.PathEscape(propertyName), body, requestCredentials{
+	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/controll/device/"+nodeTypeDevice+"/"+url.PathEscape(deviceID)+"/w/properties/"+url.PathEscape(propertyName), body, requestCredentials{
 		Authorization: request.Credentials.Authorization,
 		ClientID:      request.Credentials.ClientID,
 	})
@@ -85,7 +84,7 @@ func (client DevicePropertySetClient) Run(ctx context.Context, request DevicePro
 		DeviceID:     deviceID,
 		PropertyName: propertyName,
 		Command:      command,
-		Source:       "open_control_property_endpoint",
+		Source:       "device_property_set_endpoint",
 		RawShape:     responseDataType(response),
 		APICalls:     1,
 	}, nil

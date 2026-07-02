@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestDeviceListReadonlyReturnsRedactedProjection(t *testing.T) {
@@ -45,18 +47,19 @@ func TestDeviceListReadonlyReturnsRedactedProjection(t *testing.T) {
 			t.Fatalf("result leaked %q: %s", forbidden, string(data))
 		}
 	}
-	devices := result.Data.(map[string]any)["devices"].([]any)
+	resultData := result.Data.(map[string]any)
+	devices := resultData[semantic.FieldDevices].([]any)
 	first := devices[0].(map[string]any)
-	if first["id"] != "31" || first["name"] != "主灯" || first["roomId"] != "10" || first["capability"] != "p,l,ct" {
+	if first[semantic.FieldID] != "31" || first[semantic.FieldName] != "主灯" || first[semantic.FieldRoomID] != "10" || first[semantic.FieldCapability] != "p,l,ct" {
 		t.Fatalf("first device = %#v", first)
 	}
 	gateway := devices[1].(map[string]any)
-	if gateway["childDeviceCount"] != 1 {
+	if gateway[semantic.FieldChildDeviceCount] != 1 {
 		t.Fatalf("gateway = %#v", gateway)
 	}
-	meshgroups := result.Data.(map[string]any)["meshgroups"].([]any)
-	if meshgroups[0].(map[string]any)["deviceCount"] != 2 {
-		t.Fatalf("meshgroups = %#v", meshgroups)
+	groups := resultData[semantic.FieldGroups].([]any)
+	if groups[0].(map[string]any)[semantic.FieldDeviceCount] != 2 {
+		t.Fatalf("groups = %#v", groups)
 	}
 }
 

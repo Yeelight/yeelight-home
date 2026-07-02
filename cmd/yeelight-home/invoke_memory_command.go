@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -110,6 +111,18 @@ func (app *app) invokeMemoryForget(request contract.Request, profile string, reg
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
+	preferenceIDs, recommendationIDs := memoryForgetIDs(request)
+	if len(preferenceIDs) > 0 || len(recommendationIDs) > 0 {
+		deletedPreferences, err := app.memoryStore.DeletePreferencesByID(profile, region, houseID, preferenceIDs)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		deletedRecommendations, err := app.memoryStore.DeleteRecommendationsByID(profile, region, houseID, recommendationIDs)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		return memoryForgetResponse(request, houseID, selectedMemoryExport(profile, region, houseID, deletedPreferences, deletedRecommendations)), nil
+	}
 	exported, err := app.memoryStore.Export(profile, region, houseID)
 	if err != nil {
 		return contract.Response{}, err
@@ -118,6 +131,32 @@ func (app *app) invokeMemoryForget(request contract.Request, profile string, reg
 		return contract.Response{}, err
 	}
 	return memoryForgetResponse(request, houseID, exported), nil
+}
+
+func memoryForgetIDs(request contract.Request) ([]string, []string) {
+	genericIDs := requestStringList(request.Parameters[semantic.FieldIDs], request.Parameters[semantic.FieldID])
+	preferenceIDs := requestStringList(request.Parameters[semantic.FieldPreferenceIDs], request.Parameters[semantic.FieldPreferenceID])
+	recommendationIDs := requestStringList(request.Parameters[semantic.FieldRecommendationIDs], request.Parameters[semantic.FieldRecommendationID])
+	if len(genericIDs) > 0 {
+		preferenceIDs = append(preferenceIDs, genericIDs...)
+		recommendationIDs = append(recommendationIDs, genericIDs...)
+	}
+	return preferenceIDs, recommendationIDs
+}
+
+func selectedMemoryExport(profile string, region string, houseID string, preferences []storage.PreferenceRecord, recommendations []storage.RecommendationRecord) map[string]any {
+	return map[string]any{
+		semantic.FieldFormat:          storage.MemoryExportFormatVersion,
+		semantic.FieldNamespace:       memoryResponseNamespace(profile, region, houseID),
+		semantic.FieldProfile:         profile,
+		semantic.FieldRegion:          region,
+		semantic.FieldHouseID:         houseID,
+		semantic.FieldEncryption:      "not_encrypted_local_runtime_export",
+		semantic.FieldImportPolicy:    "merge_by_id_replace_existing",
+		semantic.FieldRetentionPolicy: storage.RetentionPolicy(),
+		semantic.FieldPreferences:     preferences,
+		semantic.FieldRecommendations: recommendations,
+	}
 }
 
 func (app *app) invokeRecommendationList(request contract.Request, profile string, region string, houseID string) (contract.Response, error) {
@@ -163,11 +202,11 @@ func (app *app) invokeRecommendationFeedback(request contract.Request, profile s
 	if houseID == "" {
 		return memoryClarificationResponse(request, "missing_house_id"), nil
 	}
-	recommendationID := firstRequestString(request.Parameters, "recommendationId", "recommendationID", "id")
+	recommendationID := firstRequestString(request.Parameters, semantic.FieldRecommendationID, semantic.FieldID)
 	if recommendationID == "" {
 		return memoryClarificationResponse(request, "missing_recommendation_id"), nil
 	}
-	feedback := normalizeRecommendationFeedback(firstRequestString(request.Parameters, "feedback", "action", "status"))
+	feedback := normalizeRecommendationFeedback(firstRequestString(request.Parameters, semantic.FieldFeedback, semantic.FieldAction, semantic.FieldStatus))
 	if feedback == "" {
 		return memoryClarificationResponse(request, "missing_recommendation_feedback"), nil
 	}
@@ -229,9 +268,9 @@ func normalizeRecommendationFeedback(value string) string {
 	switch strings.ToLower(firstNonEmptyString(value)) {
 	case "accept", "accepted", "接受", "采纳":
 		return "accepted"
-	case "dismiss", "dismissed", "ignore", "ignored", "稍后", "忽略":
+	case "dismiss", "dismissed", "hide", "hidden", "ignore", "ignored", "稍后", "忽略", "隐藏", "不显示", "不要再提醒", "别再提醒":
 		return "dismissed"
-	case "reject", "rejected", "decline", "declined", "拒绝", "不再推荐":
+	case "reject", "rejected", "decline", "declined", "拒绝", "不采纳", "不再推荐", "别再推荐":
 		return "rejected"
 	case "cooldown", "later", "remind_later", "稍后提醒":
 		return "cooldown"
@@ -241,7 +280,7 @@ func normalizeRecommendationFeedback(value string) string {
 }
 
 func recommendationCooldownSeconds(request contract.Request) int64 {
-	value, ok := requestInteger(request.Parameters["cooldownHours"])
+	value, ok := requestInteger(request.Parameters[semantic.FieldCooldownHours])
 	if !ok || value < 1 || value > 24*30 {
 		return int64(7 * 24 * 60 * 60)
 	}
@@ -250,33 +289,33 @@ func recommendationCooldownSeconds(request contract.Request) int64 {
 
 func recommendationRecordFromRequest(request contract.Request, profile string, region string, houseID string, now int64) (storage.RecommendationRecord, bool) {
 	source := request.Parameters
-	if nested := requestMap(request.Parameters["recommendation"]); nested != nil {
+	if nested := requestMap(request.Parameters[semantic.FieldRecommendation]); nested != nil {
 		source = nested
 	}
-	recommendationType := firstRequestString(source, "type", "recommendationType")
-	explanation := firstRequestString(source, "explanation", "reason", "summary")
-	evidence := firstRequestString(source, "evidence")
+	recommendationType := firstRequestString(source, semantic.FieldType, semantic.FieldRecommendationType)
+	explanation := firstRequestString(source, semantic.FieldExplanation)
+	evidence := firstRequestString(source, semantic.FieldEvidence)
 	if recommendationType == "" || explanation == "" || evidence == "" {
 		return storage.RecommendationRecord{}, false
 	}
-	priority, _ := requestInteger(source["priority"])
+	priority, _ := requestInteger(source[semantic.FieldPriority])
 	record := storage.RecommendationRecord{
-		ID:             firstRequestString(source, "recommendationId", "id"),
+		ID:             firstRequestString(source, semantic.FieldRecommendationID, semantic.FieldID),
 		Profile:        profile,
 		Region:         region,
 		HouseID:        houseID,
 		Type:           recommendationType,
-		Source:         firstRequestString(source, "source", "sourceType"),
-		TargetIntent:   firstRequestString(source, "targetIntent", "intent"),
-		ScopeType:      firstRequestString(source, "scopeType"),
-		ScopeRef:       firstRequestString(source, "scopeRef", "target", "targetName"),
+		Source:         firstRequestString(source, semantic.FieldSource),
+		TargetIntent:   firstRequestString(source, semantic.FieldTargetIntent),
+		ScopeType:      firstRequestString(source, semantic.FieldScopeType),
+		ScopeRef:       firstRequestString(source, semantic.FieldScopeRef),
 		Priority:       priority,
-		Confidence:     firstRequestString(source, "confidence"),
-		ActionHint:     requestMap(source["actionHint"]),
-		ParametersHint: requestMap(source["parametersHint"]),
+		Confidence:     firstRequestString(source, semantic.FieldConfidence),
+		ActionHint:     requestMap(source[semantic.FieldActionHint]),
+		ParametersHint: requestMap(source[semantic.FieldParametersHint]),
 		Explanation:    explanation,
 		Evidence:       evidence,
-		Status:         firstRequestString(source, "status"),
+		Status:         firstRequestString(source, semantic.FieldStatus),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,7 +17,7 @@ func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -28,16 +29,16 @@ func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request
 	if err != nil {
 		return contract.Response{}, err
 	}
-	payload, err := buildSceneUpdatePayload(request, houseID)
+	payload, err := buildSceneUpdatePayload(request, houseID, entities)
 	if err != nil {
 		return sceneUpdateClarificationResponse(request, err.Error()), nil
 	}
 	if reason := validateSceneUpdatePayload(payload, entities); reason != "" {
 		return sceneUpdateClarificationResponse(request, reason), nil
 	}
-	name := executionPayloadString(payload, "name")
+	name := executionPayloadString(payload, semantic.FieldName)
 	if name == "" {
-		name = valueIDString(payload["sceneId"])
+		name = valueIDString(payload[semantic.FieldSceneID])
 	}
 	now := time.Now()
 	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("更新情景 %s", name), payload, []string{
@@ -54,51 +55,85 @@ func (app *app) prepareSceneUpdate(ctx context.Context, request contract.Request
 }
 
 func sceneUpdateClarificationResponse(request contract.Request, reason string) contract.Response {
-	return configureClarificationResponseWithGuide(request, reason, sceneUpdateAcceptedFields(), scenePayloadGuide())
+	return configureClarificationResponseWithGuide(request, reason, sceneUpdateAcceptedFields(), scenePayloadGuide("scene.update"))
 }
 
-func buildSceneUpdatePayload(request contract.Request, houseID string) (map[string]any, error) {
-	sceneID := firstRequestString(request.Parameters, "sceneId", "id", "entityId")
-	if sceneID == "" {
+func buildSceneUpdatePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, error) {
+	scene, err := resolveSceneUpdateTarget(request, entities)
+	if err != nil {
+		return nil, err
+	}
+	details, ok := normalizeSceneActionRows(request.Parameters[semantic.FieldActions])
+	if !ok {
 		return nil, fmt.Errorf("invalid_scene_update_payload")
 	}
-	details, ok := requestMapList(request.Parameters["details"])
-	if !ok {
-		detail, ok := sceneSingleDetail(request)
-		if !ok {
-			return nil, fmt.Errorf("invalid_scene_update_payload")
-		}
-		details = []map[string]any{detail}
+	name := firstRequestString(request.Parameters, semantic.FieldNewName, semantic.FieldName)
+	if name == "" {
+		name = scene.Name
 	}
 	payload, err := api.BuildSceneCreatePayload(
 		houseID,
-		configureName(request),
-		firstRequestString(request.Parameters, "description", "desc"),
-		firstRequestString(request.Parameters, "icon"),
+		name,
+		firstRequestString(request.Parameters, semantic.FieldDescription),
+		firstRequestString(request.Parameters, semantic.FieldIcon),
 		details,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("invalid_scene_update_payload")
 	}
-	payload["id"] = requestNumberOrString(sceneID)
-	payload["sceneId"] = sceneID
-	if roomID := firstRequestString(request.Parameters, "roomId", "room_id"); roomID != "" {
-		payload["roomId"] = requestNumberOrString(roomID)
+	payload[semantic.FieldID] = requestNumberOrString(scene.ID)
+	payload[semantic.FieldSceneID] = scene.ID
+	if roomID := firstRequestString(request.Parameters, semantic.FieldRoomID); roomID != "" {
+		payload[semantic.FieldRoomID] = requestNumberOrString(roomID)
 	}
-	if gatewayDeviceID := firstRequestString(request.Parameters, "gatewayDeviceId", "gateway_device_id"); gatewayDeviceID != "" {
-		payload["gatewayDeviceId"] = requestNumberOrString(gatewayDeviceID)
+	if gatewayDeviceID := firstRequestString(request.Parameters, semantic.FieldGatewayDeviceID); gatewayDeviceID != "" {
+		payload[semantic.FieldGatewayDeviceID] = requestNumberOrString(gatewayDeviceID)
 	}
 	return payload, nil
 }
 
+type sceneUpdateTarget struct {
+	ID   string
+	Name string
+}
+
+func resolveSceneUpdateTarget(request contract.Request, entities api.EntityListResult) (sceneUpdateTarget, error) {
+	sceneID := firstRequestString(request.Parameters, semantic.FieldSceneID, semantic.FieldID, semantic.FieldEntityID)
+	if sceneID != "" {
+		match, _, _ := findEntity(entityGetTarget{id: sceneID, entityType: "scene"}, entities.Entities)
+		if match.ID == "" {
+			return sceneUpdateTarget{}, fmt.Errorf("invalid_scene_reference")
+		}
+		return sceneUpdateTarget{ID: match.ID, Name: match.Name}, nil
+	}
+	sceneName := firstRequestString(
+		request.Parameters,
+		semantic.FieldSceneName,
+		semantic.FieldCurrentName,
+		semantic.FieldEntityName,
+		semantic.FieldTargetName,
+	)
+	if sceneName == "" {
+		return sceneUpdateTarget{}, fmt.Errorf("invalid_scene_update_payload")
+	}
+	match, candidates, _ := findEntity(entityGetTarget{name: sceneName, entityType: "scene"}, entities.Entities)
+	if match.ID != "" {
+		return sceneUpdateTarget{ID: match.ID, Name: match.Name}, nil
+	}
+	if len(candidates) > 0 {
+		return sceneUpdateTarget{}, fmt.Errorf("ambiguous_scene_reference")
+	}
+	return sceneUpdateTarget{}, fmt.Errorf("invalid_scene_reference")
+}
+
 func validateSceneUpdatePayload(payload map[string]any, entities api.EntityListResult) string {
-	sceneID := valueIDString(payload["sceneId"])
+	sceneID := valueIDString(payload[semantic.FieldSceneID])
 	if !entityExists(entities, "scene", sceneID) {
 		return "invalid_scene_reference"
 	}
-	delete(payload, "sceneId")
+	delete(payload, semantic.FieldSceneID)
 	reason := validateSceneCreatePayload(payload, entities)
-	payload["sceneId"] = sceneID
+	payload[semantic.FieldSceneID] = sceneID
 	if reason == "house_scene_limit_exceeded" {
 		return ""
 	}
@@ -109,24 +144,32 @@ func validateSceneUpdatePayload(payload map[string]any, entities api.EntityListR
 }
 
 func sceneUpdateAcceptedFields() []string {
-	return []string{
-		"parameters.houseId",
-		"parameters.sceneId",
-		"parameters.name",
-		"parameters.description",
-		"parameters.icon",
-		"parameters.details",
-		"parameters.deviceId",
-		"parameters.params",
-		"parameters.roomId",
-		"parameters.gatewayDeviceId",
-	}
+	return append(semanticParameterPaths(
+		semantic.FieldHouseID,
+		semantic.FieldSceneID,
+		semantic.FieldSceneName,
+		semantic.FieldCurrentName,
+		semantic.FieldEntityName,
+		semantic.FieldTargetName,
+		semantic.FieldName,
+		semantic.FieldNewName,
+		semantic.FieldDescription,
+		semantic.FieldIcon,
+		semantic.FieldActions,
+		semantic.FieldRoomID,
+		semantic.FieldGatewayDeviceID,
+	),
+		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetType),
+		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetID),
+		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetName),
+		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldSet),
+	)
 }
 
 func (app *app) executeSceneUpdate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewSceneUpdateClient(endpoint, nil).Run(ctx, api.SceneUpdateRequest{
 		HouseID:        record.HouseID,
-		SceneID:        executionPayloadString(record.Payload, "sceneId"),
+		SceneID:        executionPayloadString(record.Payload, semantic.FieldSceneID),
 		Payload:        record.Payload,
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,

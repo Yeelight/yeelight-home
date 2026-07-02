@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func installDiagnostics(online bool) map[string]any {
@@ -37,7 +39,7 @@ func buildInstallDiagnostics(executable string, pathLookup string, version strin
 	}
 	npm := npmGlobalDiagnostics(runCommand)
 	homebrew := homebrewDiagnostics(runCommand)
-	if npmVersion, ok := npm["version"].(string); ok && versionMismatch(version, npmVersion) {
+	if npmVersion, ok := npm[semantic.FieldVersion].(string); ok && versionMismatch(version, npmVersion) {
 		warnings = append(warnings, "npm_global_package_version_differs_from_runtime_version")
 	}
 	for _, warning := range homebrewVersionMismatchWarnings(version, homebrew) {
@@ -58,26 +60,26 @@ func buildInstallDiagnostics(executable string, pathLookup string, version strin
 	}
 	remediations := installRemediations(warnings, npm, homebrew)
 	result := map[string]any{
-		"cli":                "yeelight-home",
-		"publicRepo":         "Yeelight/yeelight-home",
-		"version":            version,
-		"os":                 goos,
-		"arch":               goarch,
-		"executable":         executable,
-		"executableResolved": executableResolved,
-		"pathLookup":         pathLookup,
-		"pathLookupResolved": pathLookupResolved,
-		"npmWrapper":         npmWrapperPath,
-		"npmWrapperResolved": npmWrapperResolved,
-		"packageManagers": map[string]any{
-			"npm":      npm,
-			"homebrew": homebrew,
+		semantic.FieldCLI:                "yeelight-home",
+		semantic.FieldPublicRepo:         "Yeelight/yeelight-home",
+		semantic.FieldVersion:            version,
+		semantic.FieldOS:                 goos,
+		semantic.FieldArch:               goarch,
+		semantic.FieldExecutable:         executable,
+		semantic.FieldExecutableResolved: executableResolved,
+		semantic.FieldPathLookup:         pathLookup,
+		semantic.FieldPathLookupResolved: pathLookupResolved,
+		semantic.FieldNPMWrapper:         npmWrapperPath,
+		semantic.FieldNPMWrapperResolved: npmWrapperResolved,
+		semantic.FieldPackageManagers: map[string]any{
+			semantic.FieldNPM:      npm,
+			semantic.FieldHomebrew: homebrew,
 		},
-		"warnings":     warnings,
-		"remediations": remediations,
+		semantic.FieldWarnings:     warnings,
+		semantic.FieldRemediations: remediations,
 	}
 	if latestChecker != nil {
-		result["latest"] = latest
+		result[semantic.FieldLatest] = latest
 	}
 	return result
 }
@@ -88,7 +90,7 @@ func installRemediations(warnings []string, npm map[string]any, homebrew map[str
 		actions = append(actions, "Run `command -v yeelight-home` and restart the shell or Skill host so PATH resolves the intended binary.")
 	}
 	if containsDiagnostic(warnings, "path_lookup_uses_npm_wrapper") || containsDiagnostic(warnings, "npm_global_package_version_differs_from_runtime_version") {
-		if boolFromMap(npm, "installed") {
+		if boolFromMap(npm, semantic.FieldInstalled) {
 			actions = append(actions, "Upgrade the npm wrapper with `npm install -g yeelight-home@latest`, then restart the shell or Skill host.")
 		}
 	}
@@ -96,14 +98,14 @@ func installRemediations(warnings []string, npm map[string]any, homebrew map[str
 		actions = append(actions, "The npm registry has a newer yeelight-home package; run `npm install -g yeelight-home@latest` and restart the shell or Skill host.")
 	}
 	if containsDiagnostic(warnings, "homebrew_package_version_differs_from_runtime_version") {
-		if boolFromMap(homebrew, "installed") {
+		if boolFromMap(homebrew, semantic.FieldInstalled) {
 			actions = append(actions, "Upgrade Homebrew with `brew update && brew upgrade yeelight-home`, then restart the shell or Skill host.")
 		}
 	}
-	if containsDiagnostic(warnings, "homebrew_formula_version_differs_from_runtime_version") && nestedBoolFromMap(homebrew, "formula", "installed") {
+	if containsDiagnostic(warnings, "homebrew_formula_version_differs_from_runtime_version") && nestedBoolFromMap(homebrew, semantic.FieldFormula, semantic.FieldInstalled) {
 		actions = append(actions, "Upgrade the Homebrew formula with `brew update && brew upgrade yeelight-home`, then restart the shell or Skill host.")
 	}
-	if containsDiagnostic(warnings, "homebrew_cask_version_differs_from_runtime_version") && nestedBoolFromMap(homebrew, "cask", "installed") {
+	if containsDiagnostic(warnings, "homebrew_cask_version_differs_from_runtime_version") && nestedBoolFromMap(homebrew, semantic.FieldCask, semantic.FieldInstalled) {
 		actions = append(actions, "Upgrade the Homebrew cask with `brew update && brew upgrade --cask yeelight-home`, then restart the shell or Skill host.")
 	}
 	if containsDiagnostic(warnings, "homebrew_formula_behind_latest") {
@@ -115,7 +117,7 @@ func installRemediations(warnings []string, npm map[string]any, homebrew map[str
 	if containsDiagnostic(warnings, "npm_wrapper_differs_from_path_lookup") {
 		actions = append(actions, "Remove or unlink stale npm/Homebrew entries so only one `yeelight-home` appears on PATH.")
 	}
-	if len(actions) == 0 && boolFromMap(npm, "installed") && boolFromMap(homebrew, "installed") {
+	if len(actions) == 0 && boolFromMap(npm, semantic.FieldInstalled) && boolFromMap(homebrew, semantic.FieldInstalled) {
 		actions = append(actions, "Prefer one primary install channel per machine; remove the unused npm or Homebrew install to avoid PATH drift.")
 	}
 	return uniqueStrings(actions)
@@ -123,23 +125,23 @@ func installRemediations(warnings []string, npm map[string]any, homebrew map[str
 
 func onlineInstallWarnings(npm map[string]any, homebrew map[string]any, latest map[string]any) []string {
 	warnings := []string{}
-	npmLatest := latestChannelVersion(latest, "npm")
-	if boolFromMap(npm, "installed") && versionNewerThan(npmLatest, stringFromMap(npm, "version")) {
+	npmLatest := latestChannelVersion(latest, semantic.FieldNPM)
+	if boolFromMap(npm, semantic.FieldInstalled) && versionNewerThan(npmLatest, stringFromMap(npm, semantic.FieldVersion)) {
 		warnings = append(warnings, "npm_global_package_behind_latest")
 	}
-	homebrewLatest := latestChannelVersion(latest, "homebrew")
-	if nestedBoolFromMap(homebrew, "formula", "installed") && versionNewerThan(homebrewLatest, nestedStringFromMap(homebrew, "formula", "version")) {
+	homebrewLatest := latestChannelVersion(latest, semantic.FieldHomebrew)
+	if nestedBoolFromMap(homebrew, semantic.FieldFormula, semantic.FieldInstalled) && versionNewerThan(homebrewLatest, nestedStringFromMap(homebrew, semantic.FieldFormula, semantic.FieldVersion)) {
 		warnings = append(warnings, "homebrew_formula_behind_latest")
 	}
-	homebrewCaskLatest := firstNonEmpty(latestChannelVersion(latest, "homebrewCask"), homebrewLatest)
-	if nestedBoolFromMap(homebrew, "cask", "installed") && versionNewerThan(homebrewCaskLatest, nestedStringFromMap(homebrew, "cask", "version")) {
+	homebrewCaskLatest := firstNonEmpty(latestChannelVersion(latest, semantic.FieldHomebrewCask), homebrewLatest)
+	if nestedBoolFromMap(homebrew, semantic.FieldCask, semantic.FieldInstalled) && versionNewerThan(homebrewCaskLatest, nestedStringFromMap(homebrew, semantic.FieldCask, semantic.FieldVersion)) {
 		warnings = append(warnings, "homebrew_cask_behind_latest")
 	}
 	return warnings
 }
 
 func latestChannelVersion(latest map[string]any, channel string) string {
-	channels, ok := latest["channels"].(map[string]any)
+	channels, ok := latest[semantic.FieldChannels].(map[string]any)
 	if !ok {
 		return ""
 	}
@@ -147,7 +149,7 @@ func latestChannelVersion(latest map[string]any, channel string) string {
 	if !ok {
 		return ""
 	}
-	return stringFromMap(info, "version")
+	return stringFromMap(info, semantic.FieldVersion)
 }
 
 func stringFromMap(values map[string]any, key string) string {
@@ -177,32 +179,32 @@ func runInstallDiagnosticCommand(command string, args ...string) (string, error)
 }
 
 func npmGlobalDiagnostics(runCommand installCommandRunner) map[string]any {
-	info := map[string]any{"available": false, "installed": false}
+	info := map[string]any{semantic.FieldAvailable: false, semantic.FieldInstalled: false}
 	if runCommand == nil {
 		return info
 	}
 	root, rootErr := runCommand("npm", "root", "-g")
 	if rootErr != nil {
-		info["error"] = "npm_not_available"
+		info[semantic.FieldError] = "npm_not_available"
 		return info
 	}
-	info["available"] = true
+	info[semantic.FieldAvailable] = true
 	if root != "" {
-		info["globalRoot"] = root
+		info[semantic.FieldGlobalRoot] = root
 	}
 	output, err := runCommand("npm", "list", "-g", "yeelight-home", "--depth=0", "--json")
 	if err != nil && strings.TrimSpace(output) == "" {
-		info["error"] = "package_not_listed"
+		info[semantic.FieldError] = "package_not_listed"
 		return info
 	}
 	version := parseNPMGlobalVersion(output)
 	if version == "" {
 		return info
 	}
-	info["installed"] = true
-	info["version"] = version
+	info[semantic.FieldInstalled] = true
+	info[semantic.FieldVersion] = version
 	if root != "" {
-		info["packagePath"] = filepath.Join(root, "yeelight-home")
+		info[semantic.FieldPackagePath] = filepath.Join(root, "yeelight-home")
 	}
 	return info
 }
@@ -223,38 +225,38 @@ func parseNPMGlobalVersion(output string) string {
 }
 
 func homebrewDiagnostics(runCommand installCommandRunner) map[string]any {
-	info := map[string]any{"available": false, "installed": false}
+	info := map[string]any{semantic.FieldAvailable: false, semantic.FieldInstalled: false}
 	if runCommand == nil {
 		return info
 	}
 	prefix, prefixErr := runCommand("brew", "--prefix")
 	if prefixErr != nil {
-		info["error"] = "brew_not_available"
+		info[semantic.FieldError] = "brew_not_available"
 		return info
 	}
-	info["available"] = true
+	info[semantic.FieldAvailable] = true
 	if prefix != "" {
-		info["prefix"] = prefix
+		info[semantic.FieldPrefix] = prefix
 	}
 	formula := homebrewFormulaDiagnostics(runCommand)
 	cask := homebrewCaskDiagnostics(runCommand)
-	info["formula"] = formula
-	info["cask"] = cask
-	if boolFromMap(formula, "installed") || boolFromMap(cask, "installed") {
-		info["installed"] = true
+	info[semantic.FieldFormula] = formula
+	info[semantic.FieldCask] = cask
+	if boolFromMap(formula, semantic.FieldInstalled) || boolFromMap(cask, semantic.FieldInstalled) {
+		info[semantic.FieldInstalled] = true
 	}
-	if version := stringFromMap(formula, "version"); version != "" {
-		info["version"] = version
-		info["channel"] = "formula"
-	} else if version := stringFromMap(cask, "version"); version != "" {
-		info["version"] = version
-		info["channel"] = "cask"
+	if version := stringFromMap(formula, semantic.FieldVersion); version != "" {
+		info[semantic.FieldVersion] = version
+		info[semantic.FieldChannel] = semantic.FieldFormula
+	} else if version := stringFromMap(cask, semantic.FieldVersion); version != "" {
+		info[semantic.FieldVersion] = version
+		info[semantic.FieldChannel] = semantic.FieldCask
 	}
 	return info
 }
 
 func homebrewFormulaDiagnostics(runCommand installCommandRunner) map[string]any {
-	info := map[string]any{"installed": false}
+	info := map[string]any{semantic.FieldInstalled: false}
 	output, err := runCommand("brew", "list", "--versions", "yeelight-home")
 	if err != nil && strings.TrimSpace(output) == "" {
 		return info
@@ -263,13 +265,13 @@ func homebrewFormulaDiagnostics(runCommand installCommandRunner) map[string]any 
 	if version == "" {
 		return info
 	}
-	info["installed"] = true
-	info["version"] = version
+	info[semantic.FieldInstalled] = true
+	info[semantic.FieldVersion] = version
 	return info
 }
 
 func homebrewCaskDiagnostics(runCommand installCommandRunner) map[string]any {
-	info := map[string]any{"installed": false}
+	info := map[string]any{semantic.FieldInstalled: false}
 	output, err := runCommand("brew", "list", "--cask", "--versions", "yeelight-home")
 	if err != nil && strings.TrimSpace(output) == "" {
 		return info
@@ -278,17 +280,17 @@ func homebrewCaskDiagnostics(runCommand installCommandRunner) map[string]any {
 	if version == "" {
 		return info
 	}
-	info["installed"] = true
-	info["version"] = version
+	info[semantic.FieldInstalled] = true
+	info[semantic.FieldVersion] = version
 	return info
 }
 
 func homebrewVersionMismatchWarnings(runtimeVersion string, homebrew map[string]any) []string {
 	warnings := []string{}
-	formulaVersion := nestedStringFromMap(homebrew, "formula", "version")
-	caskVersion := nestedStringFromMap(homebrew, "cask", "version")
+	formulaVersion := nestedStringFromMap(homebrew, semantic.FieldFormula, semantic.FieldVersion)
+	caskVersion := nestedStringFromMap(homebrew, semantic.FieldCask, semantic.FieldVersion)
 	if formulaVersion == "" && caskVersion == "" {
-		if brewVersion, ok := homebrew["version"].(string); ok && versionMismatch(runtimeVersion, brewVersion) {
+		if brewVersion, ok := homebrew[semantic.FieldVersion].(string); ok && versionMismatch(runtimeVersion, brewVersion) {
 			return []string{"homebrew_package_version_differs_from_runtime_version"}
 		}
 		return nil
@@ -378,14 +380,14 @@ func canonicalExecutablePath(path string) string {
 
 func onlineLatestVersions(ctx context.Context) map[string]any {
 	checks := map[string]any{
-		"githubRelease": latestGitHubRelease(ctx),
-		"npm":           latestNPMVersion(ctx),
-		"homebrew":      latestHomebrewFormulaVersion(ctx),
-		"homebrewCask":  latestHomebrewCaskVersion(ctx),
+		semantic.FieldGitHubRelease: latestGitHubRelease(ctx),
+		semantic.FieldNPM:           latestNPMVersion(ctx),
+		semantic.FieldHomebrew:      latestHomebrewFormulaVersion(ctx),
+		semantic.FieldHomebrewCask:  latestHomebrewCaskVersion(ctx),
 	}
 	return map[string]any{
-		"checked":  true,
-		"channels": checks,
+		semantic.FieldChecked:  true,
+		semantic.FieldChannels: checks,
 	}
 }
 
@@ -396,14 +398,14 @@ func latestGitHubRelease(ctx context.Context) map[string]any {
 		HTMLURL     string `json:"html_url"`
 	}
 	if err := getJSON(ctx, "https://api.github.com/repos/Yeelight/yeelight-home/releases/latest", &payload); err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+		return map[string]any{semantic.FieldOK: false, semantic.FieldError: err.Error()}
 	}
 	return map[string]any{
-		"ok":          true,
-		"version":     strings.TrimPrefix(strings.TrimSpace(payload.TagName), "v"),
-		"tag":         payload.TagName,
-		"publishedAt": payload.PublishedAt,
-		"url":         payload.HTMLURL,
+		semantic.FieldOK:          true,
+		semantic.FieldVersion:     strings.TrimPrefix(strings.TrimSpace(payload.TagName), "v"),
+		semantic.FieldTag:         payload.TagName,
+		semantic.FieldPublishedAt: payload.PublishedAt,
+		semantic.FieldURL:         payload.HTMLURL,
 	}
 }
 
@@ -412,35 +414,35 @@ func latestNPMVersion(ctx context.Context) map[string]any {
 		Version string `json:"version"`
 	}
 	if err := getJSON(ctx, "https://registry.npmjs.org/yeelight-home/latest", &payload); err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+		return map[string]any{semantic.FieldOK: false, semantic.FieldError: err.Error()}
 	}
 	version := strings.TrimSpace(payload.Version)
-	return map[string]any{"ok": version != "", "version": version}
+	return map[string]any{semantic.FieldOK: version != "", semantic.FieldVersion: version}
 }
 
 func latestHomebrewFormulaVersion(ctx context.Context) map[string]any {
 	body, err := getText(ctx, "https://raw.githubusercontent.com/Yeelight/homebrew-tap/main/Formula/yeelight-home.rb")
 	if err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+		return map[string]any{semantic.FieldOK: false, semantic.FieldError: err.Error()}
 	}
 	version := parseHomebrewFormulaVersion(body)
 	return map[string]any{
-		"ok":      version != "",
-		"version": version,
-		"name":    "yeelight/tap/yeelight-home",
+		semantic.FieldOK:      version != "",
+		semantic.FieldVersion: version,
+		semantic.FieldName:    "yeelight/tap/yeelight-home",
 	}
 }
 
 func latestHomebrewCaskVersion(ctx context.Context) map[string]any {
 	body, err := getText(ctx, "https://raw.githubusercontent.com/Yeelight/homebrew-tap/main/Casks/yeelight-home.rb")
 	if err != nil {
-		return map[string]any{"ok": false, "error": err.Error()}
+		return map[string]any{semantic.FieldOK: false, semantic.FieldError: err.Error()}
 	}
 	version := parseHomebrewFormulaVersion(body)
 	return map[string]any{
-		"ok":      version != "",
-		"version": version,
-		"name":    "yeelight/tap/yeelight-home",
+		semantic.FieldOK:      version != "",
+		semantic.FieldVersion: version,
+		semantic.FieldName:    "yeelight/tap/yeelight-home",
 	}
 }
 

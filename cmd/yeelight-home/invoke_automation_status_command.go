@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareAutomationStatus(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,27 +17,29 @@ func (app *app) prepareAutomationStatus(ctx context.Context, request contract.Re
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID), "local profile houseId"}), nil
 	}
-	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-		HouseID: houseID,
-		Credentials: api.EntityListCredentials{
-			Authorization: authorization,
-			ClientID:      clientID,
-		},
-	})
+	target := entityGetTargetFromRequest(request)
+	if target.entityType == "" {
+		target.entityType = "automation"
+	}
+	if target.id == "" && target.name == "" {
+		return configureClarificationResponse(request, "missing_automation_target", automationStatusAcceptedFields()), nil
+	}
+	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	automation, reason := automationStatusTarget(request, entities)
+	entities := resolved.Entities
+	automation, reason := automationStatusResolvedTarget(resolved)
 	if reason != "" {
 		return configureClarificationResponse(request, reason, automationStatusAcceptedFields()), nil
 	}
 	summary := automationStatusSummary(request.Intent, automation)
 	now := time.Now()
 	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, map[string]any{
-		"houseId":      requestNumberOrString(houseID),
-		"automationId": automation.ID,
+		semantic.FieldHouseID:      requestNumberOrString(houseID),
+		semantic.FieldAutomationID: automation.ID,
 	}, []string{
 		"提交前重新读取家庭自动化列表",
 		"目标自动化必须属于当前家庭",
@@ -47,6 +50,16 @@ func (app *app) prepareAutomationStatus(ctx context.Context, request contract.Re
 	}
 	app.preparedOperation = &record
 	return executionPreviewResponse(request, record, entities), nil
+}
+
+func automationStatusResolvedTarget(resolved entityResolveResult) (api.EntitySummary, string) {
+	if resolved.Match.ID != "" {
+		return resolved.Match, ""
+	}
+	if len(resolved.Candidates) > 1 {
+		return api.EntitySummary{}, "ambiguous_automation_target"
+	}
+	return api.EntitySummary{}, "invalid_automation_reference"
 }
 
 func automationStatusTarget(request contract.Request, entities api.EntityListResult) (api.EntitySummary, string) {
@@ -68,7 +81,7 @@ func automationStatusTarget(request contract.Request, entities api.EntityListRes
 }
 
 func automationStatusAcceptedFields() []string {
-	return []string{"parameters.houseId", "parameters.automationId", "parameters.id", "parameters.name"}
+	return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldAutomationID, semantic.FieldID, semantic.FieldAutomationName, semantic.FieldName)
 }
 
 func automationStatusSummary(intent string, automation api.EntitySummary) string {
@@ -89,7 +102,7 @@ func (app *app) executeAutomationStatus(ctx context.Context, request contract.Re
 	result, err := api.NewAutomationStatusClient(endpoint, nil).Run(ctx, api.AutomationStatusRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
-		AutomationID:   executionPayloadString(record.Payload, "automationId"),
+		AutomationID:   executionPayloadString(record.Payload, semantic.FieldAutomationID),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.AutomationStatusCredentials{

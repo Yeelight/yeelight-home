@@ -112,8 +112,8 @@ func TestInvokeMaintenanceReadNextUsesSemanticAdapters(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-maintenance-next-secret", "client-maintenance-next-1", "house-1")
 
 	inputs := []string{
-		`{"contractVersion":"1.0","requestId":"req-app-upgrade","locale":"zh-CN","utterance":"查看用户版安卓 App 最新升级版本","intent":"app_upgrade.latest.get","parameters":{"type":"1","osType":"1","languageCode":"zh-CN"}}`,
-		`{"contractVersion":"1.0","requestId":"req-ota-version","locale":"zh-CN","utterance":"按版本查看固件文件","intent":"ota.version_file.batch_list","parameters":{"firmwareType":"main","version":44,"language":"zh","script":"Hans","region":"CN"}}`,
+		`{"contractVersion":"1.0","requestId":"req-app-upgrade","locale":"zh-CN","utterance":"查看用户版安卓 App 最新升级版本","intent":"app_upgrade.latest.get","parameters":{"appType":"yeelight","osType":"android","languageCode":"zh-CN"}}`,
+		`{"contractVersion":"1.0","requestId":"req-ota-version","locale":"zh-CN","utterance":"按版本查看固件文件","intent":"ota.version_file.batch_list","parameters":{"firmwareType":"main","version":44,"languageCode":"zh","script":"Hans","region":"CN"}}`,
 		`{"contractVersion":"1.0","requestId":"req-node-property","locale":"zh-CN","utterance":"查看主灯节点属性配置","intent":"node.property_config.get","targets":[{"entityType":"device","id":"device-1"}],"parameters":{"nodeType":"device"}}`,
 	}
 	for _, input := range inputs {
@@ -160,7 +160,7 @@ func TestInvokeMaintenanceReadonlyAuthBoundaryReturnsPartialJSON(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-maintenance-auth-secret", "client-maintenance-auth-1", "house-1")
 
-	input := `{"contractVersion":"1.0","requestId":"req-ota-unauthorized","locale":"zh-CN","utterance":"按版本查看固件文件","intent":"ota.version_file.batch_list","parameters":{"firmwareType":"main","version":44,"language":"zh","script":"Hans","region":"CN"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-ota-unauthorized","locale":"zh-CN","utterance":"按版本查看固件文件","intent":"ota.version_file.batch_list","parameters":{"firmwareType":"main","version":44,"languageCode":"zh","script":"Hans","region":"CN"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -184,7 +184,11 @@ func TestInvokeMaintenanceReadonlyAuthBoundaryReturnsPartialJSON(t *testing.T) {
 		t.Fatalf("warnings = %#v", response["warnings"])
 	}
 	result := response["result"].(map[string]any)
-	if result["cloudWrites"] != false || result["rawShape"] != "<http_auth_boundary>" {
+	if result["cloudWrites"] != false || result["rawShape"] != nil {
 		t.Fatalf("result = %#v", result)
+	}
+	data := result["data"].(map[string]any)
+	if data["httpStatus"] != float64(http.StatusUnauthorized) {
+		t.Fatalf("data = %#v", data)
 	}
 }

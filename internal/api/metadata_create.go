@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type MetadataCreateCredentials struct {
@@ -187,7 +189,7 @@ func (client MetadataCreateClient) findMetadataByNameWithCallCount(ctx context.C
 
 func metadataListBody(spec metadataCreateSpec, houseID string) map[string]any {
 	if spec.kind == MetadataKindAutomation {
-		return map[string]any{"houseId": houseID}
+		return map[string]any{semantic.FieldHouseID: houseID}
 	}
 	return spec.listBody
 }

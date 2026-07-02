@@ -66,6 +66,62 @@ func TestSpaceBatchOrganizationClientMovesDevicesWithReadAfterWrite(t *testing.T
 	}
 }
 
+func TestSpaceBatchOrganizationClientRejectsDependentEntityCountDrop(t *testing.T) {
+	deviceListCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/200171/area/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"401391","name":"客厅"},{"id":"401392","name":"卧室"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/device/r/info/1/100":
+			deviceListCalls++
+			if deviceListCalls < 2 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"50018330","name":"主灯","roomId":"401391"}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"50018330","name":"主灯","roomId":"401392"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/group/r/info/1/100":
+			if deviceListCalls < 2 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"group-1","name":"灯组"}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/scene/r/info/1/100":
+			if deviceListCalls < 2 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"scene-1","name":"回家"}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v1/automations/r/list":
+			if deviceListCalls < 2 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"auto-1","name":"开灯","status":1}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/device/room/w/batch-modify":
+			_, _ = writer.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	_, err := NewSpaceBatchOrganizationClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client()).Run(context.Background(), SpaceBatchOrganizationRequest{
+		Kind:           SpaceBatchDeviceMoveRoom,
+		HouseID:        "200171",
+		VerifyAttempts: 1,
+		Payload: map[string]any{
+			"items": map[string]any{"50018330": "401392"},
+		},
+		Credentials: SpaceOrganizationCredentials{Authorization: "secret-token", ClientID: "client-1"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "dependent entity count drop") || !strings.Contains(err.Error(), "group 1->0") || !strings.Contains(err.Error(), "scene 1->0") || !strings.Contains(err.Error(), "automation 1->0") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestSpaceBatchOrganizationClientRejectsTooManyItems(t *testing.T) {
 	items := map[string]any{}
 	for index := 0; index < 21; index++ {

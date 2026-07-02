@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestProductPediaSearchProjectsProductsAndResources(t *testing.T) {
@@ -90,7 +92,7 @@ func TestProductPediaSearchProjectsProductsAndResources(t *testing.T) {
 	}
 	products := data["products"].([]any)
 	product := products[0].(map[string]any)
-	if product["materialCode"] != "1-000003268" || product["productName"] == "" || product["pediaDisplay"] != true {
+	if product["skuCode"] != "1-000003268" || product["productName"] == "" || product["pediaDisplay"] != true {
 		t.Fatalf("product = %#v", product)
 	}
 	for key, want := range map[string]any{
@@ -142,14 +144,17 @@ func TestProductPediaSearchProjectsProductsAndResources(t *testing.T) {
 	}
 	attachments := resources["attachments"].([]any)
 	firstAttachment := attachments[0].(map[string]any)
-	if firstAttachment["id"] != float64(7320) || firstAttachment["bizId"] != float64(2791) || firstAttachment["bizType"] != "productSet" || firstAttachment["createUid"] != float64(256204) {
+	if firstAttachment[semantic.FieldID] != float64(7320) || firstAttachment[semantic.FieldTargetID] != float64(2791) || firstAttachment[semantic.FieldTargetType] != "productSet" || firstAttachment[semantic.FieldRank] != float64(0) {
 		t.Fatalf("attachment = %#v", firstAttachment)
 	}
-	if _, ok := firstAttachment["name"]; !ok || firstAttachment["name"] != nil {
+	if _, ok := firstAttachment[semantic.FieldName]; !ok || firstAttachment[semantic.FieldName] != nil {
 		t.Fatalf("attachment null name not preserved: %#v", firstAttachment)
 	}
 	if _, ok := firstAttachment["accessToken"]; ok {
 		t.Fatalf("sensitive attachment field leaked: %#v", firstAttachment)
+	}
+	if _, ok := firstAttachment["createUid"]; ok {
+		t.Fatalf("source uid field leaked: %#v", firstAttachment)
 	}
 }
 

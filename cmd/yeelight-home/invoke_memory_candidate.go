@@ -1,6 +1,9 @@
 package main
 
-import "github.com/yeelight/yeelight-home/internal/contract"
+import (
+	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
+)
 
 type memoryPreferenceCandidate struct {
 	scopeType       string
@@ -21,9 +24,9 @@ func memoryPreferenceFromRequest(request contract.Request) memoryPreferenceCandi
 }
 
 func memoryPreferencesFromRequest(request contract.Request) []memoryPreferenceCandidate {
-	candidates := memoryPreferencesFromParameterList(request.Parameters["preferences"])
+	candidates := memoryPreferencesFromParameterList(request.Parameters[semantic.FieldPreferences])
 	if len(candidates) == 0 {
-		candidates = memoryPreferencesFromParameterList(request.Parameters["memories"])
+		candidates = memoryPreferencesFromParameterList(request.Parameters[semantic.FieldMemories])
 	}
 	if len(candidates) > 0 {
 		return candidates
@@ -57,12 +60,12 @@ func memoryPreferencesFromParameterList(value any) []memoryPreferenceCandidate {
 
 func memoryPreferenceFromParameters(parameters map[string]any) memoryPreferenceCandidate {
 	return memoryPreferenceCandidate{
-		scopeType:       firstNonEmptyString(firstRequestString(parameters, "scopeType"), "home"),
-		scopeRef:        firstRequestString(parameters, "scopeRef"),
-		preferenceType:  firstRequestString(parameters, "preferenceType", "type"),
-		preferenceValue: firstRequestString(parameters, "preferenceValue", "value"),
-		kind:            firstNonEmptyString(firstRequestString(parameters, "kind"), "explicit"),
-		status:          firstRequestString(parameters, "status"),
-		evidence:        firstRequestString(parameters, "evidence"),
+		scopeType:       firstNonEmptyString(firstRequestString(parameters, semantic.FieldScopeType), "home"),
+		scopeRef:        firstRequestString(parameters, semantic.FieldScopeRef),
+		preferenceType:  firstRequestString(parameters, semantic.FieldPreferenceType),
+		preferenceValue: firstRequestString(parameters, semantic.FieldPreferenceValue),
+		kind:            firstNonEmptyString(firstRequestString(parameters, semantic.FieldKind), "explicit"),
+		status:          firstRequestString(parameters, semantic.FieldStatus),
+		evidence:        firstRequestString(parameters, semantic.FieldEvidence),
 	}
 }

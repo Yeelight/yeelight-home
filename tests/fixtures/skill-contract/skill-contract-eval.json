@@ -985,7 +985,7 @@
       ]
     },
     {
-      "id": "product-pedia-material-code-manual-search",
+      "id": "product-pedia-sku-manual-search",
       "utterance": "帮我找一下 1-000003268 的说明书",
       "expectedIntent": "product.pedia.search",
       "mustUse": [
@@ -1668,7 +1668,7 @@
       "expectedIntent": "lighting.design.import",
       "mustUse": [
         "scripts/product-select.mjs",
-        "materialCode",
+        "skuCode",
         "lighting.design.import",
         "scripts/invoke"
       ],

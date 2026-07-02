@@ -39,7 +39,7 @@ func TestThingSchemaReadonlyAdaptersReturnProjectedSchema(t *testing.T) {
 	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
 	request := MetadataReadonlyRequest{
 		HouseID:     "house-1",
-		Parameters:  map[string]any{"productId": "1001"},
+		Parameters:  map[string]any{"capabilityPid": "1001"},
 		Credentials: MetadataReadonlyCredentials{Authorization: "Bearer token-schema-secret", ClientID: "client-1"},
 	}
 
@@ -60,7 +60,7 @@ func TestThingSchemaReadonlyAdaptersReturnProjectedSchema(t *testing.T) {
 		},
 		func() (MetadataReadonlyResult, error) {
 			versioned := request
-			versioned.Parameters = map[string]any{"productId": "1001", "version": 2}
+			versioned.Parameters = map[string]any{"capabilityPid": "1001", "version": 2}
 			return client.RunThingProductInfoV3BatchGet(context.Background(), versioned)
 		},
 		func() (MetadataReadonlyResult, error) {
@@ -131,7 +131,7 @@ func TestThingSchemaGetRequiresProductContextWithoutCloudCall(t *testing.T) {
 	}
 
 	v3, err := client.RunThingProductInfoV3BatchGet(context.Background(), MetadataReadonlyRequest{
-		Parameters:  map[string]any{"productId": "1001"},
+		Parameters:  map[string]any{"capabilityPid": "1001"},
 		Credentials: MetadataReadonlyCredentials{Authorization: "Bearer token-schema-secret", ClientID: "client-1"},
 	})
 	if err != nil {
@@ -139,6 +139,35 @@ func TestThingSchemaGetRequiresProductContextWithoutCloudCall(t *testing.T) {
 	}
 	if !v3.Partial || v3.APICalls != 0 || len(v3.Warnings) != 1 || v3.Warnings[0] != "product_version_context_missing" {
 		t.Fatalf("v3 = %#v", v3)
+	}
+}
+
+func TestThingProductInfoAcceptsCapabilityPidsList(t *testing.T) {
+	var gotQueries []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotQueries = append(gotQueries, request.URL.RawQuery)
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"success":true,"data":[{"pid":1001,"desc":"主灯产品"},{"pid":1002,"desc":"辅灯产品"}]}`))
+	}))
+	defer server.Close()
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+
+	result, err := client.RunThingProductInfoBatchGet(context.Background(), MetadataReadonlyRequest{
+		Parameters:  map[string]any{"capabilityPids": []any{"1001", "1002"}},
+		Credentials: MetadataReadonlyCredentials{Authorization: "Bearer token-schema-secret", ClientID: "client-1"},
+	})
+	if err != nil {
+		t.Fatalf("RunThingProductInfoBatchGet error = %v", err)
+	}
+	if result.Partial || result.APICalls != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(gotQueries) != 1 || !strings.Contains(gotQueries[0], "pids=1001%2C1002") {
+		t.Fatalf("gotQueries = %#v", gotQueries)
+	}
+	data, ok := result.Data.(map[string]any)
+	if !ok || data["capabilityPid"] != "1001,1002" {
+		t.Fatalf("data = %#v", result.Data)
 	}
 }
 

@@ -11,8 +11,6 @@ import (
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
-const topologyCacheTTL = 5 * time.Minute
-
 type topologyCache struct {
 	legacyPath string
 	rootDir    string
@@ -38,7 +36,7 @@ func newTopologyCache(path string) topologyCache {
 	}
 }
 
-func (cache topologyCache) Load(profile string, region string, houseID string, now time.Time) (api.EntityListResult, bool) {
+func (cache topologyCache) Load(profile string, region string, houseID string, _ time.Time) (api.EntityListResult, bool) {
 	if strings.TrimSpace(cache.rootDir) == "" || strings.TrimSpace(houseID) == "" {
 		return api.EntityListResult{}, false
 	}
@@ -47,9 +45,6 @@ func (cache topologyCache) Load(profile string, region string, houseID string, n
 		return api.EntityListResult{}, false
 	}
 	if entry.Result.Total == 0 {
-		return api.EntityListResult{}, false
-	}
-	if now.Unix()-entry.UpdatedAt > int64(topologyCacheTTL.Seconds()) {
 		return api.EntityListResult{}, false
 	}
 	result := entry.Result

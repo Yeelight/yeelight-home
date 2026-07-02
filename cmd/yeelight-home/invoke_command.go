@@ -11,6 +11,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
 	localruntime "github.com/yeelight/yeelight-home/internal/runtime"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
@@ -31,6 +32,16 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 	}
 	response, err := app.invokeWithFlags(context.Background(), request, flags)
 	if err != nil {
+		response = invokeErrorResponse(request, err)
+		encoded, encodeErr := contract.EncodeResponse(response)
+		if encodeErr != nil {
+			_, _ = fmt.Fprintf(stderr, "encode SkillResponse: %v\n", encodeErr)
+			return exitInternalError
+		}
+		if _, writeErr := stdout.Write(encoded); writeErr != nil {
+			_, _ = fmt.Fprintf(stderr, "write stdout: %v\n", writeErr)
+			return exitInternalError
+		}
 		_, _ = fmt.Fprintf(stderr, "invoke: %v\n", err)
 		return exitInternalError
 	}
@@ -44,6 +55,46 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 		return exitInternalError
 	}
 	return exitOK
+}
+
+func invokeErrorResponse(request contract.Request, err error) contract.Response {
+	message := strings.TrimSpace(fmt.Sprint(err))
+	if message == "" {
+		message = "unknown invoke error"
+	}
+	safeToRetry, nextAction := invokeErrorRetryPolicy(message)
+	return contract.Response{
+		ContractVersion: contract.Version,
+		RequestID:       request.RequestID,
+		Status:          "error",
+		UserMessage:     "Runtime 执行失败，已返回可解析错误；调用方可以根据 error.code、error.message 和原始语义请求继续修正或重试。",
+		Result: map[string]any{
+			semantic.FieldIntent:      request.Intent,
+			semantic.FieldSafeToRetry: safeToRetry,
+			semantic.FieldNextAction:  nextAction,
+		},
+		Warnings: []string{"runtime_error_returned_as_skill_response"},
+		TraceID:  "invoke-error",
+		Metrics: map[string]any{
+			semantic.FieldAPICalls:  0,
+			semantic.FieldCacheHits: 0,
+		},
+		Error: &contract.Error{
+			Code:    "invoke_failed",
+			Message: message,
+		},
+	}
+}
+
+func invokeErrorRetryPolicy(message string) (bool, string) {
+	normalized := strings.ToLower(strings.TrimSpace(message))
+	if strings.Contains(normalized, "returned non-success business response") {
+		return false, "report_backend_failure_do_not_retry_same_payload"
+	}
+	if strings.Contains(normalized, "unsupported") || strings.Contains(normalized, "not supported") {
+		return false, "use_supported_alternative_or_ask_user"
+	}
+	return true, "fix_request_or_retry_after_backend_recovery"
 }
 
 func invokeFlagsAllowed(flags cliFlags) bool {
@@ -80,8 +131,11 @@ func (app *app) invokeWithFlagsDirect(ctx context.Context, request contract.Requ
 		if isPreparedExecutionResponse(response) {
 			return previewOnlyResponse(response), nil
 		}
+		if isDirectNoWritePreviewResponse(response) {
+			return response, nil
+		}
 		if response.Status == "success" || response.Status == "partial" {
-			response.Warnings = appendWarning(response.Warnings, "dry_run_no_cloud_write_not_available_for_direct_adapter")
+			response.Warnings = appendWarning(response.Warnings, "dry_run_no_cloud_write_not_available_for_direct_execution")
 		}
 		return response, nil
 	}
@@ -92,16 +146,81 @@ func (app *app) invokeWithFlagsDirect(ctx context.Context, request contract.Requ
 	if record == nil {
 		return response, nil
 	}
+	if record.Risk == operation.RiskR3 && !requestBool(request.Parameters, semantic.FieldConfirmed) {
+		return r3ConfirmationRequiredResponse(request, response), nil
+	}
 	executed, err := app.executeTransientPreparedOperation(ctx, request, flags, *record)
 	if err != nil {
 		return contract.Response{}, err
 	}
+	mergePreviewCacheHits(executed.Metrics, response.Metrics)
 	executed.Warnings = appendWarning(executed.Warnings, "runtime_direct_execution_after_validation")
 	if executed.Execution == nil {
 		executed.Execution = map[string]any{}
 	}
-	executed.Execution["executionMode"] = "direct"
+	executed.Execution[semantic.FieldExecutionModel] = "direct"
 	return executed, nil
+}
+
+func r3ConfirmationRequiredResponse(request contract.Request, previewResponse contract.Response) contract.Response {
+	preview := copyRequestMap(requestMap(previewResponse.Result[semantic.FieldPreview]))
+	clarification := map[string]any{
+		semantic.FieldReason: "explicit_confirmation_required",
+		semantic.FieldAcceptedFields: []string{
+			semantic.ParameterPath(semantic.FieldConfirmed),
+		},
+		semantic.FieldNextStep: "Ask the user for explicit natural-language confirmation, then resend the same request with parameters.confirmed=true. Do not execute destructive or permission-sensitive operations without that flag.",
+	}
+	if len(preview) > 0 {
+		clarification[semantic.FieldPreview] = preview
+	}
+	return contract.Response{
+		ContractVersion: contract.Version,
+		RequestID:       request.RequestID,
+		Status:          "clarification_required",
+		UserMessage:     "这是高影响操作，需要用户明确确认后才会执行。",
+		Clarification:   clarification,
+		Warnings:        []string{"r3_explicit_confirmation_required"},
+		TraceID:         "r3-confirmation-required",
+		Metrics:         previewResponse.Metrics,
+	}
+}
+
+func isDirectNoWritePreviewResponse(response contract.Response) bool {
+	if response.TraceID != "direct-write-preview" && response.TraceID != "lighting-experience-apply-preview" {
+		return false
+	}
+	if response.Result == nil {
+		return false
+	}
+	return requestBool(response.Result, semantic.FieldDryRun)
+}
+
+func mergePreviewCacheHits(target map[string]any, preview map[string]any) {
+	if target == nil || preview == nil {
+		return
+	}
+	targetHits := metricInt(target[semantic.FieldCacheHits])
+	previewHits := metricInt(preview[semantic.FieldCacheHits])
+	if previewHits <= 0 {
+		return
+	}
+	target[semantic.FieldCacheHits] = targetHits + previewHits
+}
+
+func metricInt(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	default:
+		return 0
+	}
 }
 
 func (app *app) executeTransientPreparedOperation(ctx context.Context, request contract.Request, flags cliFlags, record operation.Prepared) (contract.Response, error) {
@@ -127,13 +246,13 @@ func (app *app) executeTransientPreparedOperation(ctx context.Context, request c
 }
 
 func previewOnlyResponse(response contract.Response) contract.Response {
-	preview := copyRequestMap(requestMap(response.Result["preview"]))
+	preview := copyRequestMap(requestMap(response.Result[semantic.FieldPreview]))
 	response.Status = "success"
 	response.UserMessage = "已生成执行预览；调用方确认后可重新发送同一语义请求直接执行。"
 	response.Result = map[string]any{
-		"dryRun":       true,
-		"preview":      preview,
-		"executeModel": "resend_same_intent_after_user_confirmation",
+		semantic.FieldDryRun:         true,
+		semantic.FieldPreview:        preview,
+		semantic.FieldExecutionModel: "resend_same_intent_after_user_confirmation",
 	}
 	response.TraceID = "invoke-preview"
 	response.Warnings = appendWarning(response.Warnings, "dry_run_no_cloud_write")
@@ -141,8 +260,8 @@ func previewOnlyResponse(response contract.Response) contract.Response {
 }
 
 func isPreparedExecutionResponse(response contract.Response) bool {
-	preview := requestMap(response.Result["preview"])
-	return preview != nil && requestString(preview["executionModel"]) == "ordinary_invoke_executes_directly"
+	preview := requestMap(response.Result[semantic.FieldPreview])
+	return preview != nil && requestString(preview[semantic.FieldExecutionModel]) == "ordinary_invoke_executes_directly"
 }
 
 func shouldReturnPreviewOnly(request contract.Request, flags cliFlags) bool {
@@ -150,7 +269,7 @@ func shouldReturnPreviewOnly(request contract.Request, flags cliFlags) bool {
 		return true
 	}
 	for _, source := range []map[string]any{request.Options, request.Parameters} {
-		if requestBool(source, "previewOnly", "preview_only", "dryRun", "dry_run") {
+		if requestBool(source, semantic.FieldPreviewOnly, semantic.FieldDryRun) {
 			return true
 		}
 	}
@@ -164,14 +283,15 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	if request.Options == nil {
 		request.Options = map[string]any{}
 	}
-	for _, name := range []string{"dry-run", "preview-only"} {
-		if flags.bool(name) {
-			request.Options[strings.ReplaceAll(name, "-", "")] = true
-		}
+	if flags.bool("dry-run") {
+		request.Options[semantic.FieldDryRun] = true
 	}
-	if region := requestString(request.Parameters["region"]); region != "" {
+	if flags.bool("preview-only") {
+		request.Options[semantic.FieldPreviewOnly] = true
+	}
+	if region := requestString(request.Parameters[semantic.FieldRegion]); region != "" {
 		if flags.string("region", "") == "" {
-			flags.values["region"] = region
+			flags.values[semantic.FieldRegion] = region
 		}
 	}
 	if houseID := requestHouseID(request); houseID != "" {
@@ -193,20 +313,30 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	region := context.Region
 	clientID := context.ClientID
 	houseID := context.HouseID
-	if isHouseIndependentInvokeIntent(request.Intent) {
+	houseIndependent := requestRunsHouseIndependent(request)
+	if houseIndependent {
 		houseID = ""
 	}
 	endpoint := context.Endpoint
 	accessToken := context.AccessToken
-	if !isHouseIndependentInvokeIntent(request.Intent) && !isLocalOnlyInvokeIntent(request.Intent) && requestHouseID(request) == "" {
+	if !houseIndependent && !isLocalOnlyInvokeIntent(request.Intent) && requestHouseID(request) == "" && !skipImplicitHomeResolution(request) {
 		resolvedHouseID, resolveErr := app.resolveRequestHouseID(ctx, request, endpoint, accessToken, clientID)
 		if resolveErr != nil {
 			return contract.Response{}, resolveErr
 		}
 		if resolvedHouseID != "" {
 			houseID = resolvedHouseID
-		} else if strings.TrimSpace(firstRequestString(request.HomeRef, "name", "houseName")) != "" {
-			return configureClarificationResponse(request, "home_name_not_found_or_ambiguous", []string{"homeRef.name", "homeRef.id", "parameters.houseId"}), nil
+		} else if strings.TrimSpace(firstRequestString(request.HomeRef, semantic.FieldName, semantic.FieldHouseName)) != "" {
+			return configureClarificationResponse(request, "home_name_not_found_or_ambiguous", []string{
+				semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldName),
+				semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID),
+				semantic.ParameterPath(semantic.FieldHouseID),
+			}), nil
+		}
+	}
+	if shouldReturnPreviewOnly(request, flags) {
+		if preview, handled, err := app.previewDirectWriteIntent(ctx, request, endpoint, profile, region, houseID, accessToken, clientID); handled {
+			return preview, err
 		}
 	}
 	defer func() {
@@ -223,89 +353,89 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	case "account.info":
 		return app.invokeAccountInfo(ctx, request, endpoint, accessToken, clientID)
 	case "home.member.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, homeMemberListSpec())
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, homeMemberListSpec())
 	case "home.member.current.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.member.current.get", "已读取当前家庭成员的脱敏只读信息。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.member.current.get", "已读取当前家庭成员的脱敏只读信息。"))
 	case "device.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.detail.get", "已读取设备详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.detail.get", "已读取设备详情的安全摘要。"))
 	case "device.attr.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.attr.list", "已读取设备属性的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.attr.list", "已读取设备属性的安全摘要。"))
 	case "device.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.list", "已读取家庭设备候选列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.list", "已读取家庭设备候选列表。"))
 	case "room.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("room.detail.get", "已读取房间详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("room.detail.get", "已读取房间详情的安全摘要。"))
 	case "room.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("room.list", "已读取家庭房间列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("room.list", "已读取家庭房间列表。"))
 	case "room.search":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("room.search", "已搜索家庭房间候选。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("room.search", "已搜索家庭房间候选。"))
 	case "area.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("area.detail.get", "已读取区域详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("area.detail.get", "已读取区域详情的安全摘要。"))
 	case "home.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.detail.get", "已读取家庭详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.detail.get", "已读取家庭详情的安全摘要。"))
 	case "home.stat.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.stat.get", "已读取家庭统计的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.stat.get", "已读取家庭统计的安全摘要。"))
 	case "geo_area.children.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("geo_area.children.list", "已读取地理区域下级城市候选。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("geo_area.children.list", "已读取地理区域下级城市候选。"))
 	case "geo_area.search":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("geo_area.search", "已按名称搜索地理区域候选。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("geo_area.search", "已按名称搜索地理区域候选。"))
 	case "group.structure.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.structure.list", "已读取设备组结构的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.structure.list", "已读取设备组结构的安全摘要。"))
 	case "group.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.list", "已读取设备组列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.list", "已读取设备组列表。"))
 	case "group.search":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.search", "已搜索设备组候选。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.search", "已搜索设备组候选。"))
 	case "group.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.detail.get", "已读取设备组详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.detail.get", "已读取设备组详情的安全摘要。"))
 	case "scene.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.detail.get", "已读取情景详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.detail.get", "已读取情景详情的安全摘要。"))
 	case "scene.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.list", "已读取家庭情景列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.list", "已读取家庭情景列表。"))
 	case "scene.scoped.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.scoped.list", "已按家庭或房间读取情景列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.scoped.list", "已按家庭或房间读取情景列表。"))
 	case "scene.search":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.search", "已搜索家庭情景。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.search", "已搜索家庭情景。"))
 	case "automation.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.list", "已读取家庭自动化列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.list", "已读取家庭自动化列表。"))
 	case "automation.supported.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.supported.list", "已读取自动化支持能力。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.supported.list", "已读取自动化支持能力。"))
 	case "automation.supported.v2.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.supported.v2.list", "已读取自动化 V2 支持能力。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.supported.v2.list", "已读取自动化 V2 支持能力。"))
 	case "automation.rule.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.rule.list", "已读取家庭规则列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.rule.list", "已读取家庭规则列表。"))
 	case "automation.list.page":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.list.page", "已分页读取自动化列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.list.page", "已分页读取自动化列表。"))
 	case "automation.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.detail.get", "已读取自动化详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("automation.detail.get", "已读取自动化详情的安全摘要。"))
 	case "schedule_job.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("schedule_job.list", "已读取家庭定时任务列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("schedule_job.list", "已读取家庭定时任务列表。"))
 	case "message.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("message.list", "已读取当前账号消息列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("message.list", "已读取当前账号消息列表的安全摘要。"))
 	case "sensor.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("sensor.list", "已读取家庭传感器列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("sensor.list", "已读取家庭传感器列表的安全摘要。"))
 	case "sensor.event.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("sensor.event.list", "已读取传感器事件列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("sensor.event.list", "已读取传感器事件列表的安全摘要。"))
 	case "device.energy.summary":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.energy.summary", "已读取设备用电摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.energy.summary", "已读取设备用电摘要。"))
 	case "device.weather.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.weather.get", "已读取设备天气上下文。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.weather.get", "已读取设备天气上下文。"))
 	case "device.virtual_count.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.virtual_count.get", "已读取家庭虚拟设备数量。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.virtual_count.get", "已读取家庭虚拟设备数量。"))
 	case "meshgroup.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("meshgroup.detail.get", "已读取 Mesh 组详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("meshgroup.detail.get", "已读取 Mesh 组详情的安全摘要。"))
 	case "node.sorted_device.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("node.sorted_device.list", "已读取节点下设备排序列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("node.sorted_device.list", "已读取节点下设备排序列表。"))
 	case "gateway.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.detail.get", "已读取网关详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.detail.get", "已读取网关详情的安全摘要。"))
 	case "gateway.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.list", "已读取家庭网关列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.list", "已读取家庭网关列表的安全摘要。"))
 	case "gateway.thread.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.thread.get", "已读取网关 Thread 信息的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.thread.get", "已读取网关 Thread 信息的安全摘要。"))
 	case "gateway.stats.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.stats.list", "已读取家庭网关统计的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.stats.list", "已读取家庭网关统计的安全摘要。"))
 	case "gateway.scene_relation.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.scene_relation.list", "已读取网关关联情景的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("gateway.scene_relation.list", "已读取网关关联情景的安全摘要。"))
 	case "product.pedia.search":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("product.pedia.search", "已搜索产品百科资料和候选说明书/FAQ 资源。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("product.pedia.search", "已搜索产品百科资料和候选说明书/FAQ 资源。"))
 	case "home.summary":
 		summary, err := api.NewHomeSummaryClient(endpoint, nil).RunList(ctx, api.HomeSummaryCredentials{
 			Authorization: accessToken,
@@ -326,10 +456,10 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return homeListResponse(request, summary, "home-list-readonly", "已读取账号下家庭列表。"), nil
 	case "home.search":
 		if strings.TrimSpace(firstNonEmptyString(
-			requestString(request.Parameters["fuzzyName"]),
-			requestString(request.Parameters["name"]),
-			requestString(request.Parameters["keyword"]),
-			requestString(request.Parameters["query"]),
+			requestString(request.Parameters[semantic.FieldFuzzyName]),
+			requestString(request.Parameters[semantic.FieldName]),
+			requestString(request.Parameters[semantic.FieldKeyword]),
+			requestString(request.Parameters[semantic.FieldQuery]),
 		)) == "" {
 			return homeSearchClarificationResponse(request), nil
 		}
@@ -358,18 +488,20 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
 		}
-		entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, accessToken, clientID, entityLoadOptions{PreferCache: true})
+		resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, accessToken, clientID, target)
 		if err != nil {
 			return contract.Response{}, err
 		}
-		match, candidates, matchedBy := findEntity(target, entities.Entities)
-		if match.ID == "" {
-			return entityGetClarificationResponse(request, "entity_not_found", target, candidates, entityListAPICalls(entities)), nil
-		}
+		entities := resolved.Entities
+		match := resolved.Match
+		candidates := resolved.Candidates
 		if len(candidates) > 1 && target.id == "" {
 			return entityGetClarificationResponse(request, "ambiguous_target", target, candidates, entityListAPICalls(entities)), nil
 		}
-		return entityGetResponse(request, entities, match, matchedBy), nil
+		if match.ID == "" {
+			return entityGetClarificationResponse(request, "entity_not_found", target, candidates, entityListAPICalls(entities)), nil
+		}
+		return entityGetResponse(request, entities, match, resolved.MatchedBy), nil
 	case "entity.capabilities":
 		target := entityGetTargetFromRequest(request)
 		if target.id == "" && target.name == "" {
@@ -378,16 +510,18 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
 		}
-		entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, accessToken, clientID, entityLoadOptions{PreferCache: true})
+		resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, accessToken, clientID, target)
 		if err != nil {
 			return contract.Response{}, err
 		}
-		match, candidates, _ := findEntity(target, entities.Entities)
-		if match.ID == "" {
-			return entityCapabilitiesClarificationResponse(request, "entity_not_found", target, candidates, entityListAPICalls(entities)), nil
-		}
+		entities := resolved.Entities
+		match := resolved.Match
+		candidates := resolved.Candidates
 		if len(candidates) > 1 && target.id == "" {
 			return entityCapabilitiesClarificationResponse(request, "ambiguous_target", target, candidates, entityListAPICalls(entities)), nil
+		}
+		if match.ID == "" {
+			return entityCapabilitiesClarificationResponse(request, "entity_not_found", target, candidates, entityListAPICalls(entities)), nil
 		}
 		if match.Type == "device" {
 			capabilities, err := api.NewDeviceCapabilitiesClient(endpoint, nil).Run(ctx, api.DeviceCapabilitiesRequest{
@@ -412,11 +546,13 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
 		}
-		entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, accessToken, clientID, entityLoadOptions{PreferCache: true})
+		resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, accessToken, clientID, target)
 		if err != nil {
 			return contract.Response{}, err
 		}
-		match, candidates, _ := findEntity(target, entities.Entities)
+		entities := resolved.Entities
+		match := resolved.Match
+		candidates := resolved.Candidates
 		if match.ID == "" {
 			return stateQueryClarificationResponse(request, "entity_not_found", target, candidates, entityListAPICalls(entities)), nil
 		}
@@ -426,9 +562,12 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		if match.Type != "device" {
 			return stateQueryClarificationResponse(request, "target_not_device", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
 		}
-		propertyName := stateQueryPropertyName(request)
+		propertyID := stateQueryPropertyName(request)
+		if propertyID != "" && semantic.PropertySensitive(propertyID) {
+			return stateQuerySensitivePropertyResponse(request, propertyID), nil
+		}
 		propertySet := []string{}
-		if propertyName == "" {
+		if propertyID == "" {
 			if capabilities, err := api.NewDeviceCapabilitiesClient(endpoint, nil).Run(ctx, api.DeviceCapabilitiesRequest{
 				HouseID:  houseID,
 				DeviceID: match.ID,
@@ -442,7 +581,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		}
 		state, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
 			DeviceID:     match.ID,
-			PropertyName: propertyName,
+			PropertyName: propertyID,
 			PropertySet:  propertySet,
 			Credentials: api.StateQueryCredentials{
 				Authorization: accessToken,
@@ -484,79 +623,79 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	case "automation.capabilities":
 		return app.prepareMetadataLocal(request, houseID, automationCapabilitiesSpec())
 	case "panel.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, panelGetSpec())
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, panelGetSpec())
 	case "panel.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("panel.list", "已读取家庭下面板列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("panel.list", "已读取家庭下面板列表的安全摘要。"))
 	case "panel.button.type.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("panel.button.type.get", "已按类型读取面板按键配置的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("panel.button.type.get", "已按类型读取面板按键配置的安全摘要。"))
 	case "screen.control.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("screen.control.list", "已读取屏控制设备列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("screen.control.list", "已读取屏控制设备列表的安全摘要。"))
 	case "knob.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, knobGetSpec())
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, knobGetSpec())
 	case "upgrade.file.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("upgrade.file.list", "已读取设备可用升级文件的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("upgrade.file.list", "已读取设备可用升级文件的安全摘要。"))
 	case "upgrade.progress.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("upgrade.progress.get", "已读取设备升级进度的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("upgrade.progress.get", "已读取设备升级进度的安全摘要。"))
 	case "upgrade.file.batch_list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("upgrade.file.batch_list", "已批量读取设备可用升级文件的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("upgrade.file.batch_list", "已批量读取设备可用升级文件的安全摘要。"))
 	case "progress.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("progress.get", "已读取任务进度的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("progress.get", "已读取任务进度的安全摘要。"))
 	case "app_upgrade.latest.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("app_upgrade.latest.get", "已读取 App 最新升级版本的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("app_upgrade.latest.get", "已读取 App 最新升级版本的安全摘要。"))
 	case "ota.version_file.batch_list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("ota.version_file.batch_list", "已按版本批量读取 OTA 升级文件的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("ota.version_file.batch_list", "已按版本批量读取 OTA 升级文件的安全摘要。"))
 	case "node.property_config.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("node.property_config.get", "已读取节点属性配置的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("node.property_config.get", "已读取节点属性配置的安全摘要。"))
 	case "thing.schema.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.list", "已读取可见产品物模型列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.list", "已读取可见产品物模型列表的安全摘要。"))
 	case "thing.schema.detail.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.detail.list", "已读取可见产品物模型详情列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.detail.list", "已读取可见产品物模型详情列表的安全摘要。"))
 	case "thing.schema.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.get", "已读取产品物模型详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.get", "已读取产品物模型详情的安全摘要。"))
 	case "thing.schema.event.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.event.list", "已读取产品事件物模型的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.schema.event.list", "已读取产品事件物模型的安全摘要。"))
 	case "thing.product.info.batch_get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product.info.batch_get", "已批量读取产品定义的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product.info.batch_get", "已批量读取产品定义的安全摘要。"))
 	case "thing.product.info.v3.batch_get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product.info.v3.batch_get", "已按版本批量读取产品定义的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product.info.v3.batch_get", "已按版本批量读取产品定义的安全摘要。"))
 	case "thing.product.list.v3":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product.list.v3", "已读取版本化产品列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product.list.v3", "已读取版本化产品列表的安全摘要。"))
 	case "thing.product_domain.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_domain.list", "已读取产品域目录的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_domain.list", "已读取产品域目录的安全摘要。"))
 	case "thing.product_faq.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.list", "已读取产品帮助 FAQ 列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.list", "已读取产品帮助 FAQ 列表的安全摘要。"))
 	case "thing.product_faq.detail.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.detail.get", "已读取产品帮助 FAQ 详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.detail.get", "已读取产品帮助 FAQ 详情的安全摘要。"))
 	case "thing.product_faq.type.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.type.list", "已读取产品帮助 FAQ 类型列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.type.list", "已读取产品帮助 FAQ 类型列表。"))
 	case "thing.product_faq.item_type.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.item_type.list", "已读取产品帮助 FAQ 项类型列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.item_type.list", "已读取产品帮助 FAQ 项类型列表。"))
 	case "thing.product_faq.locale.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.locale.list", "已读取产品帮助 FAQ 支持语言列表。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.locale.list", "已读取产品帮助 FAQ 支持语言列表。"))
 	case "thing.product_faq.page.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.page.list", "已分页读取产品帮助 FAQ 列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.page.list", "已分页读取产品帮助 FAQ 列表的安全摘要。"))
 	case "thing.product_faq.page_detail.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.page_detail.list", "已分页读取产品帮助 FAQ 详情列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.product_faq.page_detail.list", "已分页读取产品帮助 FAQ 详情列表的安全摘要。"))
 	case "thing.category.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.category.list", "已读取物模型品类列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.category.list", "已读取物模型品类列表的安全摘要。"))
 	case "thing.component.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.component.list", "已读取物模型组件列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.component.list", "已读取物模型组件列表的安全摘要。"))
 	case "thing.component.get":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.component.get", "已读取物模型组件详情的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.component.get", "已读取物模型组件详情的安全摘要。"))
 	case "thing.property.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.property.list", "已读取物模型属性列表的安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("thing.property.list", "已读取物模型属性列表的安全摘要。"))
 	case "device.storage.get":
 		return app.invokeMetadataReadonlyProjection(ctx, request, endpoint, houseID, accessToken, clientID, deviceStorageGetSpec())
 	case "ai_voice.list":
 		return app.invokeMetadataReadonlyProjection(ctx, request, endpoint, houseID, accessToken, clientID, aiVoiceListSpec())
 	case "ai_voice.product.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, metadataDetailReadonlySpec("ai_voice.product.list", "已读取支持 AI 语音能力的产品列表安全摘要。"))
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("ai_voice.product.list", "已读取支持 AI 语音能力的产品列表安全摘要。"))
 	case "favorite.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, favoriteListSpec())
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, favoriteListSpec())
 	case "favorite.plan":
 		return app.prepareMetadataLocal(request, houseID, favoritePlanSpec())
 	case "home.sort.list":
-		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, houseID, accessToken, clientID, homeSortListSpec())
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, homeSortListSpec())
 	case "home.sort.configure", "favorite.add", "favorite.update", "favorite.delete", "favorite.batch_add", "favorite.batch_update", "favorite.batch_delete":
 		return app.prepareHomeOrganization(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "home.member.invite", "home.member.accept_share", "home.member.configure", "home.member.remove", "home.member.transfer", "home.member.quit":
@@ -586,7 +725,7 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	case "panel.button.configure", "panel.button_event.update", "panel.button_event.batch_update", "panel.button_event.reset", "knob.configure", "knob.reset":
 		return app.preparePanelConfiguration(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "lighting.design.plan":
-		return app.prepareLightingDesign(ctx, request, endpoint, houseID, accessToken, clientID)
+		return app.prepareLightingDesign(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "lighting.design.apply":
 		return app.prepareLightingDesignApply(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "lighting.design.import", "device.slot.create":
@@ -634,11 +773,34 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	}
 }
 
+func skipImplicitHomeResolution(request contract.Request) bool {
+	if request.Intent != "lighting.design.import" {
+		return false
+	}
+	if requestHouseID(request) != "" {
+		return false
+	}
+	if requestBool(request.HomeRef, semantic.FieldUseCurrent) {
+		return false
+	}
+	return true
+}
+
+func requestRunsHouseIndependent(request contract.Request) bool {
+	if !isHouseIndependentInvokeIntent(request.Intent) {
+		return false
+	}
+	if metadataReadonlyIntentNeedsEntityID(request.Intent) && requestHouseID(request) != "" {
+		return false
+	}
+	return true
+}
+
 func (app *app) resolveRequestHouseID(ctx context.Context, request contract.Request, endpoint api.Endpoint, accessToken string, clientID string) (string, error) {
 	if houseID := requestHouseID(request); houseID != "" {
 		return houseID, nil
 	}
-	homeName := strings.TrimSpace(firstRequestString(request.HomeRef, "name", "houseName"))
+	homeName := strings.TrimSpace(firstRequestString(request.HomeRef, semantic.FieldName, semantic.FieldHouseName))
 	if homeName == "" {
 		return "", nil
 	}
@@ -649,17 +811,32 @@ func (app *app) resolveRequestHouseID(ctx context.Context, request contract.Requ
 	if err != nil {
 		return "", err
 	}
-	matchID := ""
-	matches := 0
-	for _, house := range summary.Houses {
-		if strings.TrimSpace(house.Name) != homeName {
-			continue
-		}
-		matches++
-		matchID = house.ID
+	ranked := semantic.RankNameMatches(homeName, summary.Houses, func(house api.HouseSummary) string {
+		return house.Name
+	})
+	if len(ranked) == 0 {
+		return "", nil
 	}
-	if matches == 1 {
-		return matchID, nil
+	if ranked[0].Match.Kind == "name" {
+		exact := 0
+		matchID := ""
+		for _, match := range ranked {
+			if match.Match.Kind == "name" {
+				exact++
+				matchID = match.Value.ID
+			}
+		}
+		if exact == 1 {
+			return matchID, nil
+		}
+		return "", nil
+	}
+	second := semantic.NameMatch{}
+	if len(ranked) > 1 {
+		second = ranked[1].Match
+	}
+	if semantic.NameMatchAutoAccept(ranked[0].Match, second) {
+		return ranked[0].Value.ID, nil
 	}
 	return "", nil
 }
@@ -668,8 +845,9 @@ func homeSummaryResponse(request contract.Request, summary api.HomeSummaryResult
 	houses := make([]any, 0, len(summary.Houses))
 	for _, house := range summary.Houses {
 		houses = append(houses, map[string]any{
-			"id":   house.ID,
-			"name": house.Name,
+			semantic.FieldHouseID: house.ID,
+			semantic.FieldID:      house.ID,
+			semantic.FieldName:    house.Name,
 		})
 	}
 	return contract.Response{
@@ -678,16 +856,16 @@ func homeSummaryResponse(request contract.Request, summary api.HomeSummaryResult
 		Status:          "success",
 		UserMessage:     fmt.Sprintf("已找到 %d 个家庭。", summary.HouseCount),
 		Result: map[string]any{
-			"region":     summary.Region,
-			"houseCount": summary.HouseCount,
-			"houses":     houses,
-			"source":     summary.Source,
+			semantic.FieldRegion:     summary.Region,
+			semantic.FieldHouseCount: summary.HouseCount,
+			semantic.FieldHouses:     houses,
+			semantic.FieldSource:     summary.Source,
 		},
 		Warnings: []string{},
 		TraceID:  "home-summary-readonly",
 		Metrics: map[string]any{
-			"apiCalls":  firstPositive(summary.APICalls, 1),
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  firstPositive(summary.APICalls, 1),
+			semantic.FieldCacheHits: 0,
 		},
 	}
 }
@@ -696,21 +874,22 @@ func homeListResponse(request contract.Request, summary api.HomeSummaryResult, t
 	houses := make([]any, 0, len(summary.Houses))
 	for _, house := range summary.Houses {
 		item := map[string]any{
-			"id":   house.ID,
-			"name": house.Name,
+			semantic.FieldHouseID: house.ID,
+			semantic.FieldID:      house.ID,
+			semantic.FieldName:    house.Name,
 		}
 		for key, value := range map[string]string{
-			"icon":     house.Icon,
-			"desc":     house.Desc,
-			"areaCode": house.AreaCode,
-			"areaName": house.AreaName,
+			semantic.FieldIcon:        house.Icon,
+			semantic.FieldDescription: house.Desc,
+			semantic.FieldAreaCode:    house.AreaCode,
+			semantic.FieldAreaName:    house.AreaName,
 		} {
 			if strings.TrimSpace(value) != "" {
 				item[key] = value
 			}
 		}
 		if len(house.Counts) > 0 {
-			item["counts"] = house.Counts
+			item[semantic.FieldCounts] = house.Counts
 		}
 		houses = append(houses, item)
 	}
@@ -720,16 +899,16 @@ func homeListResponse(request contract.Request, summary api.HomeSummaryResult, t
 		Status:          "success",
 		UserMessage:     fmt.Sprintf("%s共 %d 个候选家庭。", message, summary.HouseCount),
 		Result: map[string]any{
-			"region":     summary.Region,
-			"houseCount": summary.HouseCount,
-			"houses":     houses,
-			"source":     summary.Source,
+			semantic.FieldRegion:     summary.Region,
+			semantic.FieldHouseCount: summary.HouseCount,
+			semantic.FieldHouses:     houses,
+			semantic.FieldSource:     summary.Source,
 		},
 		Warnings: []string{},
 		TraceID:  traceID,
 		Metrics: map[string]any{
-			"apiCalls":  firstPositive(summary.APICalls, 1),
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  firstPositive(summary.APICalls, 1),
+			semantic.FieldCacheHits: 0,
 		},
 	}
 }
@@ -741,14 +920,14 @@ func homeSearchClarificationResponse(request contract.Request) contract.Response
 		Status:          "clarification_required",
 		UserMessage:     "请提供要搜索的家庭名称关键词。",
 		Clarification: map[string]any{
-			"reason":         "home_search_keyword_missing",
-			"requiredFields": []string{"parameters.name"},
+			semantic.FieldReason:         "home_search_keyword_missing",
+			semantic.FieldRequiredFields: []string{semantic.ParameterPath(semantic.FieldName)},
 		},
 		Warnings: []string{},
 		TraceID:  "home-search-clarification",
 		Metrics: map[string]any{
-			"apiCalls":  0,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  0,
+			semantic.FieldCacheHits: 0,
 		},
 	}
 }

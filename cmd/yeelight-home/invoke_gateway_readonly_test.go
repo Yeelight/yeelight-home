@@ -47,7 +47,7 @@ func TestInvokeGatewayThreadGetUsesCloudReadonlyAdapter(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
-	if result["cloudWrites"] != false || result["deviceId"] != "gateway-1" {
+	if result["cloudWrites"] != false || result["gatewayId"] != "gateway-1" || result["deviceId"] != nil {
 		t.Fatalf("result = %#v", result)
 	}
 	data := result["data"].(map[string]any)
@@ -89,6 +89,49 @@ func TestInvokeGatewayListRedactsLocalKeys(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "configCount") {
 		t.Fatalf("gateway list should keep only configCount summary: %s", stdout.String())
+	}
+}
+
+func TestInvokeGatewayDetailResolvesNaturalGatewayNameFromDeviceProjection(t *testing.T) {
+	var detailCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/gateway/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"gateway-1","name":"DALI 网关","mac":"AA:BB:CC:DD"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/gateway/gateway-1/r/info":
+			detailCalled = true
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"gateway-1","name":"DALI 网关","mac":"AA:BB:CC:DD","localToken":"not-allowed"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-gateway-name-secret", "client-gateway-name-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-gateway-detail-by-name","locale":"zh-CN","utterance":"查看 DALI 网关详情","intent":"gateway.detail.get","parameters":{"houseId":"house-1","gatewayName":"DALI网关"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !detailCalled {
+		t.Fatalf("gateway detail endpoint was not called")
+	}
+	output := stdout.String() + stderr.String()
+	for _, forbidden := range []string{"token-gateway-name-secret", "not-allowed", "AA:BB:CC:DD"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("output leaked %q: stdout=%s stderr=%s", forbidden, stdout.String(), stderr.String())
+		}
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "gateway-detail-get-readonly" {
+		t.Fatalf("response = %#v", response)
 	}
 }
 

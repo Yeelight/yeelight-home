@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type HomeCreateCredentials struct {
@@ -202,18 +204,18 @@ func (client HomeCreateClient) verifyHouseScopedEntityList(ctx context.Context, 
 }
 
 func (client HomeCreateClient) createHouse(ctx context.Context, request HomeCreateRequest, credentials requestCredentials) (writeProbeResult, int, error) {
-	body := map[string]any{"name": strings.TrimSpace(request.Name)}
+	body := map[string]any{semantic.FieldName: strings.TrimSpace(request.Name)}
 	if value := strings.TrimSpace(request.Description); value != "" {
-		body["desc"] = value
+		body[semantic.InternalField(semantic.DomainCommon, semantic.FieldDescription)] = value
 	}
 	if value := strings.TrimSpace(request.Icon); value != "" {
-		body["icon"] = value
+		body[semantic.FieldIcon] = value
 	}
 	if value := strings.TrimSpace(request.AreaCode); value != "" {
-		body["areaCode"] = value
+		body[semantic.FieldAreaCode] = value
 	}
 	if value := strings.TrimSpace(request.AreaName); value != "" {
-		body["areaName"] = value
+		body[semantic.FieldAreaName] = value
 	}
 	response, err := callJSON(ctx, client.client, http.MethodPut, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/w/create", body, credentials)
 	if err != nil {

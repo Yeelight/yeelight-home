@@ -17,7 +17,7 @@ func TestDevicePropertySetClientSetsSingleDeviceProperty(t *testing.T) {
 		gotAuthorization = request.Header.Get("Authorization")
 		gotClientID = request.Header.Get("Client-Id")
 		writer.Header().Set("Content-Type", "application/json")
-		if request.Method != http.MethodPost || request.URL.Path != "/apis/iot/v1/open/control/house/house-1/control/2/device-1/w/properties/p" {
+		if request.Method != http.MethodPost || request.URL.Path != "/apis/iot/v1/controll/device/2/device-1/w/properties/p" {
 			http.NotFound(writer, request)
 			return
 		}
@@ -49,10 +49,10 @@ func TestDevicePropertySetClientSetsSingleDeviceProperty(t *testing.T) {
 	if gotClientID != "client-control-1" {
 		t.Fatalf("Client-Id = %q", gotClientID)
 	}
-	if gotBody["command"] != "set" || gotBody["value"] != false {
+	if _, ok := gotBody["command"]; ok || gotBody["value"] != false {
 		t.Fatalf("body = %#v", gotBody)
 	}
-	if result.Region != "dev" || result.HouseID != "house-1" || result.DeviceID != "device-1" || result.PropertyName != "p" || result.Source != "open_control_property_endpoint" || result.APICalls != 1 {
+	if result.Region != "dev" || result.HouseID != "house-1" || result.DeviceID != "device-1" || result.PropertyName != "p" || result.Source != "device_property_set_endpoint" || result.APICalls != 1 {
 		t.Fatalf("result = %#v", result)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const productPediaResourceBaseURL = "https://rag-resources.yeelight.com/products/sku-res"
@@ -31,15 +33,15 @@ func (client MetadataReadonlyClient) RunProductPediaSearch(ctx context.Context, 
 		Region:     client.endpoint.Region,
 		Capability: "product.pedia.search",
 		Data: map[string]any{
-			"query":          query,
-			"total":          productPediaTotal(response["data"], len(products)),
-			"returned":       len(products),
-			"products":       products,
-			"resourceStatus": "candidate_urls_may_not_exist",
-			"cachePolicy": map[string]any{
-				"scope":      "profile_global_product_pedia",
-				"ttlSeconds": 86400,
-				"persistent": false,
+			semantic.FieldQuery:          query,
+			semantic.FieldTotal:          productPediaTotal(response[semantic.FieldData], len(products)),
+			semantic.FieldReturned:       len(products),
+			semantic.FieldProducts:       products,
+			semantic.FieldResourceStatus: "candidate_urls_may_not_exist",
+			semantic.FieldCachePolicy: map[string]any{
+				semantic.FieldScope:      "profile_global_product_pedia",
+				semantic.FieldTTLSeconds: 86400,
+				semantic.FieldPersistent: false,
 			},
 		},
 		RawShape: responseDataType(response),
@@ -49,26 +51,7 @@ func (client MetadataReadonlyClient) RunProductPediaSearch(ctx context.Context, 
 }
 
 func productPediaQueryFromReadonlyRequest(request MetadataReadonlyRequest) string {
-	for _, key := range []string{
-		"multiField",
-		"keyword",
-		"query",
-		"queryString",
-		"name",
-		"productName",
-		"productShortName",
-		"materialCode",
-		"sku",
-		"productSku",
-		"productSkuFullText",
-		"spu",
-		"productSpu",
-		"model",
-		"productModel",
-		"modelNo",
-		"barcode",
-		"pid",
-	} {
+	for _, key := range semantic.ProductPediaQueryFields() {
 		if value := stringFromAny(request.Parameters[key]); value != "" {
 			return value
 		}
@@ -77,9 +60,9 @@ func productPediaQueryFromReadonlyRequest(request MetadataReadonlyRequest) strin
 }
 
 func productPediaLimitFromRequest(request MetadataReadonlyRequest) int {
-	limit := intFromAny(request.Parameters["limit"])
+	limit := intFromAny(request.Parameters[semantic.FieldLimit])
 	if limit == 0 {
-		limit = intFromAny(request.Parameters["pageSize"])
+		limit = intFromAny(request.Parameters[semantic.FieldPageSize])
 	}
 	if limit <= 0 {
 		return 10
@@ -92,7 +75,7 @@ func productPediaLimitFromRequest(request MetadataReadonlyRequest) int {
 
 func productPediaTotal(data any, fallback int) int {
 	if item, ok := data.(map[string]any); ok {
-		if total := intFromAny(item["total"]); total > 0 {
+		if total := intFromAny(item[semantic.FieldTotal]); total > 0 {
 			return total
 		}
 	}
@@ -116,120 +99,24 @@ func projectProductPediaRows(data any, limit int) []any {
 }
 
 func projectProductPediaSummary(item map[string]any) map[string]any {
-	materialCode := firstAnyString(item, "materialCode")
+	productCode := firstAnyString(item, semantic.ProductCodeFields()...)
 	product := map[string]any{}
-	copyProductPediaFields(product, item, []string{
-		"id",
-		"materialCode",
-		"oldMaterialCode",
-		"pid",
-		"productName",
-		"productBrand",
-		"productModel",
-		"productSku",
-		"productSpu",
-		"productLine",
-		"productCategoryName",
-		"productLargeClass",
-		"productSmallClass",
-		"productShortName",
-		"productStatus",
-		"productStage",
-		"productStatusStage",
-		"productSeries",
-		"specsCode",
-		"barcode",
-		"modelNo",
-		"productType",
-		"productSource",
-		"productUsePlatform",
-		"productSaleType",
-		"productLevel",
-		"productMeasureUnit",
-		"productSellingPoint",
-		"lightingDesignLineStyle",
-		"lightingDesignDeviceCategory",
-		"productDeclareNo",
-		"productDeclareName",
-		"productDeclareUnit",
-		"stockType",
-		"baseUnit",
-		"saleUnit",
-		"baseUnitNum",
-		"minOrderQty",
-		"isAccessNet",
-		"valid",
-		"isSupportYeelightPro",
-		"isSupportHomekit",
-		"threeViewsStatus",
-		"publicityMapStatus",
-		"parameterStatus",
-		"opticalFileStatus",
-		"completion",
-		"supplierName",
-		"terminalDeliveryMode",
-		"terminalDeliveryPeriod",
-		"pediaDisplay",
-		"productWxQrcode",
-		"manualWxQrcode",
-		"quotationType",
-		"productSkuEn",
-		"overseaSaleRegion",
-		"productStatusName",
-		"productStageName",
-		"productTypeName",
-		"productUsePlatformName",
-		"productSaleTypeName",
-		"productLevelName",
-		"quotationTypeDesc",
-		"overseaSaleRegionDesc",
-		"volumn",
-		"weight",
-		"factory",
-		"features",
-	})
-	if value := productPediaFeatureValue(item["features"]); value != nil {
-		product["features"] = value
+	copyProductPediaResponseMappings(product, item, semantic.ProductPediaSummaryMappings())
+	if value := productPediaFeatureValue(item[semantic.FieldFeatures]); value != nil {
+		product[semantic.FieldFeatures] = value
 	}
-	copyProductPediaAlias(product, item, "brand", "productBrand", "brand")
-	copyProductPediaAlias(product, item, "model", "productModel", "model")
-	copyProductPediaAlias(product, item, "sku", "productSku", "sku")
-	copyProductPediaAlias(product, item, "spu", "productSpu", "spu")
-	copyProductPediaAlias(product, item, "shortName", "productShortName")
-	copyProductPediaAlias(product, item, "category", "productCategoryName", "categoryName")
-	copyProductPediaAlias(product, item, "largeClass", "productLargeClass")
-	copyProductPediaAlias(product, item, "smallClass", "productSmallClass")
-	copyProductPediaAlias(product, item, "status", "productStatusName", "productStatus")
-	copyProductPediaAlias(product, item, "stage", "productStageName", "productStage")
-	copyProductPediaAlias(product, item, "series", "productSeries")
-	copyProductPediaAlias(product, item, "type", "productTypeName", "productType")
-	copyProductPediaAlias(product, item, "usePlatform", "productUsePlatformName", "productUsePlatform")
-	copyProductPediaAlias(product, item, "supportYeelightPro", "isSupportYeelightPro")
-	copyProductPediaAlias(product, item, "supportHomekit", "isSupportHomekit")
-	attachments := projectProductPediaAttachments(item["attachments"])
+	attachments := projectProductPediaAttachments(item[semantic.FieldAttachments])
 	if len(attachments) > 0 {
-		product["attachments"] = attachments
+		product[semantic.FieldAttachments] = attachments
 	}
-	if materialCode != "" {
-		product["resources"] = productPediaResources(materialCode, attachments)
+	if productCode != "" {
+		product[semantic.FieldResources] = productPediaResources(productCode, attachments)
 	} else {
-		product["resources"] = map[string]any{
-			"attachments": attachments,
+		product[semantic.FieldResources] = map[string]any{
+			semantic.FieldAttachments: attachments,
 		}
 	}
 	return product
-}
-
-func copyProductPediaFields(output map[string]any, source map[string]any, keys []string) {
-	for _, key := range keys {
-		value, ok := source[key]
-		if !ok || isSensitiveCloudField(strings.ToLower(strings.TrimSpace(key))) {
-			continue
-		}
-		if projected, keep := productPediaProjectedValue(value); keep {
-			output[key] = projected
-		}
-	}
 }
 
 func copyProductPediaAlias(output map[string]any, source map[string]any, outputKey string, inputKeys ...string) {
@@ -265,16 +152,16 @@ func productPediaProjectedValue(value any) (any, bool) {
 	}
 }
 
-func productPediaResources(materialCode string, attachments []any) map[string]any {
-	manualURL := fmt.Sprintf("%s/%s/split/%s_split.pdf", productPediaResourceBaseURL, materialCode, materialCode)
-	faqURL := fmt.Sprintf("%s/%s/faq/%s/.json", productPediaResourceBaseURL, materialCode, materialCode)
+func productPediaResources(productCode string, attachments []any) map[string]any {
+	manualURL := fmt.Sprintf("%s/%s/split/%s_split.pdf", productPediaResourceBaseURL, productCode, productCode)
+	faqURL := fmt.Sprintf("%s/%s/faq/%s/.json", productPediaResourceBaseURL, productCode, productCode)
 	return map[string]any{
-		"materialCode":       materialCode,
-		"manualCandidateUrl": manualURL,
-		"faqCandidateUrl":    faqURL,
-		"candidateStatus":    "not_verified",
-		"attachments":        attachments,
-		"manualAttachments":  filterProductPediaAttachments(attachments, "manual"),
+		semantic.FieldProductCode:        productCode,
+		semantic.FieldManualCandidateURL: manualURL,
+		semantic.FieldFAQCandidateURL:    faqURL,
+		semantic.FieldCandidateStatus:    "not_verified",
+		semantic.FieldAttachments:        attachments,
+		semantic.FieldManualAttachments:  filterProductPediaAttachments(attachments, "manual"),
 	}
 }
 
@@ -286,36 +173,35 @@ func projectProductPediaAttachments(value any) []any {
 		if !ok {
 			continue
 		}
-		url := firstAnyString(item, "url")
+		url := firstAnyString(item, semantic.FieldURL)
 		if url == "" {
 			continue
 		}
 		attachment := map[string]any{}
-		for _, key := range []string{
-			"id",
-			"bizId",
-			"bizType",
-			"materialCode",
-			"url",
-			"type",
-			"name",
-			"sort",
-			"createUid",
-			"createTime",
-			"updateUid",
-			"updateTime",
-		} {
-			value, ok := item[key]
-			if !ok || isSensitiveCloudField(strings.ToLower(strings.TrimSpace(key))) {
-				continue
-			}
-			if projected, keep := productPediaProjectedValue(value); keep {
-				attachment[key] = projected
-			}
-		}
+		copyProductPediaResponseMappings(attachment, item, semantic.ProductPediaAttachmentMappings())
+		copyProductPediaAlias(attachment, item, semantic.FieldProductCode, semantic.InternalField(semantic.DomainProduct, semantic.FieldProductCode))
 		attachments = append(attachments, attachment)
 	}
 	return attachments
+}
+
+func copyProductPediaResponseMappings(output map[string]any, source map[string]any, mappings []semantic.ResponseFieldMapping) {
+	for _, mapping := range mappings {
+		copyProductPediaMappedValue(output, source, mapping.Public, mapping.Internal...)
+	}
+}
+
+func copyProductPediaMappedValue(output map[string]any, source map[string]any, outputKey string, inputKeys ...string) {
+	for _, key := range inputKeys {
+		value, ok := source[key]
+		if !ok || isSensitiveCloudField(strings.ToLower(strings.TrimSpace(key))) {
+			continue
+		}
+		if projected, keep := productPediaProjectedValue(value); keep {
+			output[outputKey] = projected
+			return
+		}
+	}
 }
 
 func filterProductPediaAttachments(attachments []any, kind string) []any {
@@ -326,9 +212,9 @@ func filterProductPediaAttachments(attachments []any, kind string) []any {
 			continue
 		}
 		haystack := strings.ToLower(strings.Join([]string{
-			stringFromAny(item["type"]),
-			stringFromAny(item["name"]),
-			stringFromAny(item["url"]),
+			stringFromAny(item[semantic.FieldType]),
+			stringFromAny(item[semantic.FieldName]),
+			stringFromAny(item[semantic.FieldURL]),
 		}, " "))
 		if (kind == "manual" && (strings.Contains(haystack, "说明书") || strings.Contains(haystack, "manual") || strings.Contains(haystack, "_split.pdf"))) ||
 			(kind == "faq" && strings.Contains(haystack, "faq")) {

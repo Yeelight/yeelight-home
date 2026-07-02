@@ -93,17 +93,21 @@
       "capabilitySource": "entity.list_projection",
       "schemaStatus": "not_connected",
       "operations": {
-        "read": ["entity.get", "entity.list", "entity.capabilities"],
+        "read": [
+          "entity.get",
+          "entity.list",
+          "entity.capabilities"
+        ],
         "write": []
       },
       "limitations": [
-        "当前 Runtime 尚未接入设备实例级 product schema adapter。",
+        "当前 Runtime 尚不能返回该设备实例的完整能力详情。",
         "不会根据静态物模型推断设备控制能力。",
         "写操作必须通过对应语义 Runtime intent 执行，并依赖 Runtime 校验和写后验证。"
       ]
     },
     "warnings": [
-      "设备实例级能力需要后续接入 getProductSchema(pid, houseId, deviceId) 等价只读接口后才能返回。"
+      "设备实例级能力详情需要 Runtime 返回可验证的只读能力证据后才能展示。"
     ],
     "traceId": "entity-capabilities-readonly",
     "metrics": {

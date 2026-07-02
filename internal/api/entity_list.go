@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const (
@@ -24,15 +26,16 @@ type EntityListRequest struct {
 }
 
 type EntitySummary struct {
-	Type    string `json:"type"`
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	HouseID string `json:"houseId,omitempty"`
-	RoomID  string `json:"roomId,omitempty"`
-	Online  *bool  `json:"online,omitempty"`
-	Bind    *bool  `json:"bind,omitempty"`
-	Virtual *bool  `json:"virtual,omitempty"`
-	Status  string `json:"status,omitempty"`
+	Type            string `json:"type"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	HouseID         string `json:"houseId,omitempty"`
+	RoomID          string `json:"roomId,omitempty"`
+	GatewayDeviceID string `json:"gatewayDeviceId,omitempty"`
+	Online          *bool  `json:"online,omitempty"`
+	Bind            *bool  `json:"bind,omitempty"`
+	Virtual         *bool  `json:"virtual,omitempty"`
+	Status          string `json:"status,omitempty"`
 }
 
 type EntityListResult struct {
@@ -126,7 +129,7 @@ func houseScopedEntityListCalls(houseID string) []entityListCall {
 		{entityType: "device", method: http.MethodPost, pathPattern: fmt.Sprintf("/v2/thing/manage/house/%s/device/r/info/{pageNo}/%d", houseID, entityListPageSize), body: map[string]any{}},
 		{entityType: "group", method: http.MethodGet, pathPattern: fmt.Sprintf("/v2/thing/manage/house/%s/group/r/info/{pageNo}/%d", houseID, entityListPageSize)},
 		{entityType: "scene", method: http.MethodPost, pathPattern: fmt.Sprintf("/v2/thing/manage/house/%s/scene/r/info/{pageNo}/%d", houseID, entityListPageSize), body: map[string]any{}},
-		{entityType: "automation", method: http.MethodPost, pathPattern: "/v1/automations/r/list", body: map[string]any{"houseId": houseID}, singlePage: true},
+		{entityType: "automation", method: http.MethodPost, pathPattern: "/v1/automations/r/list", body: map[string]any{semantic.FieldHouseID: houseID}, singlePage: true},
 	}
 }
 
@@ -161,25 +164,35 @@ func projectEntities(entityType string, houseID string, response map[string]any)
 			continue
 		}
 		entity := EntitySummary{
-			Type:    entityType,
-			ID:      firstAnyString(item, "id", "houseId", "areaId", "roomId", "groupId", "sceneId", "automationId", "deviceId"),
-			Name:    firstAnyString(item, "name", "houseName", "areaName", "roomName", "groupName", "sceneName", "automationName"),
-			HouseID: firstNonEmpty(firstAnyString(item, "houseId"), houseID),
-			RoomID:  firstAnyString(item, "roomId"),
-			Status:  firstAnyString(item, "status"),
+			Type:            entityType,
+			ID:              firstAnyString(item, semantic.EntitySummaryIDFieldsForType(entityType)...),
+			Name:            firstAnyString(item, semantic.EntitySummaryNameFields()...),
+			HouseID:         firstNonEmpty(firstAnyString(item, semantic.EntitySummaryHouseIDFields()...), houseID),
+			RoomID:          firstAnyString(item, semantic.EntitySummaryRoomIDFields()...),
+			GatewayDeviceID: firstAnyString(item, semantic.FieldGatewayDeviceID, semantic.FieldGatewayID),
+			Status:          firstAnyString(item, semantic.EntitySummaryStatusFields()...),
 		}
-		if online, ok := item["online"].(bool); ok {
+		if online, ok := firstBoolFromAny(item, semantic.EntitySummaryOnlineFields()...); ok {
 			entity.Online = &online
 		}
-		if bind, ok := item["bind"].(bool); ok {
+		if bind, ok := firstBoolFromAny(item, semantic.EntitySummaryBindFields()...); ok {
 			entity.Bind = &bind
 		}
-		if virtual, ok := item["virtual"].(bool); ok {
+		if virtual, ok := firstBoolFromAny(item, semantic.EntitySummaryVirtualFields()...); ok {
 			entity.Virtual = &virtual
 		}
 		entities = append(entities, entity)
 	}
 	return entities
+}
+
+func firstBoolFromAny(item map[string]any, keys ...string) (bool, bool) {
+	for _, key := range keys {
+		if value, ok := boolFromAny(item[key]); ok {
+			return value, true
+		}
+	}
+	return false, false
 }
 
 func upsertEntityListSummary(result EntityListResult, entity EntitySummary) EntityListResult {

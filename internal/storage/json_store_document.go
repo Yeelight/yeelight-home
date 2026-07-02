@@ -6,7 +6,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+var jsonDocumentLocks sync.Map
+
+func jsonDocumentLock(path string) *sync.Mutex {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		absolute = path
+	}
+	value, _ := jsonDocumentLocks.LoadOrStore(absolute, &sync.Mutex{})
+	return value.(*sync.Mutex)
+}
 
 func (store JSONStore) load() (jsonDocument, error) {
 	data, err := os.ReadFile(store.path)
@@ -61,12 +73,47 @@ func (store JSONStore) loadScope(profile string, region string, houseID string) 
 	return scoped, nil
 }
 
+func (store JSONStore) mutateScope(profile string, region string, houseID string, mutate func(*jsonDocument) error) error {
+	region = normalizeStorageRegion(region)
+	path := store.scopePath(profile, region, houseID)
+	lock := jsonDocumentLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	document, err := store.loadScopeForMutation(profile, region, houseID)
+	if err != nil {
+		return err
+	}
+	if err := mutate(&document); err != nil {
+		return err
+	}
+	document = normalizeDocument(document)
+	document.Namespace = storageNamespace(profile, region, houseID, "memory")
+	document = compactScopedDocument(document, 0)
+	return writeJSONDocument(path, document)
+}
+
+func (store JSONStore) loadScopeForMutation(profile string, region string, houseID string) (jsonDocument, error) {
+	path := store.scopePath(profile, region, houseID)
+	document, err := readJSONDocument(path)
+	if err == nil {
+		return document, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return jsonDocument{}, err
+	}
+	return store.loadLegacyScope(profile, region, houseID)
+}
+
 func (store JSONStore) saveScope(profile string, region string, houseID string, document jsonDocument) error {
 	region = normalizeStorageRegion(region)
 	document = normalizeDocument(document)
 	document.Namespace = storageNamespace(profile, region, houseID, "memory")
 	document = compactScopedDocument(document, 0)
-	return writeJSONDocument(store.scopePath(profile, region, houseID), document)
+	path := store.scopePath(profile, region, houseID)
+	lock := jsonDocumentLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	return writeJSONDocument(path, document)
 }
 
 func (store JSONStore) scopePath(profile string, region string, houseID string) string {
@@ -104,6 +151,9 @@ func (store JSONStore) loadLegacyScope(profile string, region string, houseID st
 }
 
 func (store JSONStore) save(document jsonDocument) error {
+	lock := jsonDocumentLock(store.path)
+	lock.Lock()
+	defer lock.Unlock()
 	return writeJSONDocument(store.path, normalizeDocument(document))
 }
 
@@ -123,17 +173,37 @@ func readJSONDocument(path string) (jsonDocument, error) {
 }
 
 func writeJSONDocument(path string, document jsonDocument) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return err
 	}
-	tempPath := path + ".tmp"
-	if err := os.WriteFile(tempPath, data, 0o600); err != nil {
+	tempFile, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
 		return err
 	}
+	tempPath := tempFile.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if _, err := tempFile.Write(data); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Chmod(0o600); err != nil {
+		_ = tempFile.Close()
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	removeTemp = false
 	return os.Rename(tempPath, path)
 }
 

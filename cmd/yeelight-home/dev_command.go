@@ -248,17 +248,17 @@ func (app *app) runDevSeedDevice(args []string, stdout io.Writer, stderr io.Writ
 		return exitInvalidInput
 	}
 	result, err := api.NewDevSeedClient(endpoint, nil).EnsureDevice(context.Background(), api.DevSeedDeviceRequest{
-		HouseID:        houseID,
-		RoomID:         flags.string("room-id", ""),
-		Name:           flags.string("name", "Codex Dev Test Device"),
-		PID:            flags.int("pid", 1),
-		DeviceType:     flags.int("type", 1),
-		ConnectType:    flags.int("connect-type", 0),
-		Bound:          flags.string("bound", "true") != "false",
-		AllowWriteDev:  true,
-		VerifyAttempts: 5,
-		VerifyInterval: time.Second,
-		Credentials:    credentials,
+		HouseID:             houseID,
+		RoomID:              flags.string("room-id", ""),
+		Name:                flags.string("name", "Codex Dev Test Device"),
+		CapabilityProductID: flags.int("capability-product-id", 1),
+		DeviceType:          flags.int("type", 1),
+		ConnectType:         flags.int("connect-type", 0),
+		Bound:               flags.string("bound", "true") != "false",
+		AllowWriteDev:       true,
+		VerifyAttempts:      5,
+		VerifyInterval:      time.Second,
+		Credentials:         credentials,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "dev seed-device: %v\n", err)

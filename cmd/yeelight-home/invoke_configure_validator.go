@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const (
@@ -56,11 +57,11 @@ func validateAreaCreatePayload(payload map[string]any, entities api.EntityListRe
 	if entities.Counts["area"]+1 > houseAreaLimit {
 		return "house_area_limit_exceeded"
 	}
-	roomIDs := valueIDList(payload["roomIds"])
+	roomIDs := valueIDList(payload[semantic.FieldRoomIDs])
 	if len(roomIDs) > areaRoomLimit {
 		return "area_room_limit_exceeded"
 	}
-	if parentID := valueIDString(payload["parentId"]); parentID != "" && !entityExists(entities, "area", parentID) {
+	if parentID := valueIDString(payload[semantic.FieldParentID]); parentID != "" && !entityExists(entities, "area", parentID) {
 		return "invalid_area_resource_reference"
 	}
 	for _, roomID := range roomIDs {
@@ -75,11 +76,17 @@ func validateGroupCreatePayload(payload map[string]any, entities api.EntityListR
 	if entities.Counts["group"]+1 > houseGroupLimit {
 		return "house_group_limit_exceeded"
 	}
-	roomID := valueIDString(payload["roomId"])
+	if reason := resolveGroupCreateReferences(payload, entities); reason != "" {
+		return reason
+	}
+	roomID := valueIDString(payload[semantic.FieldRoomID])
 	if roomID == "" || !entityExists(entities, "room", roomID) {
 		return "invalid_group_room_reference"
 	}
-	deviceIDs := valueIDList(payload["deviceIds"])
+	deviceIDs := valueIDList(payload[semantic.FieldDeviceIDs])
+	if len(deviceIDs) == 0 {
+		return "missing_group_members"
+	}
 	if len(deviceIDs) > groupDeviceLimit {
 		return "group_device_limit_exceeded"
 	}
@@ -91,11 +98,94 @@ func validateGroupCreatePayload(payload map[string]any, entities api.EntityListR
 	return ""
 }
 
+func resolveGroupCreateReferences(payload map[string]any, entities api.EntityListResult) string {
+	roomID := valueIDString(payload[semantic.FieldRoomID])
+	if roomID == "" {
+		roomName := firstNonEmptyString(
+			requestString(payload[semantic.FieldRoomName]),
+			requestString(payload[semantic.FieldTargetRoomName]),
+		)
+		if roomName != "" {
+			match, candidates, _ := findEntity(entityGetTarget{name: roomName, entityType: "room"}, entities.Entities)
+			if match.ID != "" && len(candidates) == 1 {
+				roomID = match.ID
+				payload[semantic.FieldRoomID] = requestNumberOrString(match.ID)
+			} else if len(candidates) > 0 {
+				return "ambiguous_group_room_reference"
+			}
+		}
+	}
+	deviceNames := requestStringList(payload[semantic.FieldDeviceNames])
+	if len(deviceNames) == 0 {
+		return ""
+	}
+	deviceIDs := valueIDList(payload[semantic.FieldDeviceIDs])
+	for _, deviceName := range deviceNames {
+		target := entityGetTarget{name: deviceName, entityType: "device", roomID: roomID}
+		match, candidates, _ := findEntity(target, entities.Entities)
+		if match.ID != "" && len(candidates) == 1 {
+			deviceIDs = append(deviceIDs, match.ID)
+			continue
+		}
+		if len(candidates) > 0 {
+			return "ambiguous_group_device_reference"
+		}
+		return "invalid_group_device_reference"
+	}
+	payload[semantic.FieldDeviceIDs] = stringListAsRequestIDs(deviceIDs)
+	delete(payload, semantic.FieldDeviceNames)
+	return ""
+}
+
+func groupCreateReferenceCandidateMaps(payload map[string]any, entities api.EntityListResult, reason string) []map[string]any {
+	switch reason {
+	case "ambiguous_group_room_reference":
+		roomName := firstNonEmptyString(
+			requestString(payload[semantic.FieldRoomName]),
+			requestString(payload[semantic.FieldTargetRoomName]),
+		)
+		_, candidates, _ := findEntity(entityGetTarget{name: roomName, entityType: "room"}, entities.Entities)
+		return entityCandidateMaps(candidates)
+	case "ambiguous_group_device_reference", "invalid_group_device_reference":
+		roomID := valueIDString(payload[semantic.FieldRoomID])
+		roomName := firstNonEmptyString(
+			requestString(payload[semantic.FieldRoomName]),
+			requestString(payload[semantic.FieldTargetRoomName]),
+		)
+		if roomID == "" && roomName != "" {
+			roomMatch, roomCandidates, _ := findEntity(entityGetTarget{name: roomName, entityType: "room"}, entities.Entities)
+			if roomMatch.ID != "" && len(roomCandidates) == 1 {
+				roomID = roomMatch.ID
+			}
+		}
+		for _, deviceName := range requestStringList(payload[semantic.FieldDeviceNames]) {
+			target := entityGetTarget{name: deviceName, entityType: "device", roomID: roomID, roomName: roomName}
+			match, candidates, _ := findEntity(target, entities.Entities)
+			if match.ID != "" && len(candidates) == 1 {
+				continue
+			}
+			return entityCandidateMaps(candidates)
+		}
+	}
+	return nil
+}
+
+func entityCandidateMaps(candidates []api.EntitySummary) []map[string]any {
+	if len(candidates) == 0 {
+		return nil
+	}
+	result := make([]map[string]any, 0, len(candidates))
+	for _, candidate := range candidates {
+		result = append(result, entitySummaryMap(candidate))
+	}
+	return result
+}
+
 func validateSceneCreatePayload(payload map[string]any, entities api.EntityListResult) string {
 	if entities.Counts["scene"]+1 > houseSceneLimit {
 		return "house_scene_limit_exceeded"
 	}
-	details, ok := payload["details"].([]map[string]any)
+	details, ok := payload[semantic.FieldDetails].([]map[string]any)
 	if !ok || len(details) == 0 {
 		return "invalid_scene_create_payload"
 	}
@@ -103,10 +193,19 @@ func validateSceneCreatePayload(payload map[string]any, entities api.EntityListR
 		return "scene_action_limit_exceeded"
 	}
 	for _, detail := range details {
+		if reason := resolveActionResourceName(detail, entities, "ambiguous_scene_resource_reference"); reason != "" {
+			return reason
+		}
 		if reason := normalizeSceneDetail(detail, entities, "invalid_scene_detail_params"); reason != "" {
 			return reason
 		}
-		if reason := validateResourceReference(detail["typeId"], detail["resId"], entities, "invalid_scene_resource_type", "invalid_scene_resource_reference"); reason != "" {
+		if reason := validateResourceReference(
+			detail[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)],
+			detail[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)],
+			entities,
+			"invalid_scene_resource_type",
+			"invalid_scene_resource_reference",
+		); reason != "" {
 			return reason
 		}
 	}
@@ -117,28 +216,38 @@ func validateAutomationCreatePayload(payload map[string]any, entities api.Entity
 	if entities.Counts["automation"]+1 > houseAutomationLimit {
 		return "house_automation_limit_exceeded"
 	}
-	if statusValue, ok := payload["status"]; ok {
+	if statusValue, ok := payload[semantic.FieldStatus]; ok {
 		status, valid := valueInt(statusValue)
 		if !valid || (status != 0 && status != 1) {
 			return "invalid_automation_status"
 		}
 	}
-	repeatType, _ := valueInt(payload["repeatType"])
-	if reason := validateAutomationParams(payload["params"], repeatType, entities); reason != "" {
+	repeatType, _ := valueInt(payload[semantic.InternalRepeatTypeField()])
+	if reason := validateAutomationParams(payload[semantic.InternalAutomationParamsField()], repeatType, entities); reason != "" {
 		return reason
 	}
-	actions, ok := payload["actions"].([]map[string]any)
+	actions, ok := payload[semantic.FieldActions].([]map[string]any)
 	if !ok || len(actions) == 0 {
 		return "invalid_automation_create_payload"
 	}
 	if len(actions) > automationThenLimit {
 		return "automation_action_limit_exceeded"
 	}
-	for _, action := range actions {
+	for index, action := range actions {
+		if reason := resolveActionResourceName(action, entities, "ambiguous_automation_action_reference"); reason != "" {
+			return reason
+		}
 		if reason := normalizeActionParams(action, "invalid_automation_action_params"); reason != "" {
 			return reason
 		}
-		if reason := validateAutomationActionReference(action["typeId"], action["resId"], entities); reason != "" {
+		if _, ok := valueInt(action[semantic.FieldRank]); !ok {
+			action[semantic.FieldRank] = index
+		}
+		if reason := validateAutomationActionReference(
+			action[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)],
+			action[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)],
+			entities,
+		); reason != "" {
 			return reason
 		}
 	}
@@ -157,10 +266,10 @@ func validateAutomationParams(value any, repeatType int, entities api.EntityList
 	default:
 		return "invalid_automation_params"
 	}
-	if strings.TrimSpace(requestString(params["type"])) != "and" {
+	if strings.TrimSpace(requestString(params[semantic.InternalField(semantic.DomainAutomation, semantic.FieldConditionType)])) != "and" {
 		return "invalid_automation_params"
 	}
-	conditions, ok := params["conditions"].([]any)
+	conditions, ok := params[semantic.FieldConditions].([]any)
 	if !ok || len(conditions) == 0 {
 		return "invalid_automation_params"
 	}
@@ -208,6 +317,35 @@ func validateResourceReference(typeValue any, idValue any, entities api.EntityLi
 	return ""
 }
 
+func resolveActionResourceName(item map[string]any, entities api.EntityListResult, ambiguousReason string) string {
+	idKey := semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)
+	if valueIDString(item[idKey]) != "" {
+		return ""
+	}
+	typeID, ok := valueInt(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)])
+	if !ok {
+		return ""
+	}
+	entityType, ok := entityTypeForGroupType(typeID)
+	if !ok {
+		return ""
+	}
+	targetName := strings.TrimSpace(requestString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName)]))
+	if targetName == "" {
+		return ""
+	}
+	match, candidates, _ := findEntity(entityGetTarget{name: targetName, entityType: entityType}, entities.Entities)
+	if match.ID != "" && len(candidates) == 1 {
+		item[idKey] = requestNumberOrString(match.ID)
+		item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName)] = match.Name
+		return ""
+	}
+	if len(candidates) > 0 {
+		return ambiguousReason
+	}
+	return ""
+}
+
 func entityTypeForGroupType(typeID int) (string, bool) {
 	switch typeID {
 	case groupTypeRoom:
@@ -228,15 +366,20 @@ func entityTypeForGroupType(typeID int) (string, bool) {
 }
 
 func normalizeActionParams(item map[string]any, reason string) string {
-	params, ok := item["params"]
+	params, ok := item[semantic.InternalActionParamsField()]
 	if !ok {
+		typeID, typeOK := valueInt(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)])
+		if typeOK && typeID == groupTypeScene {
+			item[semantic.InternalActionParamsField()] = "{}"
+			return ""
+		}
 		return reason
 	}
 	compact, err := compactJSONForRuntime(params)
 	if err != nil || strings.TrimSpace(compact) == "" {
 		return reason
 	}
-	item["params"] = compact
+	item[semantic.InternalActionParamsField()] = compact
 	return ""
 }
 
@@ -244,23 +387,27 @@ func normalizeSceneDetail(item map[string]any, entities api.EntityListResult, re
 	if reason := normalizeActionParams(item, reason); reason != "" {
 		return reason
 	}
-	if _, ok := valueInt(item["typeId"]); !ok {
+	if _, ok := valueInt(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)]); !ok {
 		return reason
 	}
-	if valueIDString(item["resId"]) == "" {
+	if valueIDString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)]) == "" {
 		return reason
 	}
-	if _, ok := valueInt(item["action"]); !ok {
-		item["action"] = 0
+	if _, ok := valueInt(item[semantic.FieldAction]); !ok {
+		item[semantic.FieldAction] = 0
 	}
-	if _, ok := valueInt(item["rank"]); !ok {
-		item["rank"] = 0
+	if _, ok := valueInt(item[semantic.FieldRank]); !ok {
+		item[semantic.FieldRank] = 0
 	}
-	if strings.TrimSpace(requestString(item["resName"])) == "" {
-		if entity, ok := findEntityForSceneDetail(entities, item["typeId"], item["resId"]); ok && strings.TrimSpace(entity.Name) != "" {
-			item["resName"] = entity.Name
+	if strings.TrimSpace(requestString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName)])) == "" {
+		if entity, ok := findEntityForSceneDetail(
+			entities,
+			item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)],
+			item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)],
+		); ok && strings.TrimSpace(entity.Name) != "" {
+			item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName)] = entity.Name
 		} else {
-			item["resName"] = valueIDString(item["resId"])
+			item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName)] = valueIDString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)])
 		}
 	}
 	return ""
@@ -285,7 +432,9 @@ func findEntityForSceneDetail(entities api.EntityListResult, typeValue any, idVa
 }
 
 func hasResourceReference(item map[string]any) bool {
-	return valueIDString(item["resId"]) != "" || valueIDString(item["deviceId"]) != "" || item["typeId"] != nil
+	return valueIDString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)]) != "" ||
+		valueIDString(item[semantic.FieldDeviceID]) != "" ||
+		item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)] != nil
 }
 
 func entityExists(entities api.EntityListResult, entityType string, id string) bool {

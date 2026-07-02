@@ -4,7 +4,7 @@
 
 - Tokens are stored in the system credential store when available, or in a protected local fallback.
 - Profile metadata stores non-secret values: profile name, region, selected home, and QR device identity.
-- User-facing commands do not require a client id. When QR login returns a service client id, the Runtime may keep it internally for API compatibility.
+- User-facing commands do not require a client id. When QR login returns a service client id, the Runtime may keep it internally for service calls.
 
 ## Precedence
 
@@ -136,7 +136,7 @@ Resource groups exposed by the CLI:
 | Space and entities | `room list`, `room batch-create`, `area update`, `group structure`, `entity list`, `entity rename-batch` |
 | Devices and gateways | `device detail`, `device attrs`, `device move-room-batch`, `gateway thread`, `gateway stats`, `meshgroup detail` |
 | Scenes and automations | `scene execute`, `scene batch-delete`, `automation supported-v2`, `automation enable`, `schedule jobs` |
-| Lighting and controls | `light on`, `light brightness-adjust`, `light ct`, `light color`, `lighting plan`, `lighting apply` |
+| Lighting and controls | `light on`, `light brightness-adjust`, `light color-temperature`, `light color`, `lighting plan`, `lighting apply` |
 | Panels and sensors | `panel screen-controls`, `panel button-event-update`, `knob configure`, `sensor events`, `screen controls` |
 | Knowledge and maintenance | `thing products`, `thing schema-get`, `thing faqs`, `upgrade files`, `progress get`, `message list` |
 | Local intelligence | `memory remember`, `memory list`, `recommendation record`, `recommendation feedback`, `ai-voice products` |
@@ -144,9 +144,9 @@ Resource groups exposed by the CLI:
 For less common intent fields, use `--params-json` or `--set key=value`:
 
 ```sh
-yeelight-home scene create --params-json '{"name":"回家灯光","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}' --json
-yeelight-home favorite add --set typeId=2,resId=50018330,rank=1 --json
-yeelight-home thing product-info --product-ids 133121,198660 --json
+yeelight-home scene create --params-json '{"name":"回家灯光","actions":[{"targetType":"device","targetId":"50018330","set":{"power":true}}]}' --json
+yeelight-home favorite add --set targetType=device,targetId=50018330,rank=1 --json
+yeelight-home thing product-info --capability-product-ids 133121,198660 --json
 yeelight-home panel button-event-update --button-event-id <id> --params-json '<json>' --json
 ```
 

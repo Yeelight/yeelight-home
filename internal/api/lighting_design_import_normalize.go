@@ -3,40 +3,65 @@ package api
 import (
 	"fmt"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func NormalizeLightingDesignImportPayload(houseID string, payload map[string]any) (map[string]any, error) {
-	if _, err := parseID(houseID, "house id"); err != nil {
+	if strings.TrimSpace(houseID) != "" {
+		if _, err := parseID(houseID, "house id"); err != nil {
+			return nil, err
+		}
+	}
+	if lightingDesignImportHasUnsupportedOverwrite(payload) {
+		return nil, fmt.Errorf("clearAll/overwrite is not supported by lighting.design.import; use dedicated delete/update intents for existing configured homes")
+	}
+	semanticResult, err := semantic.NormalizeLightingDesignImport(payload, semantic.LightingDesignOptions{HouseID: houseID})
+	if err != nil {
 		return nil, err
 	}
+	payload = semanticResult.Payload
 	return normalizeLightingDesignHouseMeta(houseID, payload)
+}
+
+func lightingDesignImportHasUnsupportedOverwrite(payload map[string]any) bool {
+	for _, key := range semantic.ImportOverwriteFields() {
+		if boolFromMap(payload, key) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeLightingDesignHouseMeta(houseID string, payload map[string]any) (map[string]any, error) {
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	expanded := lightingDesignExpandShortKeys(payload)
-	if boolFromMap(expanded, "clearAll") || boolFromMap(expanded, "overwrite") {
-		return nil, fmt.Errorf("clearAll/overwrite is not supported by lighting.design.import HouseMeta; use dedicated semantic delete/update intents for existing configured homes")
+	expanded := copyLightingDesignDeepMap(payload)
+	if lightingDesignImportHasUnsupportedOverwrite(expanded) {
+		return nil, fmt.Errorf("clearAll/overwrite is not supported by lighting.design.import; use dedicated delete/update intents for existing configured homes")
 	}
-	gateway, ok := mapFromAny(expanded["gateway"])
+	gateway, ok := mapFromAny(expanded[semantic.FieldGateway])
 	if !ok {
 		if looksLikeNaturalLightingDesign(expanded) {
-			return nil, fmt.Errorf("lighting.design.import now requires HouseMeta payload for /v1/meta/import; Skill must generate gateway.roomList/deviceList/groupList/sceneList/automationList instead of natural rooms/items")
+			return nil, fmt.Errorf("lighting.design.import requires the CLI lighting design model: rooms[].deviceSlots[], rooms[].groups[], scenes[].actions[], and automations[].actions[]")
 		}
-		return nil, fmt.Errorf("gateway is required")
+		return nil, fmt.Errorf("lighting design model is required")
 	}
 	meta := copyLightingDesignDeepMap(expanded)
-	meta["houseId"] = requestNumberOrStringForAPI(houseID)
-	if name := strings.TrimSpace(stringFromMap(meta, "name")); name == "" {
-		meta["name"] = firstNonEmpty(stringFromMap(meta, "houseName"), "AI照明设计")
+	if strings.TrimSpace(houseID) != "" {
+		meta[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
+	} else {
+		delete(meta, semantic.FieldHouseID)
 	}
-	if strings.TrimSpace(stringFromMap(meta, "tempId")) == "" {
-		meta["tempId"] = "hm1"
+	if name := strings.TrimSpace(stringFromMap(meta, semantic.FieldName)); name == "" {
+		meta[semantic.FieldName] = firstNonEmpty(stringFromMap(meta, semantic.FieldHouseName), "AI照明设计")
 	}
-	if version, ok := lightingDesignIntFromAny(meta["version"]); !ok || version <= 0 {
-		meta["version"] = 2
+	if strings.TrimSpace(stringFromMap(meta, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))) == "" {
+		meta[semantic.InternalField(semantic.DomainImport, semantic.FieldKey)] = "hm1"
+	}
+	if version, ok := lightingDesignIntFromAny(meta[semantic.FieldVersion]); !ok || version <= 0 {
+		meta[semantic.FieldVersion] = 2
 	}
 	index := lightingDesignMetaIndex{
 		RoomsByTempID:   map[string]string{},
@@ -48,35 +73,35 @@ func normalizeLightingDesignHouseMeta(houseID string, payload map[string]any) (m
 	if err != nil {
 		return nil, err
 	}
-	meta["gateway"] = normalizedGateway
-	areaList, err := normalizeLightingDesignHouseMetaAreas(meta["areaList"], index)
+	meta[semantic.FieldGateway] = normalizedGateway
+	areaList, err := normalizeLightingDesignHouseMetaAreas(meta[semantic.InternalField(semantic.DomainImport, semantic.FieldAreas)], index)
 	if err != nil {
 		return nil, err
 	}
 	if len(areaList) > 0 {
-		meta["areaList"] = areaList
+		meta[semantic.InternalField(semantic.DomainImport, semantic.FieldAreas)] = areaList
 	} else {
-		delete(meta, "areaList")
+		delete(meta, semantic.InternalField(semantic.DomainImport, semantic.FieldAreas))
 	}
-	sceneList, err := normalizeLightingDesignHouseMetaScenes(meta["sceneList"], &index)
+	sceneList, err := normalizeLightingDesignHouseMetaScenes(meta[semantic.InternalField(semantic.DomainImport, semantic.FieldScenes)], &index)
 	if err != nil {
 		return nil, err
 	}
 	if len(sceneList) > 0 {
-		meta["sceneList"] = sceneList
+		meta[semantic.InternalField(semantic.DomainImport, semantic.FieldScenes)] = sceneList
 	} else {
-		delete(meta, "sceneList")
+		delete(meta, semantic.InternalField(semantic.DomainImport, semantic.FieldScenes))
 	}
-	automationList, err := normalizeLightingDesignHouseMetaAutomations(meta["automationList"], index)
+	automationList, err := normalizeLightingDesignHouseMetaAutomations(meta[semantic.InternalField(semantic.DomainImport, semantic.FieldAutomations)], index)
 	if err != nil {
 		return nil, err
 	}
 	if len(automationList) > 0 {
-		meta["automationList"] = automationList
+		meta[semantic.InternalField(semantic.DomainImport, semantic.FieldAutomations)] = automationList
 	} else {
-		delete(meta, "automationList")
+		delete(meta, semantic.InternalField(semantic.DomainImport, semantic.FieldAutomations))
 	}
-	for _, key := range []string{"rooms", "roomList", "devices", "deviceList", "groups", "groupList", "scenes", "automations"} {
+	for _, key := range semantic.ImportCleanupFields() {
 		delete(meta, key)
 	}
 	return meta, nil
@@ -84,21 +109,21 @@ func normalizeLightingDesignHouseMeta(houseID string, payload map[string]any) (m
 
 func normalizeLightingDesignHouseMetaGateway(gateway map[string]any, index *lightingDesignMetaIndex) (map[string]any, error) {
 	result := copyLightingDesignDeepMap(gateway)
-	if strings.TrimSpace(stringFromMap(result, "name")) == "" {
-		result["name"] = "默认网关"
+	if strings.TrimSpace(stringFromMap(result, semantic.FieldName)) == "" {
+		result[semantic.FieldName] = "默认网关"
 	}
-	if strings.TrimSpace(stringFromMap(result, "tempId")) == "" && result["gatewayDeviceId"] == nil {
-		result["tempId"] = "gw1"
+	if strings.TrimSpace(stringFromMap(result, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))) == "" && result[semantic.FieldGatewayDeviceID] == nil {
+		result[semantic.InternalField(semantic.DomainImport, semantic.FieldKey)] = "1"
 	}
-	if _, ok := lightingDesignIntFromAny(result["pid"]); !ok {
-		result["pid"] = int64(17000001)
+	if _, ok := lightingDesignIntFromAny(result[semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID)]); !ok {
+		result[semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID)] = int64(17000001)
 	}
-	rooms, ok := mapListFromAny(result["roomList"])
+	rooms, ok := mapListFromAny(result[semantic.InternalField(semantic.DomainImport, semantic.FieldRooms)])
 	if !ok || len(rooms) == 0 {
-		return nil, fmt.Errorf("gateway.roomList is required")
+		return nil, fmt.Errorf("rooms[] is required")
 	}
 	if len(rooms) > lightingDesignMaxRooms {
-		return nil, fmt.Errorf("gateway.roomList count exceeds limit %d", lightingDesignMaxRooms)
+		return nil, fmt.Errorf("rooms[] count exceeds limit %d", lightingDesignMaxRooms)
 	}
 	normalizedRooms := make([]any, 0, len(rooms))
 	deviceCount := 0
@@ -111,103 +136,117 @@ func normalizeLightingDesignHouseMetaGateway(gateway map[string]any, index *ligh
 		deviceCount += devices
 		groupCount += groups
 		if deviceCount > lightingDesignMaxDevices {
-			return nil, fmt.Errorf("deviceList count exceeds limit %d", lightingDesignMaxDevices)
+			return nil, fmt.Errorf("deviceSlots[] count exceeds limit %d", lightingDesignMaxDevices)
 		}
 		if groupCount > lightingDesignMaxGroups {
-			return nil, fmt.Errorf("groupList count exceeds limit %d", lightingDesignMaxGroups)
+			return nil, fmt.Errorf("groups[] count exceeds limit %d", lightingDesignMaxGroups)
 		}
 		normalizedRooms = append(normalizedRooms, normalized)
 	}
-	result["roomList"] = normalizedRooms
+	result[semantic.InternalField(semantic.DomainImport, semantic.FieldRooms)] = normalizedRooms
 	return result, nil
 }
 
 func normalizeLightingDesignHouseMetaRoom(room map[string]any, roomIndex int, index *lightingDesignMetaIndex) (map[string]any, int, int, error) {
 	result := copyLightingDesignDeepMap(room)
-	name := strings.TrimSpace(stringFromMap(result, "name"))
+	name := strings.TrimSpace(stringFromMap(result, semantic.FieldName))
 	if name == "" {
-		return nil, 0, 0, fmt.Errorf("gateway.roomList[].name is required")
+		return nil, 0, 0, fmt.Errorf("rooms[].name is required")
 	}
-	if strings.TrimSpace(stringFromMap(result, "tempId")) == "" {
-		result["tempId"] = fmt.Sprintf("rm%d", roomIndex+1)
+	if strings.TrimSpace(stringFromMap(result, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))) == "" {
+		result[semantic.InternalField(semantic.DomainImport, semantic.FieldKey)] = fmt.Sprintf("rm%d", roomIndex+1)
 	}
-	roomTempID := stringFromMap(result, "tempId")
-	if strings.TrimSpace(stringFromMap(result, "icon")) == "" {
-		result["icon"] = "room_1"
+	roomTempID := stringFromMap(result, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))
+	if strings.TrimSpace(stringFromMap(result, semantic.FieldIcon)) == "" {
+		result[semantic.FieldIcon] = "room_1"
 	}
 	index.RoomsByTempID[roomTempID] = name
-	devices, _ := mapListFromAny(result["deviceList"])
+	devices, _ := mapListFromAny(result[semantic.InternalField(semantic.DomainImport, semantic.FieldDeviceSlots)])
 	normalizedDevices := make([]any, 0, len(devices))
 	for deviceIndex, device := range devices {
-		normalized, err := normalizeLightingDesignHouseMetaDevice(device, roomTempID, deviceIndex)
+		normalized, err := normalizeLightingDesignHouseMetaDevice(device, deviceIndex)
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		index.DevicesByTempID[stringFromMap(normalized, "tempId")] = stringFromMap(normalized, "name")
+		index.DevicesByTempID[stringFromMap(normalized, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))] = stringFromMap(normalized, semantic.FieldName)
 		normalizedDevices = append(normalizedDevices, normalized)
 	}
-	result["deviceList"] = normalizedDevices
-	groups, _ := mapListFromAny(result["groupList"])
+	result[semantic.InternalField(semantic.DomainImport, semantic.FieldDeviceSlots)] = normalizedDevices
+	groups, _ := mapListFromAny(result[semantic.InternalField(semantic.DomainImport, semantic.FieldGroups)])
 	normalizedGroups := make([]any, 0, len(groups))
 	for groupIndex, group := range groups {
 		normalized, err := normalizeLightingDesignHouseMetaGroup(group, groupIndex, index)
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		index.GroupsByTempID[stringFromMap(normalized, "tempId")] = stringFromMap(normalized, "name")
+		index.GroupsByTempID[stringFromMap(normalized, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))] = stringFromMap(normalized, semantic.FieldName)
 		normalizedGroups = append(normalizedGroups, normalized)
 	}
-	result["groupList"] = normalizedGroups
+	result[semantic.InternalField(semantic.DomainImport, semantic.FieldGroups)] = normalizedGroups
 	return result, len(normalizedDevices), len(normalizedGroups), nil
 }
 
-func normalizeLightingDesignHouseMetaDevice(device map[string]any, roomTempID string, index int) (map[string]any, error) {
+func normalizeLightingDesignHouseMetaDevice(device map[string]any, index int) (map[string]any, error) {
 	result := copyLightingDesignDeepMap(device)
-	if strings.TrimSpace(stringFromMap(result, "name")) == "" {
-		return nil, fmt.Errorf("deviceList[].name is required")
+	if strings.TrimSpace(stringFromMap(result, semantic.FieldName)) == "" {
+		return nil, fmt.Errorf("rooms[].deviceSlots[].name is required")
 	}
-	if strings.TrimSpace(stringFromMap(result, "tempId")) == "" {
-		result["tempId"] = fmt.Sprintf("dv%d", index+1)
-	}
-	if strings.TrimSpace(stringFromMap(result, "roomTempId")) == "" {
-		result["roomTempId"] = roomTempID
+	if strings.TrimSpace(stringFromMap(result, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))) == "" {
+		result[semantic.InternalField(semantic.DomainImport, semantic.FieldKey)] = fmt.Sprintf("dv%d", index+1)
 	}
 	match := lightingDesignExplicitProduct(result)
-	if _, ok := lightingDesignIntFromAny(result["pid"]); !ok && match.Entry.PID > 0 {
-		result["pid"] = match.Entry.PID
+	if strings.TrimSpace(firstAnyString(result, semantic.ProductCodeFields()...)) == "" {
+		return nil, fmt.Errorf("rooms[].deviceSlots[].product.skuCode is required; Skill must choose a concrete SKU before import")
 	}
-	if _, ok := lightingDesignIntFromAny(result["pid"]); !ok {
-		return nil, fmt.Errorf("deviceList[].pid is required; Skill must select a product before import")
+	if _, ok := lightingDesignIntFromAny(result[semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID)]); !ok && match.Entry.PID > 0 {
+		result[semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID)] = match.Entry.PID
+	}
+	if _, ok := lightingDesignIntFromAny(result[semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID)]); !ok {
+		return nil, fmt.Errorf("rooms[].deviceSlots[].product.capabilityPid is required; Skill must choose a product with a known capability PID before import")
 	}
 	lightingDesignMergeExtraMeta(result, result)
+	delete(result, semantic.ImportRoomTempIDField())
+	delete(result, semantic.InternalField(semantic.DomainProduct, semantic.FieldProductCategoryID))
+	lightingDesignKeepDeviceHouseMetaFields(result)
 	return result, nil
 }
 
 func normalizeLightingDesignHouseMetaGroup(group map[string]any, index int, metaIndex *lightingDesignMetaIndex) (map[string]any, error) {
 	result := copyLightingDesignDeepMap(group)
-	if strings.TrimSpace(stringFromMap(result, "name")) == "" {
-		return nil, fmt.Errorf("groupList[].name is required")
+	if strings.TrimSpace(stringFromMap(result, semantic.FieldName)) == "" {
+		return nil, fmt.Errorf("rooms[].groups[].name is required")
 	}
-	if strings.TrimSpace(stringFromMap(result, "tempId")) == "" {
-		result["tempId"] = fmt.Sprintf("gp%d", index+1)
+	if strings.TrimSpace(stringFromMap(result, semantic.InternalField(semantic.DomainImport, semantic.FieldKey))) == "" {
+		result[semantic.InternalField(semantic.DomainImport, semantic.FieldKey)] = fmt.Sprintf("gp%d", index+1)
 	}
-	if _, ok := lightingDesignIntFromAny(result["componentId"]); !ok {
-		if cid, ok := lightingDesignIntFromAny(result["cid"]); ok {
-			result["componentId"] = cid
+	if _, ok := lightingDesignIntFromAny(result[semantic.InternalGroupCapabilityIDField()]); !ok {
+		if componentID, ok := lightingDesignIntFromAny(result[semantic.InternalCloudComponentIDField()]); ok {
+			result[semantic.InternalGroupCapabilityIDField()] = componentID
 		} else {
-			return nil, fmt.Errorf("groupList[].componentId is required")
+			return nil, fmt.Errorf("rooms[].groups[].groupCapability is required")
 		}
 	}
-	ids, ok := lightingDesignStringListFromAny(result["deviceTempIdList"])
+	ids, ok := lightingDesignStringListFromAny(result[semantic.InternalField(semantic.DomainImport, semantic.FieldSlotKeys)])
 	if !ok || len(ids) == 0 {
-		return nil, fmt.Errorf("groupList[].deviceTempIdList is required")
+		return nil, fmt.Errorf("rooms[].groups[].slotKeys is required")
 	}
 	for _, tempID := range ids {
 		if metaIndex.DevicesByTempID[tempID] == "" {
-			return nil, fmt.Errorf("groupList[].deviceTempIdList references unknown device tempId %q", tempID)
+			return nil, fmt.Errorf("rooms[].groups[].slotKeys references unknown device slot key %q", tempID)
 		}
 	}
-	result["deviceTempIdList"] = ids
-	delete(result, "cid")
+	result[semantic.InternalField(semantic.DomainImport, semantic.FieldSlotKeys)] = ids
+	delete(result, semantic.InternalCloudComponentIDField())
+	delete(result, semantic.FieldGroupCategory)
+	delete(result, semantic.FieldGroupCapability)
+	delete(result, semantic.FieldSlotKeys)
 	return result, nil
+}
+
+func lightingDesignKeepDeviceHouseMetaFields(device map[string]any) {
+	if extra, ok := device[semantic.FieldExtraMeta].(map[string]string); ok {
+		if materialCode := strings.TrimSpace(extra[semantic.InternalField(semantic.DomainProduct, semantic.FieldProductCode)]); materialCode != "" {
+			device[semantic.InternalField(semantic.DomainProduct, semantic.FieldProductCode)] = materialCode
+		}
+	}
 }

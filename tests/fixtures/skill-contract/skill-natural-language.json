@@ -1,0 +1,249 @@
+{
+  "version": "1.0",
+  "description": "Novice-user natural-language SkillRequest contract cases. These cases are no-write validation inputs for the Skill docs and Runtime public contract.",
+  "cases": [
+    {
+      "id": "new-home-lighting-design-import",
+      "utterance": "帮我设计添加一个易来新家家庭，客厅一个吸顶灯，两个黑色格栅灯，主卧每天9点亮起来",
+      "expectedIntent": "lighting.design.import",
+      "requestFile": "skill/yeelight-smart-home/assets/examples/lighting-design-full-home.json",
+      "checks": [
+        "newHomeDesignImport",
+        "lightingDesignShape"
+      ],
+      "runtimeDryRun": true
+    },
+    {
+      "id": "scene-update-warmer-light",
+      "utterance": "把孩子屋开灯改成暖一点，别太刺眼",
+      "expectedIntent": "scene.update",
+      "request": {
+        "contractVersion": "1.0",
+        "requestId": "natural-scene-update-warmer",
+        "locale": "zh-CN",
+        "utterance": "把孩子屋开灯改成暖一点，别太刺眼",
+        "intent": "scene.update",
+        "targets": [
+          {
+            "entityType": "scene",
+            "name": "孩子屋开灯"
+          }
+        ],
+        "parameters": {
+          "houseId": "house-1",
+          "sceneId": "scene-1",
+          "name": "孩子屋开灯",
+          "actions": [
+            {
+              "targetType": "device",
+              "targetId": "device-1",
+              "targetName": "孩子屋吸顶灯",
+              "rank": 0,
+              "set": {
+                "power": true,
+                "brightness": 45,
+                "colorTemperature": 3000
+              }
+            }
+          ]
+        }
+      },
+      "checks": [
+        "completeActionRows"
+      ]
+    },
+    {
+      "id": "automation-create-morning-light",
+      "utterance": "主卧灯每天早上9点自动亮起来，柔和一点",
+      "expectedIntent": "automation.create",
+      "request": {
+        "contractVersion": "1.0",
+        "requestId": "natural-automation-create-morning",
+        "locale": "zh-CN",
+        "utterance": "主卧灯每天早上9点自动亮起来，柔和一点",
+        "intent": "automation.create",
+        "parameters": {
+          "houseId": "house-1",
+          "name": "主卧9点柔和亮灯",
+          "activeWindow": {
+            "start": "00:00:00",
+            "end": "23:59:59"
+          },
+          "repeat": "daily",
+          "trigger": {
+            "conditionKind": "alarm",
+            "time": "09:00:00"
+          },
+          "actions": [
+            {
+              "targetType": "device",
+              "targetId": "device-1",
+              "targetName": "主卧吸顶灯",
+              "rank": 0,
+              "set": {
+                "power": true,
+                "brightness": 60,
+                "colorTemperature": 3000
+              }
+            }
+          ]
+        }
+      },
+      "checks": [
+        "automationShape",
+        "completeActionRows"
+      ]
+    },
+    {
+      "id": "direct-control-fast-path",
+      "utterance": "把孩子屋吸顶灯打开",
+      "expectedIntent": "light.power.set",
+      "request": {
+        "contractVersion": "1.0",
+        "requestId": "natural-direct-power",
+        "locale": "zh-CN",
+        "utterance": "把孩子屋吸顶灯打开",
+        "intent": "light.power.set",
+        "targets": [
+          {
+            "entityType": "room",
+            "name": "孩子屋"
+          },
+          {
+            "entityType": "device",
+            "name": "吸顶灯"
+          }
+        ],
+        "parameters": {
+          "houseId": "house-1",
+          "roomName": "孩子屋",
+          "deviceName": "吸顶灯",
+          "power": true
+        }
+      },
+      "checks": [
+        "directControlFastPath"
+      ]
+    },
+    {
+      "id": "named-home-direct-control",
+      "utterance": "把易来新家家庭的客厅吸顶灯打开",
+      "expectedIntent": "light.power.set",
+      "request": {
+        "contractVersion": "1.0",
+        "requestId": "natural-named-home-direct-power",
+        "locale": "zh-CN",
+        "utterance": "把易来新家家庭的客厅吸顶灯打开",
+        "intent": "light.power.set",
+        "homeRef": {
+          "name": "易来新家家庭"
+        },
+        "targets": [
+          {
+            "entityType": "home",
+            "name": "易来新家家庭"
+          },
+          {
+            "entityType": "room",
+            "name": "客厅"
+          },
+          {
+            "entityType": "device",
+            "name": "吸顶灯"
+          }
+        ],
+        "parameters": {
+          "roomName": "客厅",
+          "deviceName": "吸顶灯",
+          "power": true
+        }
+      },
+      "checks": [
+        "directControlFastPath",
+        "namedHomeTarget"
+      ]
+    },
+    {
+      "id": "room-rename-natural-current-name",
+      "utterance": "把孩子屋改成儿童房",
+      "expectedIntent": "room.rename",
+      "request": {
+        "contractVersion": "1.0",
+        "requestId": "natural-room-rename-current-name",
+        "locale": "zh-CN",
+        "utterance": "把孩子屋改成儿童房",
+        "intent": "room.rename",
+        "parameters": {
+          "houseId": "house-1",
+          "roomName": "孩子屋",
+          "newName": "儿童房"
+        }
+      },
+      "checks": [
+        "roomRenameNaturalTarget"
+      ]
+    },
+    {
+      "id": "memory-explicit-batch",
+      "utterance": "记住我喜欢浪漫的色调还有高端奢华",
+      "expectedIntent": "memory.remember",
+      "request": {
+        "contractVersion": "1.0",
+        "requestId": "natural-memory-batch",
+        "locale": "zh-CN",
+        "utterance": "记住我喜欢浪漫的色调还有高端奢华",
+        "intent": "memory.remember",
+        "parameters": {
+          "houseId": "house-1",
+          "preferences": [
+            {
+              "scopeType": "home",
+              "preferenceType": "ambience",
+              "preferenceValue": "prefer_romantic_warm",
+              "evidence": "用户明确要求记住喜欢浪漫色调"
+            },
+            {
+              "scopeType": "home",
+              "preferenceType": "product_preference",
+              "preferenceValue": "prefer_premium_luxury",
+              "evidence": "用户明确要求记住高端奢华产品定位"
+            }
+          ]
+        }
+      },
+      "checks": [
+        "memoryStructured"
+      ]
+    },
+    {
+      "id": "operation-lesson-after-failure",
+      "utterance": "这次 scene.update 失败了，记一下下次别再猜动作格式",
+      "expectedIntent": "operation.lesson.record",
+      "request": {
+        "contractVersion": "1.0",
+        "requestId": "natural-lesson-scene-update",
+        "locale": "zh-CN",
+        "utterance": "这次 scene.update 失败了，记一下下次别再猜动作格式",
+        "intent": "operation.lesson.record",
+        "parameters": {
+          "lesson": {
+            "intent": "scene.update",
+            "lessonType": "parameter_shape",
+            "symptom": "更新情景时只知道顶层字段，动作行不完整导致失败",
+            "cause": "情景更新需要完整 actions 列表，不能只提交局部 set",
+            "recommendedPath": "先读取 scene.detail.get，再基于返回的完整动作列表只修改目标 set 后提交 scene.update",
+            "avoid": "不要凭一句描述临时拼不完整的动作行",
+            "fallbackIntent": "scene.create",
+            "evidence": "Runtime 返回动作结构缺失",
+            "source": "runtime_response",
+            "confidence": "high",
+            "status": "confirmed"
+          }
+        }
+      },
+      "checks": [
+        "lessonStructured"
+      ]
+    }
+  ]
+}

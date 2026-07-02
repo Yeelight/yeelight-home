@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (client HomeOrganizationClient) favoriteBatchExists(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, int, error) {
@@ -52,7 +54,11 @@ func (client HomeOrganizationClient) favoriteBatchMissing(ctx context.Context, h
 }
 
 func favoriteFieldsMatch(item map[string]any, payload map[string]any) bool {
-	for _, key := range []string{"typeId", "resId", "rank"} {
+	for _, key := range []string{
+		semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType),
+		semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID),
+		semantic.FieldRank,
+	} {
 		expected, ok := payload[key]
 		if !ok {
 			continue
@@ -62,8 +68,8 @@ func favoriteFieldsMatch(item map[string]any, payload map[string]any) bool {
 			return false
 		}
 	}
-	if expected, ok := payload["valid"].(bool); ok {
-		actual, ok := item["valid"].(bool)
+	if expected, ok := payload[semantic.FieldValid].(bool); ok {
+		actual, ok := item[semantic.FieldValid].(bool)
 		if !ok || actual != expected {
 			return false
 		}
@@ -75,15 +81,20 @@ func favoriteRowsFromData(data any) []any {
 	rows := []any{}
 	switch typed := data.(type) {
 	case map[string]any:
-		for key, typeID := range map[string]int{
-			"devices":    2,
-			"meshgroups": 4,
-			"meshGroups": 4,
-			"userscenes": 6,
-			"userScenes": 6,
-			"scenes":     6,
-		} {
-			items, ok := typed[key].([]any)
+		type container struct {
+			key    string
+			typeID int
+		}
+		containers := []container{
+			{key: "devices", typeID: semantic.ResourceDevice},
+			{key: "meshgroups", typeID: semantic.ResourceMeshGroup},
+			{key: "meshGroups", typeID: semantic.ResourceMeshGroup},
+			{key: "userscenes", typeID: semantic.ResourceScene},
+			{key: "userScenes", typeID: semantic.ResourceScene},
+			{key: "scenes", typeID: semantic.ResourceScene},
+		}
+		for _, spec := range containers {
+			items, ok := typed[spec.key].([]any)
 			if !ok {
 				continue
 			}
@@ -97,14 +108,16 @@ func favoriteRowsFromData(data any) []any {
 				for itemKey, value := range item {
 					normalized[itemKey] = value
 				}
-				if normalized["typeId"] == nil {
-					normalized["typeId"] = typeID
+				typeField := semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)
+				idField := semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)
+				if normalized[typeField] == nil {
+					normalized[typeField] = spec.typeID
 				}
-				if normalized["resId"] == nil {
-					normalized["resId"] = firstNonNilForSort(normalized["deviceId"], normalized["meshGroupId"], normalized["sceneId"], normalized["id"])
+				if normalized[idField] == nil {
+					normalized[idField] = firstNonNilForSort(normalized[semantic.FieldDeviceID], normalized[semantic.FieldMeshGroupID], normalized[semantic.FieldSceneID], normalized[semantic.FieldID])
 				}
-				if normalized["favoriteId"] == nil && normalized["favouriteId"] == nil {
-					delete(normalized, "id")
+				if normalized[semantic.FieldFavoriteID] == nil {
+					delete(normalized, semantic.FieldID)
 				}
 				rows = append(rows, normalized)
 			}
@@ -114,6 +127,71 @@ func favoriteRowsFromData(data any) []any {
 		}
 	}
 	return rowsFromData(data)
+}
+
+func projectFavoriteRows(data any) []any {
+	rows := favoriteRowsFromData(data)
+	favorites := make([]any, 0, len(rows))
+	for _, raw := range rows {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		favorite := map[string]any{}
+		if value := firstCloudAny(item, semantic.FieldFavoriteID, semantic.FieldID); value != nil {
+			favorite[semantic.FieldFavoriteID] = sanitizeCloudData(value)
+		}
+		if targetType := projectFavoriteTargetType(item); targetType != "" {
+			favorite[semantic.FieldTargetType] = targetType
+		}
+		if targetID := firstCloudAny(item,
+			semantic.FieldTargetID,
+			semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID),
+			semantic.FieldDeviceID,
+			semantic.FieldGroupID,
+			semantic.FieldMeshGroupID,
+			semantic.FieldSceneID,
+			semantic.FieldAutomationID,
+			semantic.FieldRoomID,
+		); targetID != nil {
+			favorite[semantic.FieldTargetID] = sanitizeCloudData(targetID)
+		}
+		if name := firstAnyString(item,
+			semantic.FieldName,
+			semantic.FieldTargetName,
+			semantic.FieldDeviceName,
+			semantic.FieldGroupName,
+			semantic.FieldSceneName,
+			semantic.FieldAutomationName,
+			semantic.FieldRoomName,
+		); name != "" {
+			favorite[semantic.FieldName] = name
+		}
+		for _, key := range []string{semantic.FieldRank, semantic.FieldHouseID, semantic.FieldRoomID, semantic.FieldValid} {
+			if value, ok := item[key]; ok {
+				favorite[key] = sanitizeCloudData(value)
+			}
+		}
+		if len(favorite) == 0 {
+			continue
+		}
+		favorites = append(favorites, favorite)
+	}
+	return favorites
+}
+
+func projectFavoriteTargetType(item map[string]any) string {
+	if value := firstAnyString(item, semantic.FieldTargetType); value != "" {
+		return value
+	}
+	typeValue := firstCloudAny(item,
+		semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType),
+		semantic.FieldTargetTypeID,
+	)
+	if targetType := semantic.ResourceTypeName(typeValue); targetType != "" {
+		return targetType
+	}
+	return ""
 }
 
 func favoriteRowsContain(rows []any, payload map[string]any) bool {
@@ -140,20 +218,21 @@ func favoriteRowsContainIdentity(rows []any, payload map[string]any) bool {
 }
 
 func favoriteIdentityMatches(item map[string]any, payload map[string]any) bool {
-	favoriteID := strings.TrimSpace(stringFromAny(payload["favoriteId"]))
+	favoriteID := strings.TrimSpace(stringFromAny(payload[semantic.FieldFavoriteID]))
 	if favoriteID != "" {
-		return firstAnyString(item, "favoriteId", "favouriteId", "id") == favoriteID
+		return firstAnyString(item, semantic.FieldFavoriteID, semantic.FieldID) == favoriteID
 	}
-	typeID := strings.TrimSpace(stringFromAny(payload["typeId"]))
-	resID := strings.TrimSpace(stringFromAny(payload["resId"]))
+	typeID := strings.TrimSpace(stringFromAny(payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)]))
+	resID := strings.TrimSpace(stringFromAny(payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)]))
 	if typeID == "" || resID == "" {
 		return false
 	}
-	return firstAnyString(item, "typeId") == typeID && firstAnyString(item, "resId") == resID
+	return firstAnyString(item, semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)) == typeID &&
+		firstAnyString(item, semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)) == resID
 }
 
 func favoriteBatchItems(payload map[string]any) ([]map[string]any, error) {
-	rawItems, ok := payload["items"].([]any)
+	rawItems, ok := payload[semantic.FieldItems].([]any)
 	if !ok || len(rawItems) == 0 {
 		return nil, fmt.Errorf("favorite batch items are required")
 	}
@@ -179,8 +258,8 @@ func (client HomeOrganizationClient) favoriteMergedUpdateBody(ctx context.Contex
 		if !ok {
 			continue
 		}
-		typeID := strings.TrimSpace(firstAnyString(row, "typeId"))
-		resID := strings.TrimSpace(firstAnyString(row, "resId"))
+		typeID := strings.TrimSpace(firstAnyString(row, semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)))
+		resID := strings.TrimSpace(firstAnyString(row, semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)))
 		if typeID == "" || resID == "" {
 			continue
 		}
@@ -190,8 +269,8 @@ func (client HomeOrganizationClient) favoriteMergedUpdateBody(ctx context.Contex
 		typeGroups[typeID][resID] = favoriteMergeWritableRow(houseID, row)
 	}
 	for _, update := range updates {
-		typeID := strings.TrimSpace(stringFromAny(update["typeId"]))
-		resID := strings.TrimSpace(stringFromAny(update["resId"]))
+		typeID := strings.TrimSpace(stringFromAny(update[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)]))
+		resID := strings.TrimSpace(stringFromAny(update[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)]))
 		if typeID == "" || resID == "" {
 			return nil, calls, fmt.Errorf("favorite update requires typeId and resId")
 		}
@@ -221,18 +300,18 @@ func (client HomeOrganizationClient) favoriteMergedUpdateBody(ctx context.Contex
 
 func favoriteMergeWritableRow(houseID string, source map[string]any) map[string]any {
 	row := map[string]any{
-		"houseId": requestNumberOrStringForSort(houseID),
-		"typeId":  requestNumberOrStringForSort(firstAnyString(source, "typeId")),
-		"resId":   requestNumberOrStringForSort(firstAnyString(source, "resId")),
+		semantic.FieldHouseID: requestNumberOrStringForSort(houseID),
+		semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType): requestNumberOrStringForSort(firstAnyString(source, semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType))),
+		semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID):   requestNumberOrStringForSort(firstAnyString(source, semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID))),
 	}
-	if rank := strings.TrimSpace(firstAnyString(source, "rank")); rank != "" {
-		row["rank"] = requestNumberOrStringForSort(rank)
+	if rank := strings.TrimSpace(firstAnyString(source, semantic.FieldRank)); rank != "" {
+		row[semantic.FieldRank] = requestNumberOrStringForSort(rank)
 	}
-	if valid := strings.TrimSpace(firstAnyString(source, "valid")); valid != "" {
-		row["valid"] = requestNumberOrStringForSort(valid)
+	if valid := strings.TrimSpace(firstAnyString(source, semantic.FieldValid)); valid != "" {
+		row[semantic.FieldValid] = requestNumberOrStringForSort(valid)
 	}
-	if favoriteID := strings.TrimSpace(firstAnyString(source, "favoriteId", "favouriteId", "id")); favoriteID != "" {
-		row["id"] = requestNumberOrStringForSort(favoriteID)
+	if favoriteID := strings.TrimSpace(firstAnyString(source, semantic.FieldFavoriteID, semantic.FieldID)); favoriteID != "" {
+		row[semantic.FieldID] = requestNumberOrStringForSort(favoriteID)
 	}
 	return row
 }

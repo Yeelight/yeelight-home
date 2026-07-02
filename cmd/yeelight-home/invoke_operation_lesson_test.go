@@ -69,6 +69,37 @@ func TestInvokeOperationLessonRecordMergesDuplicate(t *testing.T) {
 	}
 }
 
+func TestInvokeOperationLessonRecordDryRunDoesNotPersist(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-lesson-dry-run-secret", "client-lesson-dry-run-1", "house-1")
+	input := `{"contractVersion":"1.0","requestId":"req-lesson-dry-run","locale":"zh-CN","utterance":"先预览一下要记录的经验","intent":"operation.lesson.record","options":{"dryRun":true},"parameters":{"houseId":"house-1","lesson":{"intent":"panel.button.type.get","lessonType":"parameter_shape","symptom":"developer dry-run payload validation only","recommendedPath":"Use panel.get returned button row type for panel.button.type.get.","evidence":"dry-run validation"}}}`
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("dry-run record exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid dry-run response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "operation-lesson-record-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["dryRun"] != true {
+		t.Fatalf("result = %#v", result)
+	}
+
+	lessons, err := app.memoryStore.ListOperationLessons(newLessonFilter("default", "dev", "house-1", "panel.button.type.get"))
+	if err != nil {
+		t.Fatalf("ListOperationLessons error: %v", err)
+	}
+	if len(lessons) != 0 {
+		t.Fatalf("dry-run should not persist lessons: %#v", lessons)
+	}
+}
+
 func TestInvokeOperationLessonRecordRequiresStructuredFields(t *testing.T) {
 	app := newTestApp(t)
 	input := `{"contractVersion":"1.0","requestId":"req-lesson-invalid","locale":"zh-CN","utterance":"记录一个经验","intent":"operation.lesson.record","parameters":{"lesson":{"intent":"scene.update"}}}`

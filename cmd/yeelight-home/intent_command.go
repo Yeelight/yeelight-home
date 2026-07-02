@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func runIntent(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -120,7 +121,7 @@ func explainIntent(intent string) intentExplanation {
 		Implemented:      isImplementedInvokeIntent(intent),
 		LocalOnly:        isLocalOnlyInvokeIntent(intent),
 		HouseIndependent: isHouseIndependentInvokeIntent(intent),
-		ExecutionModel:   "direct_after_adapter_validation; use --dry-run/--preview-only for no-write preview",
+		ExecutionModel:   "direct_after_runtime_validation; use --dry-run/--preview-only for no-write preview",
 		AcceptedFields:   intentAcceptedFields(intent),
 		PayloadGuide:     guide,
 	}
@@ -135,7 +136,7 @@ func explainIntent(intent string) intentExplanation {
 		explanation.ExampleCommand = strings.TrimSpace(moduleActionExamples(resource, action, spec))
 	}
 	if guide != nil {
-		if nextStep := requestString(guide["nextStep"]); nextStep != "" {
+		if nextStep := requestString(guide[semantic.FieldNextStep]); nextStep != "" {
 			explanation.NextStep = nextStep
 		}
 	}
@@ -145,71 +146,286 @@ func explainIntent(intent string) intentExplanation {
 func intentRequestSchema(intent string, guide map[string]any) map[string]any {
 	parameters := map[string]any{
 		"type":                 "object",
-		"additionalProperties": true,
+		"additionalProperties": false,
 		"properties": map[string]any{
-			"houseId": map[string]any{
+			semantic.FieldHouseID: map[string]any{
 				"type":        "string",
 				"description": "House id. Required for house-scoped intents unless supplied by selected profile, --house-id, or homeRef.",
 			},
 		},
 	}
 	if guide != nil {
-		if shape, ok := guide["payloadShape"].(map[string]any); ok {
+		if shape, ok := guide[semantic.FieldPayloadShape].(map[string]any); ok {
 			parameters = payloadShapeToSchema(shape)
 		}
 	}
+	parameters = ensureHouseIDParameter(parameters)
+	parameters = ensureIntentTargetParameters(intent, parameters)
+	parameters = ensureIntentParameterRequiredFields(intent, parameters)
 	schema := map[string]any{
 		"$schema":              "https://json-schema.org/draft/2020-12/schema",
 		"title":                "Yeelight Home SkillRequest for " + intent,
 		"type":                 "object",
 		"additionalProperties": false,
-		"required":             []string{"contractVersion", "requestId", "locale", "utterance", "intent"},
+		"required":             []string{semantic.FieldContractVersion, semantic.FieldRequestID, semantic.FieldLocale, semantic.FieldUtterance, semantic.FieldIntent},
 		"properties": map[string]any{
-			"contractVersion": map[string]any{"const": contract.Version},
-			"requestId":       map[string]any{"type": "string", "minLength": 1},
-			"locale":          map[string]any{"type": "string", "minLength": 1},
-			"utterance":       map[string]any{"type": "string", "minLength": 1},
-			"intent":          map[string]any{"const": intent},
-			"homeRef": map[string]any{
+			semantic.FieldContractVersion: map[string]any{"const": contract.Version},
+			semantic.FieldRequestID:       map[string]any{"type": "string", "minLength": 1},
+			semantic.FieldLocale:          map[string]any{"type": "string", "minLength": 1},
+			semantic.FieldUtterance:       map[string]any{"type": "string", "minLength": 1},
+			semantic.FieldIntent:          map[string]any{"const": intent},
+			semantic.FieldHomeRef: map[string]any{
 				"type":                 "object",
-				"additionalProperties": true,
+				"additionalProperties": false,
 				"properties": map[string]any{
-					"name":       map[string]any{"type": "string"},
-					"useCurrent": map[string]any{"type": "boolean"},
+					semantic.FieldID:         map[string]any{"type": "string"},
+					semantic.FieldHouseID:    map[string]any{"type": "string"},
+					semantic.FieldName:       map[string]any{"type": "string"},
+					semantic.FieldUseCurrent: map[string]any{"type": "boolean"},
 				},
 			},
-			"targets": map[string]any{
+			semantic.FieldTargets: map[string]any{
 				"type": "array",
 				"items": map[string]any{
 					"type":                 "object",
-					"additionalProperties": true,
+					"additionalProperties": false,
 					"properties": map[string]any{
-						"id":         map[string]any{"type": "string"},
-						"name":       map[string]any{"type": "string"},
-						"entityType": map[string]any{"type": "string"},
+						semantic.FieldID:         map[string]any{"type": "string"},
+						semantic.FieldName:       map[string]any{"type": "string"},
+						semantic.FieldEntityType: map[string]any{"type": "string"},
 					},
 				},
 			},
-			"parameters": parameters,
-			"options": map[string]any{
+			semantic.FieldParameters: parameters,
+			semantic.FieldOptions: map[string]any{
 				"type":                 "object",
-				"additionalProperties": true,
+				"additionalProperties": false,
 				"properties": map[string]any{
-					"dryRun":      map[string]any{"type": "boolean"},
-					"previewOnly": map[string]any{"type": "boolean"},
+					semantic.FieldDryRun:      map[string]any{"type": "boolean"},
+					semantic.FieldPreviewOnly: map[string]any{"type": "boolean"},
 				},
 			},
 		},
 	}
 	if guide != nil {
-		if examples, ok := guide["examples"]; ok {
-			schema["examples"] = examples
+		if examples, ok := guide[semantic.FieldExamples]; ok {
+			schema[semantic.FieldExamples] = examples
 		}
-		if nextStep := requestString(guide["nextStep"]); nextStep != "" {
-			schema["nextStep"] = nextStep
+		if nextStep := requestString(guide[semantic.FieldNextStep]); nextStep != "" {
+			schema[semantic.FieldNextStep] = nextStep
 		}
 	}
 	return schema
+}
+
+func ensureIntentTargetParameters(intent string, schema map[string]any) map[string]any {
+	fields := intentTargetParameterFields(intent)
+	if len(fields) == 0 {
+		return schema
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if properties == nil {
+		properties = map[string]any{}
+		schema["properties"] = properties
+	}
+	for _, field := range fields {
+		if _, ok := properties[field]; ok {
+			continue
+		}
+		properties[field] = map[string]any{
+			"type":        "string",
+			"description": "Natural target field accepted by Runtime target resolution.",
+		}
+	}
+	return schema
+}
+
+func intentTargetParameterFields(intent string) []string {
+	switch intent {
+	case "panel.get", "panel.button.type.get", "panel.button.configure", "panel.button_event.update", "panel.button_event.batch_update", "panel.button_event.reset":
+		return []string{
+			semantic.FieldPanelID,
+			semantic.FieldDeviceID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldPanelName,
+			semantic.FieldDeviceName,
+			semantic.FieldEntityName,
+			semantic.FieldName,
+			semantic.FieldRoomID,
+			semantic.FieldRoomName,
+			semantic.FieldTargetRoomName,
+		}
+	case "knob.get", "knob.configure", "knob.reset":
+		return []string{
+			semantic.FieldKnobID,
+			semantic.FieldDeviceID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldKnobName,
+			semantic.FieldDeviceName,
+			semantic.FieldEntityName,
+			semantic.FieldName,
+			semantic.FieldRoomID,
+			semantic.FieldRoomName,
+			semantic.FieldTargetRoomName,
+		}
+	}
+	switch entityTypeFromIntent(intent) {
+	case "device":
+		return []string{
+			semantic.FieldDeviceID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldDeviceName,
+			semantic.FieldEntityName,
+			semantic.FieldName,
+			semantic.FieldRoomID,
+			semantic.FieldRoomName,
+			semantic.FieldTargetRoomName,
+		}
+	case "gateway":
+		return []string{
+			semantic.FieldGatewayID,
+			semantic.FieldDeviceID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldGatewayName,
+			semantic.FieldDeviceName,
+			semantic.FieldEntityName,
+			semantic.FieldName,
+			semantic.FieldRoomID,
+			semantic.FieldRoomName,
+			semantic.FieldTargetRoomName,
+		}
+	case "room":
+		return []string{
+			semantic.FieldRoomID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldRoomName,
+			semantic.FieldTargetRoomName,
+			semantic.FieldEntityName,
+			semantic.FieldName,
+		}
+	case "area":
+		return []string{
+			semantic.FieldAreaID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldAreaName,
+			semantic.FieldEntityName,
+			semantic.FieldName,
+		}
+	case "group":
+		return []string{
+			semantic.FieldGroupID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldGroupName,
+			semantic.FieldEntityName,
+			semantic.FieldName,
+			semantic.FieldRoomID,
+			semantic.FieldRoomName,
+			semantic.FieldTargetRoomName,
+		}
+	case "scene":
+		return []string{
+			semantic.FieldSceneID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldSceneName,
+			semantic.FieldCurrentName,
+			semantic.FieldEntityName,
+			semantic.FieldTargetName,
+			semantic.FieldName,
+		}
+	case "automation":
+		return []string{
+			semantic.FieldAutomationID,
+			semantic.FieldEntityID,
+			semantic.FieldID,
+			semantic.FieldAutomationName,
+			semantic.FieldCurrentName,
+			semantic.FieldEntityName,
+			semantic.FieldTargetName,
+			semantic.FieldName,
+		}
+	default:
+		return nil
+	}
+}
+
+func ensureHouseIDParameter(schema map[string]any) map[string]any {
+	properties, _ := schema["properties"].(map[string]any)
+	if properties == nil {
+		properties = map[string]any{}
+		schema["properties"] = properties
+	}
+	if _, ok := properties[semantic.FieldHouseID]; !ok {
+		properties[semantic.FieldHouseID] = map[string]any{
+			"type":        "string",
+			"description": "House id. Required for house-scoped intents unless supplied by selected profile, --house-id, or homeRef.",
+		}
+	}
+	return schema
+}
+
+func ensureIntentParameterRequiredFields(intent string, schema map[string]any) map[string]any {
+	requiredFields := intentAdditionalRequiredParameterFields(intent)
+	if len(requiredFields) == 0 {
+		return schema
+	}
+	properties, _ := schema["properties"].(map[string]any)
+	if len(properties) == 0 {
+		return schema
+	}
+	required := schemaStringList(schema["required"])
+	for _, field := range requiredFields {
+		if _, ok := properties[field]; ok && !schemaStringListContains(required, field) {
+			required = append(required, field)
+		}
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+func intentAdditionalRequiredParameterFields(intent string) []string {
+	switch intent {
+	case "scene.create", "scene.update":
+		return []string{semantic.FieldActions}
+	case "automation.create", "automation.update":
+		return []string{semantic.FieldTrigger, semantic.FieldActions}
+	default:
+		return nil
+	}
+}
+
+func schemaStringList(value any) []string {
+	items := []string{}
+	switch typed := value.(type) {
+	case []string:
+		items = append(items, typed...)
+	case []any:
+		for _, raw := range typed {
+			text := strings.TrimSpace(requestString(raw))
+			if text != "" {
+				items = append(items, text)
+			}
+		}
+	}
+	return items
+}
+
+func schemaStringListContains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func payloadShapeToSchema(shape map[string]any) map[string]any {
@@ -219,14 +435,14 @@ func payloadShapeToSchema(shape map[string]any) map[string]any {
 		if !payloadShapeAcceptedKey(key) {
 			continue
 		}
-		properties[key] = payloadShapeValueToSchema(shape[key])
-		if payloadShapeDescriptionContains(shape[key], "required") {
+		properties[key] = payloadShapeValueToSchema(key, shape[key])
+		if payloadShapeValueIsRequired(shape[key]) {
 			required = append(required, key)
 		}
 	}
 	schema := map[string]any{
 		"type":                 "object",
-		"additionalProperties": true,
+		"additionalProperties": false,
 		"properties":           properties,
 	}
 	if len(required) > 0 {
@@ -235,19 +451,19 @@ func payloadShapeToSchema(shape map[string]any) map[string]any {
 	return schema
 }
 
-func payloadShapeValueToSchema(value any) map[string]any {
+func payloadShapeValueToSchema(key string, value any) map[string]any {
 	switch typed := value.(type) {
 	case map[string]any:
 		return payloadShapeToSchema(typed)
 	case []any:
-		itemSchema := map[string]any{"type": "object", "additionalProperties": true}
+		itemSchema := map[string]any{"type": "object", "additionalProperties": false}
 		if len(typed) > 0 {
-			itemSchema = payloadShapeValueToSchema(typed[0])
+			itemSchema = payloadShapeValueToSchema("", typed[0])
 		}
 		return map[string]any{"type": "array", "items": itemSchema}
 	case string:
 		return map[string]any{
-			"type":        inferSchemaType(typed),
+			"type":        inferSchemaTypeForKey(key, typed),
 			"description": typed,
 		}
 	default:
@@ -255,40 +471,59 @@ func payloadShapeValueToSchema(value any) map[string]any {
 	}
 }
 
-func payloadShapeDescriptionContains(value any, marker string) bool {
-	switch typed := value.(type) {
-	case string:
-		return strings.Contains(strings.ToLower(typed), marker)
-	case map[string]any:
-		for _, child := range typed {
-			if payloadShapeDescriptionContains(child, marker) {
-				return true
-			}
-		}
-	case []any:
-		for _, child := range typed {
-			if payloadShapeDescriptionContains(child, marker) {
-				return true
-			}
-		}
+func payloadShapeValueIsRequired(value any) bool {
+	description, ok := value.(string)
+	if !ok {
+		return false
 	}
-	return false
+	lower := strings.TrimSpace(strings.ToLower(description))
+	return lower == "required" || strings.HasPrefix(lower, "required ") || strings.HasPrefix(lower, "required:")
 }
 
 func inferSchemaType(description string) any {
 	lower := strings.ToLower(description)
+	isNumeric := hasSchemaWord(lower, "integer") || hasSchemaWord(lower, "number") || strings.Contains(lower, "1..") || strings.Contains(lower, "0..")
+	isObject := hasSchemaWord(lower, "object") || hasSchemaWord(lower, "map")
 	switch {
-	case strings.Contains(lower, "list") || strings.Contains(lower, "array"):
+	case hasSchemaWord(lower, "list") || hasSchemaWord(lower, "array"):
 		return "array"
-	case strings.Contains(lower, "boolean") || strings.Contains(lower, "bool"):
+	case hasSchemaWord(lower, "boolean") || hasSchemaWord(lower, "bool"):
 		return "boolean"
-	case strings.Contains(lower, "integer") || strings.Contains(lower, "number") || strings.Contains(lower, "1..") || strings.Contains(lower, "0.."):
+	case isNumeric && isObject:
+		return []string{"integer", "number", "string", "object"}
+	case isNumeric:
 		return []string{"integer", "number", "string"}
-	case strings.Contains(lower, "object") || strings.Contains(lower, "map"):
+	case isObject:
 		return "object"
 	default:
 		return "string"
 	}
+}
+
+func inferSchemaTypeForKey(key string, description string) any {
+	normalizedKey := strings.ToLower(strings.TrimSpace(key))
+	if strings.HasSuffix(normalizedKey, "ids") || strings.HasSuffix(normalizedKey, "names") {
+		return "array"
+	}
+	if normalizedKey == "id" || (strings.HasSuffix(normalizedKey, "id") && !strings.HasSuffix(normalizedKey, "ids")) {
+		return "string"
+	}
+	if strings.HasSuffix(normalizedKey, "name") {
+		return "string"
+	}
+	return inferSchemaType(description)
+}
+
+func hasSchemaWord(value string, word string) bool {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r < 'a' || r > 'z'
+	})
+	for _, field := range fields {
+		if field == word {
+			return true
+		}
+	}
+	return false
 }
 
 func moduleSpecForIntent(intent string) (string, string, moduleCommandSpec, bool) {
@@ -306,12 +541,22 @@ func moduleSpecForIntent(intent string) (string, string, moduleCommandSpec, bool
 }
 
 func intentAcceptedFields(intent string) []string {
-	fields := []string{"parameters.houseId", "homeRef.name", "homeRef.useCurrent", "targets[].id", "targets[].name", "targets[].entityType"}
+	fields := []string{
+		semantic.ParameterPath(semantic.FieldHouseID),
+		semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldName),
+		semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldUseCurrent),
+		semantic.FieldPath(semantic.ArrayField(semantic.FieldTargets), semantic.FieldID),
+		semantic.FieldPath(semantic.ArrayField(semantic.FieldTargets), semantic.FieldName),
+		semantic.FieldPath(semantic.ArrayField(semantic.FieldTargets), semantic.FieldEntityType),
+	}
 	guide := payloadGuideForIntent(intent)
 	if guide != nil {
-		if shape, ok := guide["payloadShape"].(map[string]any); ok {
-			fields = append(fields, payloadShapeAcceptedFields("parameters", shape)...)
+		if shape, ok := guide[semantic.FieldPayloadShape].(map[string]any); ok {
+			fields = append(fields, payloadShapeAcceptedFields(semantic.FieldParameters, shape)...)
 		}
+	}
+	for _, field := range intentTargetParameterFields(intent) {
+		fields = append(fields, semantic.ParameterPath(field))
 	}
 	fields = uniqueStrings(fields)
 	sort.Strings(fields)
@@ -392,7 +637,7 @@ func writeIntentSchema(stdout io.Writer, explanation intentExplanation, schema m
 		lines = append(lines, "Next step: "+explanation.NextStep)
 	}
 	if properties := requestMap(schema["properties"]); properties != nil {
-		if parameters := requestMap(properties["parameters"]); parameters != nil {
+		if parameters := requestMap(properties[semantic.FieldParameters]); parameters != nil {
 			if parameterProperties := requestMap(parameters["properties"]); parameterProperties != nil {
 				keys := sortedMapKeys(parameterProperties)
 				lines = append(lines, "Parameter keys: "+strings.Join(keys, ", "))
@@ -404,18 +649,18 @@ func writeIntentSchema(stdout io.Writer, explanation intentExplanation, schema m
 }
 
 func invokeIntentExplain(request contract.Request) contract.Response {
-	intent := strings.TrimSpace(requestString(request.Parameters["intent"]))
+	intent := strings.TrimSpace(requestString(request.Parameters[semantic.FieldIntent]))
 	if intent == "" {
-		intent = strings.TrimSpace(requestString(request.Parameters["targetIntent"]))
+		intent = strings.TrimSpace(requestString(request.Parameters[semantic.FieldTargetIntent]))
 	}
 	if intent == "" {
-		return configureClarificationResponseWithGuide(request, "missing_intent_to_explain", []string{"parameters.intent", "parameters.targetIntent"}, map[string]any{
-			"payloadShape": map[string]any{
-				"intent":       "required semantic Runtime intent to explain, such as scene.update",
-				"targetIntent": "optional alias of intent",
+		return configureClarificationResponseWithGuide(request, "missing_intent_to_explain", []string{semantic.ParameterPath(semantic.FieldIntent), semantic.ParameterPath(semantic.FieldTargetIntent)}, map[string]any{
+			semantic.FieldPayloadShape: map[string]any{
+				semantic.FieldIntent:       "required Runtime intent to explain, such as scene.update",
+				semantic.FieldTargetIntent: "optional alias of intent",
 			},
-			"examples": []any{map[string]any{"intent": "scene.update"}},
-			"nextStep": "Send intent.explain with parameters.intent set to the semantic Runtime intent whose payload contract you need.",
+			semantic.FieldExamples: []any{map[string]any{semantic.FieldIntent: "scene.update"}},
+			semantic.FieldNextStep: "Send intent.explain with parameters.intent set to the Runtime intent whose payload contract you need.",
 		})
 	}
 	explanation := explainIntent(intent)
@@ -428,12 +673,12 @@ func invokeIntentExplain(request contract.Request) contract.Response {
 		Status:          "success",
 		UserMessage:     "已读取本地 Runtime intent 契约说明。",
 		Result: map[string]any{
-			"intentExplanation": explanation,
+			semantic.FieldIntentExplanation: explanation,
 		},
 		TraceID: "intent-explain-local",
 		Metrics: map[string]any{
-			"apiCalls":  0,
-			"cacheHits": 1,
+			semantic.FieldAPICalls:  0,
+			semantic.FieldCacheHits: 1,
 		},
 	}
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) invokeAccountInfo(ctx context.Context, request contract.Request, endpoint api.Endpoint, authorization string, clientID string) (contract.Response, error) {
@@ -23,21 +24,21 @@ func (app *app) invokeAccountInfo(ctx context.Context, request contract.Request,
 		Status:          "success",
 		UserMessage:     "已读取本机登录账号的脱敏信息。",
 		Result: map[string]any{
-			"region":   result.Region,
-			"account":  result.Summary,
-			"rawShape": result.RawShape,
+			semantic.FieldRegion:   result.Region,
+			semantic.FieldAccount:  result.Summary,
+			semantic.FieldRawShape: result.RawShape,
 		},
 		Warnings: []string{},
 		TraceID:  "account-info-readonly",
 		Metrics: map[string]any{
-			"apiCalls":  result.APICalls,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  result.APICalls,
+			semantic.FieldCacheHits: 0,
 		},
 	}, nil
 }
 
 func (app *app) invokeMetadataReadonlyProjection(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, spec metadataReadonlySpec) (contract.Response, error) {
-	if isHouseIndependentInvokeIntent(request.Intent) {
+	if requestRunsHouseIndependent(request) {
 		houseID = ""
 	} else if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
@@ -56,19 +57,32 @@ func (app *app) invokeMetadataReadonlyProjection(ctx context.Context, request co
 		return contract.Response{}, err
 	}
 	return metadataReadonlyProjectionResponse(request, spec, entities.Region, entities.HouseID, metadataEntityEvidence(entities.Entities, spec.entityTypes, spec.limit), map[string]any{
-		"apiCalls":  entityListAPICalls(entities),
-		"cacheHits": 0,
+		semantic.FieldAPICalls:  entityListAPICalls(entities),
+		semantic.FieldCacheHits: 0,
 	}), nil
 }
 
-func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, spec metadataReadonlySpec) (contract.Response, error) {
-	if isHouseIndependentInvokeIntent(request.Intent) {
+func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec metadataReadonlySpec) (contract.Response, error) {
+	if requestRunsHouseIndependent(request) {
 		houseID = ""
 	} else if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
+	enrichedRequest, resolutionCalls, clarification, resolveErr := app.enrichMetadataReadonlyTarget(ctx, request, endpoint, profile, region, houseID, authorization, clientID)
+	if clarification != nil || resolveErr != nil {
+		return responseOrError(clarification, resolveErr)
+	}
+	request = enrichedRequest
+	if request.Intent == "home.sort.list" {
+		enrichedRequest, sortResolutionCalls, sortClarification, sortResolveErr := app.enrichHomeSortListTarget(ctx, request, endpoint, profile, region, houseID, authorization, clientID)
+		resolutionCalls += sortResolutionCalls
+		if sortClarification != nil || sortResolveErr != nil {
+			return responseOrError(sortClarification, sortResolveErr)
+		}
+		request = enrichedRequest
+	}
 	target := entityGetTargetFromRequest(request)
-	deviceID := firstNonEmptyString(target.id, firstRequestString(request.Parameters, "deviceId", "deviceID"))
+	deviceID := firstNonEmptyString(target.id, firstRequestString(request.Parameters, semantic.FieldDeviceID))
 	client := api.NewMetadataReadonlyClient(endpoint, nil)
 	readonlyRequest := api.MetadataReadonlyRequest{
 		HouseID:    houseID,
@@ -241,7 +255,225 @@ func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contrac
 	if err != nil {
 		return contract.Response{}, err
 	}
+	result.APICalls += resolutionCalls
 	return metadataCloudReadonlyResponse(request, spec, result), nil
+}
+
+func (app *app) enrichMetadataReadonlyTarget(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Request, int, *contract.Response, error) {
+	if !metadataReadonlyIntentNeedsEntityID(request.Intent) {
+		return request, 0, nil, nil
+	}
+	target := entityGetTargetFromRequest(request)
+	if target.entityType == "" {
+		return request, 0, nil, nil
+	}
+	if target.id != "" {
+		return requestWithResolvedMetadataTarget(request, target.entityType, target.id), 0, nil, nil
+	}
+	if target.name == "" {
+		return request, 0, nil, nil
+	}
+	if target.entityType == "gateway" {
+		match, candidates, calls, fallbackErr := resolveGatewayFromReadonlyList(ctx, endpoint, houseID, authorization, clientID, target.name)
+		if fallbackErr != nil {
+			return request, calls, nil, fallbackErr
+		}
+		if match.ID != "" {
+			return requestWithResolvedMetadataTarget(request, "gateway", match.ID), calls, nil, nil
+		}
+		if len(candidates) > 0 {
+			response := entityGetClarificationResponse(request, "ambiguous_target", target, candidates, calls)
+			return request, calls, &response, nil
+		}
+	}
+	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
+	if err != nil {
+		return request, 0, nil, err
+	}
+	if resolved.Match.ID == "" {
+		response := entityGetClarificationResponse(request, "entity_not_found", target, resolved.Candidates, entityListAPICalls(resolved.Entities))
+		return request, entityListAPICalls(resolved.Entities), &response, nil
+	}
+	if len(resolved.Candidates) > 1 {
+		response := entityGetClarificationResponse(request, "ambiguous_target", target, resolved.Candidates, entityListAPICalls(resolved.Entities))
+		return request, entityListAPICalls(resolved.Entities), &response, nil
+	}
+	entityType := firstNonEmptyString(target.entityType, resolved.Match.Type)
+	return requestWithResolvedMetadataTarget(request, entityType, resolved.Match.ID), entityListAPICalls(resolved.Entities), nil, nil
+}
+
+func (app *app) enrichHomeSortListTarget(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Request, int, *contract.Response, error) {
+	if strings.TrimSpace(houseID) == "" {
+		return request, 0, nil, nil
+	}
+	parameters := copyRequestParameters(request.Parameters)
+	totalCalls := 0
+	for _, target := range []struct {
+		entityType string
+		idField    string
+		nameFields []string
+	}{
+		{entityType: "room", idField: semantic.FieldRoomID, nameFields: []string{semantic.FieldRoomName, semantic.FieldTargetRoomName}},
+		{entityType: "area", idField: semantic.FieldAreaID, nameFields: []string{semantic.FieldAreaName}},
+		{entityType: "device", idField: semantic.FieldDeviceID, nameFields: []string{semantic.FieldDeviceName}},
+	} {
+		if firstRequestString(parameters, target.idField) != "" {
+			continue
+		}
+		name := firstRequestString(parameters, target.nameFields...)
+		if name == "" {
+			continue
+		}
+		entityTarget := entityGetTarget{name: name, entityType: target.entityType}
+		resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, entityTarget)
+		if err != nil {
+			return request, totalCalls, nil, err
+		}
+		calls := entityListAPICalls(resolved.Entities)
+		totalCalls += calls
+		if resolved.Match.ID == "" {
+			response := entityGetClarificationResponse(request, "entity_not_found", entityTarget, resolved.Candidates, calls)
+			return request, totalCalls, &response, nil
+		}
+		if len(resolved.Candidates) > 1 {
+			response := entityGetClarificationResponse(request, "ambiguous_target", entityTarget, resolved.Candidates, calls)
+			return request, totalCalls, &response, nil
+		}
+		parameters[target.idField] = resolved.Match.ID
+	}
+	request.Parameters = parameters
+	return request, totalCalls, nil, nil
+}
+
+func resolveGatewayFromReadonlyList(ctx context.Context, endpoint api.Endpoint, houseID string, authorization string, clientID string, name string) (api.EntitySummary, []api.EntitySummary, int, error) {
+	if strings.TrimSpace(houseID) == "" || strings.TrimSpace(name) == "" {
+		return api.EntitySummary{}, nil, 0, nil
+	}
+	result, err := api.NewMetadataReadonlyClient(endpoint, nil).RunGatewayList(ctx, api.MetadataReadonlyRequest{
+		HouseID: houseID,
+		Credentials: api.MetadataReadonlyCredentials{
+			Authorization: authorization,
+			ClientID:      clientID,
+		},
+	})
+	if err != nil {
+		return api.EntitySummary{}, nil, result.APICalls, err
+	}
+	gateways := gatewayEntitiesFromReadonlyResult(result)
+	ranked := semantic.RankNameMatches(name, gateways, func(entity api.EntitySummary) string {
+		return entity.Name
+	})
+	if len(ranked) == 0 {
+		return api.EntitySummary{}, nil, result.APICalls, nil
+	}
+	if ranked[0].Match.Kind == "name" {
+		exact := entityMatchCandidatesByKind(ranked, "name")
+		if len(exact) == 1 {
+			return exact[0], exact, result.APICalls, nil
+		}
+		return api.EntitySummary{}, exact, result.APICalls, nil
+	}
+	second := semantic.NameMatch{}
+	if len(ranked) > 1 {
+		second = ranked[1].Match
+	}
+	if semantic.NameMatchAutoAccept(ranked[0].Match, second) {
+		return ranked[0].Value, []api.EntitySummary{ranked[0].Value}, result.APICalls, nil
+	}
+	return api.EntitySummary{}, entityMatchCandidates(ranked), result.APICalls, nil
+}
+
+func gatewayEntitiesFromReadonlyResult(result api.MetadataReadonlyResult) []api.EntitySummary {
+	data, ok := result.Data.(map[string]any)
+	if !ok {
+		return nil
+	}
+	rows, ok := data[semantic.FieldGateways].([]any)
+	if !ok {
+		return nil
+	}
+	gateways := make([]api.EntitySummary, 0, len(rows))
+	for _, row := range rows {
+		item, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := strings.TrimSpace(requestString(item[semantic.FieldID]))
+		name := strings.TrimSpace(requestString(item[semantic.FieldName]))
+		if id == "" || name == "" {
+			continue
+		}
+		gateways = append(gateways, api.EntitySummary{
+			Type:    "gateway",
+			ID:      id,
+			Name:    name,
+			HouseID: strings.TrimSpace(requestString(item[semantic.FieldHouseID])),
+			RoomID:  strings.TrimSpace(requestString(item[semantic.FieldRoomID])),
+		})
+	}
+	return gateways
+}
+
+func metadataReadonlyIntentNeedsEntityID(intent string) bool {
+	switch intent {
+	case "device.detail.get",
+		"device.attr.list",
+		"device.energy.summary",
+		"device.weather.get",
+		"room.detail.get",
+		"scene.scoped.list",
+		"area.detail.get",
+		"group.detail.get",
+		"scene.detail.get",
+		"automation.detail.get",
+		"meshgroup.detail.get",
+		"gateway.detail.get",
+		"gateway.thread.get",
+		"gateway.scene_relation.list",
+		"panel.get",
+		"panel.button.type.get",
+		"screen.control.list",
+		"knob.get",
+		"node.sorted_device.list",
+		"node.property_config.get",
+		"upgrade.file.list",
+		"upgrade.progress.get",
+		"upgrade.file.batch_list":
+		return true
+	default:
+		return false
+	}
+}
+
+func requestWithResolvedMetadataTarget(request contract.Request, entityType string, entityID string) contract.Request {
+	if strings.TrimSpace(entityID) == "" {
+		return request
+	}
+	parameters := copyRequestParameters(request.Parameters)
+	parameters[semantic.FieldID] = entityID
+	parameters[semantic.FieldEntityID] = entityID
+	parameters[semantic.FieldTargetID] = entityID
+	parameters[semantic.FieldTargetType] = entityType
+	parameters[semantic.FieldNodeID] = entityID
+	switch entityType {
+	case "device":
+		parameters[semantic.FieldDeviceID] = entityID
+	case "room":
+		parameters[semantic.FieldRoomID] = entityID
+	case "area":
+		parameters[semantic.FieldAreaID] = entityID
+	case "group":
+		parameters[semantic.FieldGroupID] = entityID
+	case "scene":
+		parameters[semantic.FieldSceneID] = entityID
+	case "automation":
+		parameters[semantic.FieldAutomationID] = entityID
+	case "gateway":
+		parameters[semantic.FieldGatewayID] = entityID
+		parameters[semantic.FieldDeviceID] = entityID
+	}
+	request.Parameters = parameters
+	return request
 }
 
 func metadataCloudReadonlyResponse(request contract.Request, spec metadataReadonlySpec, result api.MetadataReadonlyResult) contract.Response {
@@ -254,23 +486,25 @@ func metadataCloudReadonlyResponse(request contract.Request, spec metadataReadon
 		}
 	}
 	payload := map[string]any{
-		"region":      result.Region,
-		"capability":  result.Capability,
-		"source":      "cloud_read_adapter",
-		"cloudWrites": false,
-		"rawShape":    result.RawShape,
+		semantic.FieldRegion:      result.Region,
+		semantic.FieldCapability:  result.Capability,
+		semantic.FieldSource:      "cloud_read",
+		semantic.FieldCloudWrites: false,
 	}
 	if result.HouseID != "" {
-		payload["houseId"] = result.HouseID
+		payload[semantic.FieldHouseID] = result.HouseID
 	}
-	if result.DeviceID != "" {
-		payload["deviceId"] = result.DeviceID
+	if result.DeviceID != "" && metadataReadonlyUsesDeviceID(result.Capability) {
+		payload[semantic.FieldDeviceID] = result.DeviceID
+	}
+	if result.DeviceID != "" && strings.HasPrefix(result.Capability, "gateway.") {
+		payload[semantic.FieldGatewayID] = result.DeviceID
 	}
 	if result.Data != nil {
-		payload["data"] = result.Data
+		payload[semantic.FieldData] = result.Data
 	}
 	if len(result.Warnings) > 0 {
-		payload["unknownEvidence"] = result.Warnings
+		payload[semantic.FieldUnknownEvidence] = result.Warnings
 	}
 	return contract.Response{
 		ContractVersion: contract.Version,
@@ -281,26 +515,45 @@ func metadataCloudReadonlyResponse(request contract.Request, spec metadataReadon
 		Warnings:        result.Warnings,
 		TraceID:         traceID,
 		Metrics: map[string]any{
-			"apiCalls":  result.APICalls,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  result.APICalls,
+			semantic.FieldCacheHits: 0,
 		},
+	}
+}
+
+func metadataReadonlyUsesDeviceID(capability string) bool {
+	switch {
+	case strings.HasPrefix(capability, "device."):
+		return true
+	case strings.HasPrefix(capability, "panel."):
+		return true
+	case strings.HasPrefix(capability, "knob."):
+		return true
+	case strings.HasPrefix(capability, "screen."):
+		return true
+	case strings.HasPrefix(capability, "upgrade."):
+		return true
+	case strings.HasPrefix(capability, "node."):
+		return true
+	default:
+		return false
 	}
 }
 
 func metadataReadonlyProjectionResponse(request contract.Request, spec metadataReadonlySpec, region string, houseID string, evidence []any, metrics map[string]any) contract.Response {
 	result := map[string]any{
-		"region":          region,
-		"houseId":         houseID,
-		"capability":      spec.capability,
-		"source":          spec.source,
-		"unknownEvidence": spec.unknownEvidence,
-		"cloudWrites":     false,
+		semantic.FieldRegion:          region,
+		semantic.FieldHouseID:         houseID,
+		semantic.FieldCapability:      spec.capability,
+		semantic.FieldSource:          spec.source,
+		semantic.FieldUnknownEvidence: spec.unknownEvidence,
+		semantic.FieldCloudWrites:     false,
 	}
 	if len(evidence) > 0 {
-		result["entityEvidence"] = evidence
+		result[semantic.FieldEntityEvidence] = evidence
 	}
 	if len(spec.guidance) > 0 {
-		result["guidance"] = spec.guidance
+		result[semantic.FieldGuidance] = spec.guidance
 	}
 	return contract.Response{
 		ContractVersion: contract.Version,
@@ -315,7 +568,7 @@ func metadataReadonlyProjectionResponse(request contract.Request, spec metadataR
 }
 
 func (app *app) prepareMetadataLocal(request contract.Request, houseID string, spec metadataReadonlySpec) (contract.Response, error) {
-	if isHouseIndependentInvokeIntent(request.Intent) {
+	if requestRunsHouseIndependent(request) {
 		houseID = ""
 	} else if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
@@ -326,13 +579,13 @@ func (app *app) prepareMetadataLocal(request contract.Request, houseID string, s
 		Status:          "success",
 		UserMessage:     spec.message,
 		Result: map[string]any{
-			"houseId":          houseID,
-			"capability":       spec.capability,
-			"planType":         "local_non_persistent_guidance",
-			"persistentWrites": false,
-			"cloudWrites":      false,
-			"guidance":         spec.guidance,
-			"unknownEvidence":  spec.unknownEvidence,
+			semantic.FieldHouseID:          houseID,
+			semantic.FieldCapability:       spec.capability,
+			semantic.FieldPlanType:         "local_non_persistent_guidance",
+			semantic.FieldPersistentWrites: false,
+			semantic.FieldCloudWrites:      false,
+			semantic.FieldGuidance:         spec.guidance,
+			semantic.FieldUnknownEvidence:  spec.unknownEvidence,
 		},
 		Warnings: spec.unknownEvidence,
 		TraceID:  spec.traceID,
@@ -362,7 +615,7 @@ func metadataDetailReadonlySpec(capability string, message string) metadataReado
 		status:          "success",
 		message:         message,
 		traceID:         strings.ReplaceAll(capability, ".", "-") + "-readonly",
-		source:          "cloud_read_adapter",
+		source:          "cloud_read",
 		unknownEvidence: []string{},
 	}
 }
@@ -376,7 +629,7 @@ func knobGetSpec() metadataReadonlySpec {
 }
 
 func deviceStorageGetSpec() metadataReadonlySpec {
-	return metadataPartialSpec("device.storage.get", "device-storage-get-partial", "已返回设备素材/存储相关的保守只读证据，专项 storage adapter 尚未启用。", "device_storage_read_adapter_unavailable", []string{"device"})
+	return metadataPartialSpec("device.storage.get", "device-storage-get-partial", "已返回设备素材/存储相关的保守只读证据，专项读取能力尚未启用。", "device_storage_read_unavailable", []string{"device"})
 }
 
 func aiVoiceListSpec() metadataReadonlySpec {
@@ -394,7 +647,7 @@ func automationCapabilitiesSpec() metadataReadonlySpec {
 		source:          "runtime_policy",
 		unknownEvidence: []string{},
 		guidance: []string{
-			"automation.create 会先生成 execution preview，direct semantic execution 重新校验后创建并按名称读回验证。",
+			"automation.create 会先生成执行预览，直接执行时 Runtime 会重新校验后创建并按名称读回验证。",
 			"automation.explain 和 diagnose.automation 可做只读解释和诊断。",
 			"automation.update/enable/disable/delete 仍需 owner review 或本地批准。",
 		},
@@ -413,7 +666,7 @@ func favoritePlanSpec() metadataReadonlySpec {
 		traceID:         "favorite-plan-local",
 		source:          "local_guidance_only",
 		unknownEvidence: []string{"favorite_current_order_unavailable"},
-		guidance:        []string{"先读取当前房间、设备、情景和自动化实体。", "按高频设备、关键情景、房间维度整理收藏候选。", "真实收藏写入仍需后续 execution preview 与 owner-reviewed adapter。"},
+		guidance:        []string{"先读取当前房间、设备、情景和自动化实体。", "按高频设备、关键情景、房间维度整理收藏候选。", "真实收藏写入仍需后续执行预览与用户确认。"},
 	}
 }
 
@@ -423,7 +676,7 @@ func homeSortListSpec() metadataReadonlySpec {
 		status:          "success",
 		message:         "已读取家庭排序配置的只读摘要。",
 		traceID:         "home-sort-list-readonly",
-		source:          "cloud_read_adapter",
+		source:          "cloud_read",
 		unknownEvidence: []string{},
 	}
 }

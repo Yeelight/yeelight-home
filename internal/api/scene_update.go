@@ -2,10 +2,14 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type SceneUpdateCredentials struct {
@@ -87,7 +91,7 @@ func (client SceneUpdateClient) Run(ctx context.Context, request SceneUpdateRequ
 		Region:     client.endpoint.Region,
 		HouseID:    houseID,
 		SceneID:    sceneIDFromDetail(verified),
-		Name:       firstAnyString(verified, "name", "sceneName"),
+		Name:       firstAnyString(verified, semantic.FieldName, semantic.FieldSceneName),
 		Verified:   true,
 		VerifiedBy: "scene.detail.get",
 		APICalls:   apiCalls,
@@ -161,9 +165,9 @@ func copySceneUpdatePayload(payload map[string]any, sceneID string, houseID stri
 	for key, value := range payload {
 		body[key] = value
 	}
-	body["id"] = requestNumberOrStringForAPI(sceneID)
-	body["houseId"] = requestNumberOrStringForAPI(houseID)
-	body["details"] = normalizeSceneUpdateDetails(body["details"])
+	body[semantic.FieldID] = requestNumberOrStringForAPI(sceneID)
+	body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
+	body[semantic.FieldDetails] = normalizeSceneUpdateDetails(body[semantic.FieldDetails])
 	return body
 }
 
@@ -196,19 +200,22 @@ func normalizeSceneUpdateDetail(item map[string]any) map[string]any {
 	for key, itemValue := range item {
 		copied[key] = itemValue
 	}
-	if params, ok := copied["params"]; ok {
+	paramsField := semantic.InternalActionParamsField()
+	if params, ok := copied[paramsField]; ok {
 		if compact, err := jsonString(params); err == nil {
-			copied["params"] = compact
+			copied[paramsField] = compact
 		}
 	}
-	if strings.TrimSpace(stringFromAny(copied["resName"])) == "" {
-		copied["resName"] = stringFromAny(copied["resId"])
+	targetNameField := semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName)
+	targetIDField := semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)
+	if strings.TrimSpace(stringFromAny(copied[targetNameField])) == "" {
+		copied[targetNameField] = stringFromAny(copied[targetIDField])
 	}
-	if strings.TrimSpace(stringFromAny(copied["action"])) == "" {
-		copied["action"] = 0
+	if strings.TrimSpace(stringFromAny(copied[semantic.FieldAction])) == "" {
+		copied[semantic.FieldAction] = 0
 	}
-	if strings.TrimSpace(stringFromAny(copied["rank"])) == "" {
-		copied["rank"] = 0
+	if strings.TrimSpace(stringFromAny(copied[semantic.FieldRank])) == "" {
+		copied[semantic.FieldRank] = 0
 	}
 	return copied
 }
@@ -217,17 +224,214 @@ func sceneUpdateMatches(detail map[string]any, payload map[string]any) bool {
 	if len(detail) == 0 {
 		return false
 	}
-	expectedName := strings.TrimSpace(stringFromAny(payload["name"]))
-	if expectedName != "" && firstAnyString(detail, "name", "sceneName") != expectedName {
+	expectedName := strings.TrimSpace(stringFromAny(payload[semantic.FieldName]))
+	if expectedName != "" && firstAnyString(detail, semantic.FieldName, semantic.FieldSceneName) != expectedName {
 		return false
 	}
-	if expectedDetails, ok := payload["details"]; ok {
+	if expectedDetails, ok := payload[semantic.FieldDetails]; ok {
 		expectedDetails = normalizeSceneUpdateDetails(expectedDetails)
-		return configRowsContainExpected(detail["details"], expectedDetails, []string{"typeId", "resId", "rank", "action", "params"})
+		return sceneUpdateRowsContainExpected(detail[semantic.FieldDetails], expectedDetails)
 	}
 	return true
 }
 
 func sceneIDFromDetail(detail map[string]any) string {
-	return firstAnyString(detail, "sceneId", "id")
+	return firstAnyString(detail, semantic.FieldSceneID, semantic.FieldID)
+}
+
+func sceneUpdateRowsContainExpected(actual any, expected any) bool {
+	expectedRows := sceneUpdateRowsFromData(expected)
+	if len(expectedRows) == 0 {
+		return false
+	}
+	actualRows := sceneUpdateRowsFromData(actual)
+	if len(actualRows) == 0 {
+		return false
+	}
+	for _, expectedRow := range expectedRows {
+		matched := false
+		for _, actualRow := range actualRows {
+			if sceneUpdateRowMatches(actualRow, expectedRow) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
+func sceneUpdateRowsFromData(value any) []map[string]any {
+	rawRows := configRowsFromData(value)
+	rows := make([]map[string]any, 0, len(rawRows))
+	for _, raw := range rawRows {
+		if row, ok := raw.(map[string]any); ok {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+func sceneUpdateRowMatches(actual map[string]any, expected map[string]any) bool {
+	if !sceneUpdateSameTargetType(sceneUpdateRowTargetType(actual), sceneUpdateRowTargetType(expected)) {
+		return false
+	}
+	if !sceneUpdateSameText(sceneUpdateRowTargetID(actual), sceneUpdateRowTargetID(expected)) {
+		return false
+	}
+	if !sceneUpdateSameText(sceneUpdateRowScalar(actual, semantic.FieldRank), sceneUpdateRowScalar(expected, semantic.FieldRank)) {
+		return false
+	}
+	if !sceneUpdateSameText(sceneUpdateRowScalar(actual, semantic.FieldAction), sceneUpdateRowScalar(expected, semantic.FieldAction)) {
+		return false
+	}
+	return sceneUpdateSameParams(sceneUpdateRowParams(actual), sceneUpdateRowParams(expected))
+}
+
+func sceneUpdateRowTargetType(row map[string]any) string {
+	value := firstPresentAny(row, semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType), semantic.FieldTargetType)
+	text := strings.TrimSpace(stringFromAny(value))
+	if text == "" {
+		return ""
+	}
+	if parsed, err := strconv.Atoi(text); err == nil {
+		return strconv.Itoa(parsed)
+	}
+	if typeID, ok := semantic.TargetTypeID(text, semantic.ResourceMeshGroup); ok {
+		return strconv.Itoa(typeID)
+	}
+	return text
+}
+
+func sceneUpdateRowTargetID(row map[string]any) string {
+	return strings.TrimSpace(stringFromAny(firstPresentAny(row, semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID), semantic.FieldTargetID)))
+}
+
+func sceneUpdateRowScalar(row map[string]any, key string) string {
+	text := strings.TrimSpace(stringFromAny(row[key]))
+	if text == "" && (key == semantic.FieldRank || key == semantic.FieldAction) {
+		return "0"
+	}
+	return text
+}
+
+func sceneUpdateRowParams(row map[string]any) any {
+	if value, ok := row[semantic.InternalActionParamsField()]; ok {
+		return value
+	}
+	if params, ok := semantic.ActionParamsFromRow(row); ok {
+		return params
+	}
+	return nil
+}
+
+func sceneUpdateSameTargetType(actual string, expected string) bool {
+	return expected == "" || actual == expected
+}
+
+func sceneUpdateSameText(actual string, expected string) bool {
+	return expected == "" || actual == expected
+}
+
+func sceneUpdateSameParams(actual any, expected any) bool {
+	expectedJSON := sceneUpdateCanonicalParams(expected)
+	if expectedJSON == "" {
+		return true
+	}
+	return expectedJSON == sceneUpdateCanonicalParams(actual)
+}
+
+func sceneUpdateCanonicalParams(value any) string {
+	normalized, ok := sceneUpdateNormalizeParamValue(value)
+	if !ok {
+		return ""
+	}
+	data, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func sceneUpdateNormalizeParamValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, false
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return nil, false
+		}
+		var decoded any
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+			return sceneUpdateNormalizeParamValue(decoded)
+		}
+		return trimmed, true
+	case map[string]any:
+		result := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if key == semantic.FieldSet {
+				if set, ok := item.(map[string]any); ok {
+					result[key] = sceneUpdateNormalizeSet(set)
+					continue
+				}
+			}
+			if normalized, ok := sceneUpdateNormalizeParamValue(item); ok {
+				result[key] = normalized
+			} else {
+				result[key] = item
+			}
+		}
+		return result, true
+	case []any:
+		result := make([]any, 0, len(typed))
+		for _, item := range typed {
+			if normalized, ok := sceneUpdateNormalizeParamValue(item); ok {
+				result = append(result, normalized)
+			} else {
+				result = append(result, item)
+			}
+		}
+		return result, true
+	default:
+		return typed, true
+	}
+}
+
+func sceneUpdateNormalizeSet(set map[string]any) map[string]any {
+	result := make(map[string]any, len(set))
+	for key, value := range set {
+		result[sceneUpdateSetKey(key)] = value
+	}
+	return result
+}
+
+func sceneUpdateSetKey(key string) string {
+	switch key {
+	case semantic.FieldPower, semantic.InternalField(semantic.DomainAction, semantic.FieldPower):
+		return semantic.InternalField(semantic.DomainAction, semantic.FieldPower)
+	case semantic.FieldBrightness, semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness):
+		return semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness)
+	case semantic.FieldColorTemperature, semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature):
+		return semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature)
+	case semantic.FieldColor, semantic.InternalField(semantic.DomainAction, semantic.FieldColor):
+		return semantic.InternalField(semantic.DomainAction, semantic.FieldColor)
+	case semantic.FieldTargetPercent, semantic.InternalField(semantic.DomainAction, semantic.FieldTargetPercent):
+		return semantic.InternalField(semantic.DomainAction, semantic.FieldTargetPercent)
+	case semantic.FieldSwitchPower, semantic.InternalField(semantic.DomainAction, semantic.FieldSwitchPower):
+		return semantic.InternalField(semantic.DomainAction, semantic.FieldSwitchPower)
+	default:
+		return key
+	}
+}
+
+func firstPresentAny(values map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := values[key]; ok {
+			return value
+		}
+	}
+	return nil
 }

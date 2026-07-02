@@ -19,7 +19,7 @@ func TestInvokeHomeLockAllDryRunPreviewsWithoutWriting(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-home-lock-secret", "client-home-lock-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-home-lock-plan","locale":"zh-CN","utterance":"锁定这个家里所有设备的重置能力","intent":"home.lock_all","parameters":{"houseId":"200171"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-home-lock-plan","locale":"zh-CN","utterance":"锁定这个家里所有设备的重置能力","intent":"home.lock_all","parameters":{"houseId":"200171","confirmed":true}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
@@ -58,7 +58,7 @@ func TestInvokeHomeUnlockAllExecutesDirectly(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-home-unlock-secret", "client-home-lock-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-home-unlock-execute","locale":"zh-CN","utterance":"解锁这个家里所有设备的重置能力","intent":"home.unlock_all","parameters":{"houseId":"200171"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-home-unlock-execute","locale":"zh-CN","utterance":"解锁这个家里所有设备的重置能力","intent":"home.unlock_all","parameters":{"houseId":"200171","confirmed":true}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)

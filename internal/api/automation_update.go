@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type AutomationUpdateCredentials struct {
@@ -151,9 +153,9 @@ func copyAutomationUpdatePayload(payload map[string]any, automationID string, ho
 	for key, value := range payload {
 		body[key] = value
 	}
-	delete(body, "automationId")
-	body["id"] = requestNumberOrStringForAPI(automationID)
-	body["houseId"] = requestNumberOrStringForAPI(houseID)
+	delete(body, semantic.FieldAutomationID)
+	body[semantic.FieldID] = requestNumberOrStringForAPI(automationID)
+	body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
 	return body
 }
 
@@ -161,10 +163,10 @@ func automationUpdateMatches(entity EntitySummary, payload map[string]any) bool 
 	if entity.ID == "" {
 		return false
 	}
-	if expected := strings.TrimSpace(stringFromAny(payload["name"])); expected != "" && entity.Name != expected {
+	if expected := strings.TrimSpace(stringFromAny(payload[semantic.FieldName])); expected != "" && entity.Name != expected {
 		return false
 	}
-	if expected := strings.TrimSpace(stringFromAny(payload["status"])); expected != "" && entity.Status != expected {
+	if expected := strings.TrimSpace(stringFromAny(payload[semantic.FieldStatus])); expected != "" && entity.Status != expected {
 		return false
 	}
 	return true

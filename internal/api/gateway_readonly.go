@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (client MetadataReadonlyClient) RunGatewayDetailGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
@@ -32,7 +34,7 @@ func (client MetadataReadonlyClient) RunGatewayDetailGet(ctx context.Context, re
 		DeviceID:   gatewayID,
 		Capability: "gateway.detail.get",
 		Data: map[string]any{
-			"detail": projectGatewaySummary(response["data"]),
+			semantic.FieldDetail: projectGatewaySummary(response["data"]),
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,
@@ -58,7 +60,7 @@ func (client MetadataReadonlyClient) RunGatewayList(ctx context.Context, request
 		HouseID:    houseID,
 		Capability: "gateway.list",
 		Data: map[string]any{
-			"gateways": projectGatewayRows(response["data"]),
+			semantic.FieldGateways: projectGatewayRows(response["data"]),
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,
@@ -77,7 +79,7 @@ func (client MetadataReadonlyClient) RunGatewayThreadGet(ctx context.Context, re
 		result.HouseID = houseID
 		return result, nil
 	}
-	result, err := client.readPath(ctx, request, "gateway.thread.get", "/v2/thing/manage/house/"+pathSegment(houseID)+"/gateway/"+pathSegment(gatewayID)+"/r/thread-info", http.MethodGet, nil, map[string]any{"threadInfo": nil})
+	result, err := client.readPath(ctx, request, "gateway.thread.get", "/v2/thing/manage/house/"+pathSegment(houseID)+"/gateway/"+pathSegment(gatewayID)+"/r/thread-info", http.MethodGet, nil, map[string]any{semantic.FieldThreadInfo: nil})
 	result.DeviceID = gatewayID
 	return result, err
 }
@@ -87,7 +89,24 @@ func (client MetadataReadonlyClient) RunGatewayStatsList(ctx context.Context, re
 	if houseID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "gateway.stats.list", "house_context_missing"), nil
 	}
-	return client.readPath(ctx, request, "gateway.stats.list", "/v1/device/r/gatewayswithstats", http.MethodPost, map[string]any{"houseId": houseID}, map[string]any{"gateways": nil})
+	response, err := client.call(ctx, http.MethodPost, "/v1/device/r/gatewayswithstats", map[string]any{semantic.FieldHouseID: houseID}, request.Credentials)
+	if err != nil {
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return MetadataReadonlyResult{}, metadataReadonlyBusinessError("gateway.stats.list", response)
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		Capability: "gateway.stats.list",
+		Data: map[string]any{
+			semantic.FieldGateways: projectGatewayStatsRows(response["data"]),
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
 }
 
 func (client MetadataReadonlyClient) RunGatewaySceneRelationList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
@@ -95,7 +114,7 @@ func (client MetadataReadonlyClient) RunGatewaySceneRelationList(ctx context.Con
 	if gatewayID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "gateway.scene_relation.list", "gateway_context_missing"), nil
 	}
-	result, err := client.readPath(ctx, request, "gateway.scene_relation.list", "/v1/scene/r/"+pathSegment(gatewayID)+"/related/sceneId", http.MethodPost, nil, map[string]any{"sceneIds": nil})
+	result, err := client.readPath(ctx, request, "gateway.scene_relation.list", "/v1/scene/r/"+pathSegment(gatewayID)+"/related/sceneId", http.MethodPost, nil, map[string]any{semantic.FieldSceneIDs: nil})
 	result.DeviceID = gatewayID
 	return result, err
 }
@@ -103,17 +122,15 @@ func (client MetadataReadonlyClient) RunGatewaySceneRelationList(ctx context.Con
 func gatewayIDFromReadonlyRequest(request MetadataReadonlyRequest) string {
 	return strings.TrimSpace(firstNonEmpty(
 		request.DeviceID,
-		stringFromAny(request.Parameters["gatewayId"]),
-		stringFromAny(request.Parameters["gatewayID"]),
-		stringFromAny(request.Parameters["id"]),
-		stringFromAny(request.Parameters["deviceId"]),
-		stringFromAny(request.Parameters["deviceID"]),
+		stringFromAny(request.Parameters[semantic.FieldGatewayID]),
+		stringFromAny(request.Parameters[semantic.FieldID]),
+		stringFromAny(request.Parameters[semantic.FieldDeviceID]),
 	))
 }
 
 func readonlyPage(parameters map[string]any, defaultPageNo int, defaultPageSize int) (string, string) {
-	pageNo := positiveIntString(firstNonNil(parameters["pageNo"], parameters["page"]), defaultPageNo)
-	pageSize := positiveIntString(firstNonNil(parameters["pageSize"], parameters["size"]), defaultPageSize)
+	pageNo := positiveIntString(parameters[semantic.FieldPageNo], defaultPageNo)
+	pageSize := positiveIntString(firstNonNil(parameters[semantic.FieldPageSize], parameters[semantic.FieldLimit]), defaultPageSize)
 	return pageNo, pageSize
 }
 
@@ -153,7 +170,19 @@ func pathSegment(value string) string {
 }
 
 func projectGatewayRows(data any) []any {
-	rows := nestedRowsFromData(data, "gateways", "rows", "list")
+	rows := nestedRowsFromData(data, semantic.GatewayRowContainers()...)
+	gateways := make([]any, 0, len(rows))
+	for _, row := range rows {
+		summary := projectGatewaySummary(row)
+		if len(summary) > 0 {
+			gateways = append(gateways, summary)
+		}
+	}
+	return gateways
+}
+
+func projectGatewayStatsRows(data any) []any {
+	rows := nestedRowsFromData(data, semantic.FieldDevices, semantic.FieldGateways, "gateways", "devices", "rows", "list")
 	gateways := make([]any, 0, len(rows))
 	for _, row := range rows {
 		summary := projectGatewaySummary(row)
@@ -170,58 +199,29 @@ func projectGatewaySummary(value any) map[string]any {
 		return map[string]any{}
 	}
 	gateway := map[string]any{}
-	for outputKey, inputKeys := range map[string][]string{
-		"id":              {"id", "gatewayId", "deviceId"},
-		"did":             {"did"},
-		"gatewayDeviceId": {"gatewayDeviceId"},
-		"pid":             {"pid"},
-		"pcId":            {"pcId", "pcid"},
-		"type":            {"type"},
-		"name":            {"name", "gatewayName", "deviceName", "alias", "remark"},
-		"img":             {"img"},
-		"houseId":         {"houseId"},
-		"roomId":          {"roomId"},
-		"capability":      {"capability"},
-		"connectType":     {"connectType"},
-		"typeName":        {"typeName"},
-		"model":           {"model"},
-		"firmwareVersion": {"firmwareVersion", "fwVersion", "version"},
-	} {
-		for _, inputKey := range inputKeys {
-			if raw, ok := item[inputKey]; ok {
-				if value := stringFromAny(raw); value != "" {
-					gateway[outputKey] = value
-					break
-				}
-			}
-		}
-	}
-	for outputKey, inputKeys := range map[string][]string{
-		"online":  {"online", "isOnline"},
-		"bind":    {"bind", "isBind"},
-		"enabled": {"enabled", "enable"},
-	} {
-		for _, inputKey := range inputKeys {
+	copyResponseStringMappings(gateway, item, semantic.GatewayStringMappings())
+	for _, mapping := range semantic.GatewayBoolMappings() {
+		for _, inputKey := range mapping.Internal {
 			if value, ok := boolFromAny(item[inputKey]); ok {
-				gateway[outputKey] = value
+				gateway[mapping.Public] = value
 				break
 			}
 		}
 	}
-	if text := stringFromAny(item["mac"]); text != "" {
-		gateway["macMasked"] = maskTail(text, 4)
+	if text := stringFromAny(item[semantic.FieldMAC]); text != "" {
+		gateway[semantic.FieldMacMasked] = maskTail(text, 4)
 	}
-	if values := stringListFromAny(item["supportedBridgeType"]); len(values) > 0 {
-		gateway["supportedBridgeType"] = values
+	if values := stringListFromAny(item[semantic.SupportedBridgeTypeField()]); len(values) > 0 {
+		gateway[semantic.FieldSupportedBridgeType] = values
 	}
-	if values := stringListFromAny(item["roomIds"]); len(values) > 0 {
-		gateway["roomIds"] = values
+	if values := stringListFromAny(item[semantic.FieldRoomIDs]); len(values) > 0 {
+		gateway[semantic.FieldRoomIDs] = values
 	}
-	if values := stringListFromAny(item["deviceIds"]); len(values) > 0 {
-		gateway["childDeviceCount"] = len(values)
+	if values := stringListFromAny(item[semantic.FieldDeviceIDs]); len(values) > 0 {
+		gateway[semantic.FieldChildDeviceCount] = len(values)
 	}
-	if rows := nestedRowsFromData(item["configs"], "rows", "list"); len(rows) > 0 {
-		gateway["configCount"] = len(rows)
+	if rows := nestedRowsFromData(item[semantic.ConfigsField()], semantic.ConfigRowContainers()...); len(rows) > 0 {
+		gateway[semantic.FieldConfigCount] = len(rows)
 	}
 	return gateway
 }

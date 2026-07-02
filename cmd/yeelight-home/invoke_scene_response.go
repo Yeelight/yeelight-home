@@ -5,6 +5,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func sceneExecuteResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.SceneExecuteResult) contract.Response {
@@ -14,17 +15,16 @@ func sceneExecuteResponse(request contract.Request, entities api.EntityListResul
 		Status:          "success",
 		UserMessage:     fmt.Sprintf("已执行情景：%s。", entity.Name),
 		Result: map[string]any{
-			"region":   entities.Region,
-			"houseId":  entities.HouseID,
-			"entity":   entitySummaryMap(entity),
-			"source":   execution.Source,
-			"rawShape": execution.RawShape,
+			semantic.FieldRegion:  entities.Region,
+			semantic.FieldHouseID: entities.HouseID,
+			semantic.FieldEntity:  entitySummaryMap(entity),
+			semantic.FieldSource:  execution.Source,
 		},
 		Warnings: entities.Warnings,
 		TraceID:  "scene-execute-command",
 		Metrics: map[string]any{
-			"apiCalls":  entityListAPICalls(entities) + sceneExecuteAPICalls(execution),
-			"cacheHits": topologyCacheHits(entities),
+			semantic.FieldAPICalls:  entityListAPICalls(entities) + sceneExecuteAPICalls(execution),
+			semantic.FieldCacheHits: topologyCacheHits(entities),
 		},
 	}
 }
@@ -43,16 +43,42 @@ func sceneExecuteClarificationResponse(request contract.Request, reason string, 
 		Status:          "clarification_required",
 		UserMessage:     "请明确要执行的情景。",
 		Clarification: map[string]any{
-			"reason":               reason,
-			"target":               target.toMap(),
-			"candidates":           preview,
-			"supportedEntityTypes": []string{"scene"},
+			semantic.FieldReason:               reason,
+			semantic.FieldTarget:               target.toMap(),
+			semantic.FieldCandidates:           preview,
+			semantic.FieldSupportedEntityTypes: []string{"scene"},
 		},
 		Warnings: []string{},
 		TraceID:  "scene-execute-clarification",
 		Metrics: map[string]any{
-			"apiCalls":  apiCalls,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  apiCalls,
+			semantic.FieldCacheHits: 0,
+		},
+	}
+}
+
+func sceneExecuteBlockedResponse(request contract.Request, result api.EntityListResult, entity api.EntitySummary, code string, message string) contract.Response {
+	return contract.Response{
+		ContractVersion: contract.Version,
+		RequestID:       request.RequestID,
+		Status:          "blocked",
+		UserMessage:     message,
+		Result: map[string]any{
+			semantic.FieldRegion:      result.Region,
+			semantic.FieldHouseID:     result.HouseID,
+			semantic.FieldEntity:      entitySummaryMap(entity),
+			semantic.FieldSafeToRetry: false,
+			semantic.FieldNextAction:  "view_scene_detail_or_add_valid_gateway",
+		},
+		Warnings: append([]string{}, result.Warnings...),
+		TraceID:  "scene-execute-blocked",
+		Metrics: map[string]any{
+			semantic.FieldAPICalls:  entityListAPICalls(result) + 1,
+			semantic.FieldCacheHits: topologyCacheHits(result),
+		},
+		Error: &contract.Error{
+			Code:    code,
+			Message: message,
 		},
 	}
 }

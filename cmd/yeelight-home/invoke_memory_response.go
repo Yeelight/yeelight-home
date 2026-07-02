@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -26,10 +27,10 @@ func memoryRememberResponse(request contract.Request, upserts []storage.Preferen
 		first = memoryItemMap(upserts[0])
 	}
 	for key, value := range map[string]any{
-		"count":        len(items),
-		"createdCount": createdCount,
-		"mergedCount":  mergedCount,
-		"items":        items,
+		semantic.FieldCount:        len(items),
+		semantic.FieldCreatedCount: createdCount,
+		semantic.FieldMergedCount:  mergedCount,
+		semantic.FieldItems:        items,
 	} {
 		first[key] = value
 	}
@@ -48,19 +49,19 @@ func memoryRememberResponse(request contract.Request, upserts []storage.Preferen
 func memoryItemMap(upsert storage.PreferenceUpsertResult) map[string]any {
 	memory := upsert.Record
 	return map[string]any{
-		"id":              memory.ID,
-		"profile":         memory.Profile,
-		"region":          memory.Region,
-		"houseId":         memory.HouseID,
-		"kind":            memory.Kind,
-		"status":          memory.Status,
-		"scopeType":       memory.ScopeType,
-		"scopeRef":        memory.ScopeRef,
-		"preferenceType":  memory.PreferenceType,
-		"preferenceValue": memory.PreferenceValue,
-		"evidence":        memory.Evidence,
-		"created":         upsert.Created,
-		"merged":          upsert.Merged,
+		semantic.FieldID:              memory.ID,
+		semantic.FieldProfile:         memory.Profile,
+		semantic.FieldRegion:          memory.Region,
+		semantic.FieldHouseID:         memory.HouseID,
+		semantic.FieldKind:            memory.Kind,
+		semantic.FieldStatus:          memory.Status,
+		semantic.FieldScopeType:       memory.ScopeType,
+		semantic.FieldScopeRef:        memory.ScopeRef,
+		semantic.FieldPreferenceType:  memory.PreferenceType,
+		semantic.FieldPreferenceValue: memory.PreferenceValue,
+		semantic.FieldEvidence:        memory.Evidence,
+		semantic.FieldCreated:         upsert.Created,
+		semantic.FieldMerged:          upsert.Merged,
 	}
 }
 
@@ -68,16 +69,16 @@ func memoryListResponse(request contract.Request, houseID string, consent storag
 	items := make([]any, 0, len(preferences))
 	for _, item := range preferences {
 		items = append(items, map[string]any{
-			"id":              item.ID,
-			"region":          item.Region,
-			"kind":            item.Kind,
-			"status":          item.Status,
-			"scopeType":       item.ScopeType,
-			"scopeRef":        item.ScopeRef,
-			"preferenceType":  item.PreferenceType,
-			"preferenceValue": item.PreferenceValue,
-			"evidence":        item.Evidence,
-			"updatedAt":       item.UpdatedAt,
+			semantic.FieldID:              item.ID,
+			semantic.FieldRegion:          item.Region,
+			semantic.FieldKind:            item.Kind,
+			semantic.FieldStatus:          item.Status,
+			semantic.FieldScopeType:       item.ScopeType,
+			semantic.FieldScopeRef:        item.ScopeRef,
+			semantic.FieldPreferenceType:  item.PreferenceType,
+			semantic.FieldPreferenceValue: item.PreferenceValue,
+			semantic.FieldEvidence:        item.Evidence,
+			semantic.FieldUpdatedAt:       item.UpdatedAt,
 		})
 	}
 	return contract.Response{
@@ -86,12 +87,12 @@ func memoryListResponse(request contract.Request, houseID string, consent storag
 		Status:          "success",
 		UserMessage:     fmt.Sprintf("已读取 %d 条本地记忆。", len(items)),
 		Memory: map[string]any{
-			"houseId":         houseID,
-			"region":          consent.Region,
-			"namespace":       memoryResponseNamespace(consent.Profile, consent.Region, houseID),
-			"learningEnabled": consent.LearningEnabled,
-			"paused":          consent.Paused,
-			"items":           items,
+			semantic.FieldHouseID:         houseID,
+			semantic.FieldRegion:          consent.Region,
+			semantic.FieldNamespace:       memoryResponseNamespace(consent.Profile, consent.Region, houseID),
+			semantic.FieldLearningEnabled: consent.LearningEnabled,
+			semantic.FieldPaused:          consent.Paused,
+			semantic.FieldItems:           items,
 		},
 		Warnings: []string{},
 		TraceID:  "memory-list-local",
@@ -112,12 +113,12 @@ func memoryPauseResumeResponse(request contract.Request, consent storage.Consent
 		Status:          "success",
 		UserMessage:     statusText,
 		Memory: map[string]any{
-			"houseId":         consent.HouseID,
-			"region":          consent.Region,
-			"namespace":       memoryResponseNamespace(consent.Profile, consent.Region, consent.HouseID),
-			"learningEnabled": consent.LearningEnabled,
-			"paused":          consent.Paused,
-			"consentVersion":  consent.ConsentVersion,
+			semantic.FieldHouseID:         consent.HouseID,
+			semantic.FieldRegion:          consent.Region,
+			semantic.FieldNamespace:       memoryResponseNamespace(consent.Profile, consent.Region, consent.HouseID),
+			semantic.FieldLearningEnabled: consent.LearningEnabled,
+			semantic.FieldPaused:          consent.Paused,
+			semantic.FieldConsentVersion:  consent.ConsentVersion,
 		},
 		Warnings: []string{},
 		TraceID:  traceID,
@@ -127,26 +128,35 @@ func memoryPauseResumeResponse(request contract.Request, consent storage.Consent
 
 func memoryForgetResponse(request contract.Request, houseID string, exported map[string]any) contract.Response {
 	count := 0
-	if preferences, ok := exported["preferences"].([]storage.PreferenceRecord); ok {
+	if preferences, ok := exported[semantic.FieldPreferences].([]storage.PreferenceRecord); ok {
 		count += len(preferences)
 	}
-	if recommendations, ok := exported["recommendations"].([]storage.RecommendationRecord); ok {
+	if recommendations, ok := exported[semantic.FieldRecommendations].([]storage.RecommendationRecord); ok {
 		count += len(recommendations)
+	}
+	userMessage := "已删除当前家庭的本地记忆。"
+	if hasTargetedMemoryForgetIDs(request) {
+		userMessage = fmt.Sprintf("已删除 %d 条指定本地记忆。", count)
 	}
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     "已删除当前家庭的本地记忆。",
+		UserMessage:     userMessage,
 		Memory: map[string]any{
-			"houseId":      houseID,
-			"deletedCount": count,
-			"export":       exported,
+			semantic.FieldHouseID:      houseID,
+			semantic.FieldDeletedCount: count,
+			semantic.FieldExport:       exported,
 		},
 		Warnings: []string{},
 		TraceID:  "memory-forget-local",
 		Metrics:  noAPIMetrics(),
 	}
+}
+
+func hasTargetedMemoryForgetIDs(request contract.Request) bool {
+	preferenceIDs, recommendationIDs := memoryForgetIDs(request)
+	return len(preferenceIDs) > 0 || len(recommendationIDs) > 0
 }
 
 func recommendationListResponse(request contract.Request, profile string, region string, houseID string, recommendations []storage.RecommendationRecord) contract.Response {
@@ -157,10 +167,10 @@ func recommendationListResponse(request contract.Request, profile string, region
 			Status:          "success",
 			UserMessage:     "当前没有新的本地推荐。",
 			Recommendation: map[string]any{
-				"houseId":   houseID,
-				"region":    region,
-				"namespace": memoryResponseNamespace(profile, region, houseID),
-				"items":     []any{},
+				semantic.FieldHouseID:   houseID,
+				semantic.FieldRegion:    region,
+				semantic.FieldNamespace: memoryResponseNamespace(profile, region, houseID),
+				semantic.FieldItems:     []any{},
 			},
 			Warnings: []string{},
 			TraceID:  "recommendation-list-local",
@@ -174,11 +184,11 @@ func recommendationListResponse(request contract.Request, profile string, region
 		Status:          "success",
 		UserMessage:     "已返回 1 条本地推荐。",
 		Recommendation: map[string]any{
-			"houseId":      houseID,
-			"region":       item.Region,
-			"namespace":    memoryResponseNamespace(item.Profile, item.Region, houseID),
-			"items":        []any{recommendationItemMap(item)},
-			"sessionLimit": 1,
+			semantic.FieldHouseID:      houseID,
+			semantic.FieldRegion:       item.Region,
+			semantic.FieldNamespace:    memoryResponseNamespace(item.Profile, item.Region, houseID),
+			semantic.FieldItems:        []any{recommendationItemMap(item)},
+			semantic.FieldSessionLimit: 1,
 		},
 		Warnings: []string{},
 		TraceID:  "recommendation-list-local",
@@ -188,16 +198,16 @@ func recommendationListResponse(request contract.Request, profile string, region
 
 func recommendationRecordResponse(request contract.Request, houseID string, upsert storage.RecommendationUpsertResult) contract.Response {
 	item := recommendationItemMap(upsert.Record)
-	item["created"] = upsert.Created
-	item["merged"] = upsert.Merged
+	item[semantic.FieldCreated] = upsert.Created
+	item[semantic.FieldMerged] = upsert.Merged
 	return contract.Response{
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
 		UserMessage:     "已保存本地推荐候选。",
 		Recommendation: map[string]any{
-			"houseId": houseID,
-			"item":    item,
+			semantic.FieldHouseID: houseID,
+			semantic.FieldItem:    item,
 		},
 		Warnings: []string{},
 		TraceID:  "recommendation-record-local",
@@ -207,35 +217,35 @@ func recommendationRecordResponse(request contract.Request, houseID string, upse
 
 func recommendationItemMap(item storage.RecommendationRecord) map[string]any {
 	result := map[string]any{
-		"id":          item.ID,
-		"region":      item.Region,
-		"type":        item.Type,
-		"source":      item.Source,
-		"explanation": item.Explanation,
-		"evidence":    item.Evidence,
-		"status":      item.Status,
-		"updatedAt":   item.UpdatedAt,
+		semantic.FieldID:          item.ID,
+		semantic.FieldRegion:      item.Region,
+		semantic.FieldType:        item.Type,
+		semantic.FieldSource:      item.Source,
+		semantic.FieldExplanation: item.Explanation,
+		semantic.FieldEvidence:    item.Evidence,
+		semantic.FieldStatus:      item.Status,
+		semantic.FieldUpdatedAt:   item.UpdatedAt,
 	}
 	if item.TargetIntent != "" {
-		result["targetIntent"] = item.TargetIntent
+		result[semantic.FieldTargetIntent] = item.TargetIntent
 	}
 	if item.ScopeType != "" {
-		result["scopeType"] = item.ScopeType
+		result[semantic.FieldScopeType] = item.ScopeType
 	}
 	if item.ScopeRef != "" {
-		result["scopeRef"] = item.ScopeRef
+		result[semantic.FieldScopeRef] = item.ScopeRef
 	}
 	if item.Priority != 0 {
-		result["priority"] = item.Priority
+		result[semantic.FieldPriority] = item.Priority
 	}
 	if item.Confidence != "" {
-		result["confidence"] = item.Confidence
+		result[semantic.FieldConfidence] = item.Confidence
 	}
 	if item.ActionHint != nil {
-		result["actionHint"] = item.ActionHint
+		result[semantic.FieldActionHint] = item.ActionHint
 	}
 	if item.ParametersHint != nil {
-		result["parametersHint"] = item.ParametersHint
+		result[semantic.FieldParametersHint] = item.ParametersHint
 	}
 	return result
 }
@@ -246,11 +256,11 @@ func memoryResponseNamespace(profile string, region string, houseID string) map[
 		region = "default"
 	}
 	return map[string]any{
-		"accountProfile": profile,
-		"profile":        profile,
-		"region":         region,
-		"houseId":        houseID,
-		"dataType":       "memory",
+		semantic.FieldAccountProfile: profile,
+		semantic.FieldProfile:        profile,
+		semantic.FieldRegion:         region,
+		semantic.FieldHouseID:        houseID,
+		semantic.FieldDataType:       "memory",
 	}
 }
 
@@ -261,12 +271,12 @@ func recommendationFeedbackResponse(request contract.Request, houseID string, re
 		Status:          "success",
 		UserMessage:     "已更新本地推荐反馈。",
 		Recommendation: map[string]any{
-			"houseId":          houseID,
-			"id":               recommendation.ID,
-			"status":           recommendation.Status,
-			"cooldownUntil":    recommendation.CooldownUntil,
-			"updatedAt":        recommendation.UpdatedAt,
-			"feedbackRecorded": true,
+			semantic.FieldHouseID:          houseID,
+			semantic.FieldID:               recommendation.ID,
+			semantic.FieldStatus:           recommendation.Status,
+			semantic.FieldCooldownUntil:    recommendation.CooldownUntil,
+			semantic.FieldUpdatedAt:        recommendation.UpdatedAt,
+			semantic.FieldFeedbackRecorded: true,
 		},
 		Warnings: []string{},
 		TraceID:  "recommendation-feedback-local",
@@ -281,7 +291,7 @@ func recommendationFeedbackBlockedResponse(request contract.Request, recommendat
 		Status:          "blocked",
 		UserMessage:     message,
 		Recommendation: map[string]any{
-			"id": recommendationID,
+			semantic.FieldID: recommendationID,
 		},
 		Warnings: []string{code},
 		TraceID:  "recommendation-feedback-blocked",
@@ -300,7 +310,7 @@ func memoryClarificationResponse(request contract.Request, reason string) contra
 		Status:          "clarification_required",
 		UserMessage:     "请补充本地记忆所需的信息。",
 		Clarification: map[string]any{
-			"reason": reason,
+			semantic.FieldReason: reason,
 		},
 		Warnings: []string{},
 		TraceID:  "memory-clarification",
@@ -323,7 +333,7 @@ func memoryBlockedResponse(request contract.Request, code string, message string
 
 func noAPIMetrics() map[string]any {
 	return map[string]any{
-		"apiCalls":  0,
-		"cacheHits": 0,
+		semantic.FieldAPICalls:  0,
+		semantic.FieldCacheHits: 0,
 	}
 }

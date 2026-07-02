@@ -69,7 +69,7 @@ func TestInvokeLightBrightnessAdjustReadsAdjustsAndVerifiesDeviceProperty(t *tes
 		t.Fatalf("response = %#v", response)
 	}
 	result, ok := response["result"].(map[string]any)
-	if !ok || result["beforeValue"] != float64(42) || result["delta"] != float64(-1) || result["expectedValue"] != float64(41) || result["verified"] != true || result["verifiedValue"] != float64(41) || result["propertyName"] != "l" {
+	if !ok || result["beforeValue"] != float64(42) || result["delta"] != float64(-1) || result["expectedValue"] != float64(41) || result["verified"] != true || result["verifiedValue"] != float64(41) || result["property"] != "brightness" {
 		t.Fatalf("result = %#v", response["result"])
 	}
 }
@@ -126,7 +126,7 @@ func TestInvokeLightColorTemperatureAdjustReadsAdjustsAndVerifiesDeviceProperty(
 		t.Fatalf("response = %#v", response)
 	}
 	result, ok := response["result"].(map[string]any)
-	if !ok || result["beforeValue"] != float64(2700) || result["expectedValue"] != float64(2710) || result["verified"] != true || result["propertyName"] != "ct" {
+	if !ok || result["beforeValue"] != float64(2700) || result["expectedValue"] != float64(2710) || result["verified"] != true || result["property"] != "colorTemperature" {
 		t.Fatalf("result = %#v", response["result"])
 	}
 }

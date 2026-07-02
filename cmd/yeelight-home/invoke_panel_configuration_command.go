@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) preparePanelConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,11 +17,7 @@ func (app *app) preparePanelConfiguration(ctx context.Context, request contract.
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
-	}
-	payload, preconditions, summary, err := buildPanelConfigurationPayload(request)
-	if err != nil {
-		return panelConfigurationClarificationResponse(request, err.Error()), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -32,7 +29,11 @@ func (app *app) preparePanelConfiguration(ctx context.Context, request contract.
 	if err != nil {
 		return contract.Response{}, err
 	}
-	if !entityExists(entities, "device", valueIDString(payload["deviceId"])) {
+	payload, preconditions, summary, err := buildPanelConfigurationPayload(request, entities)
+	if err != nil {
+		return panelConfigurationClarificationResponse(request, err.Error()), nil
+	}
+	if !entityExists(entities, "device", valueIDString(payload[semantic.FieldDeviceID])) {
 		return panelConfigurationClarificationResponse(request, "invalid_panel_device_reference"), nil
 	}
 	now := time.Now()
@@ -44,47 +45,53 @@ func (app *app) preparePanelConfiguration(ctx context.Context, request contract.
 	return executionPreviewResponse(request, record, entities), nil
 }
 
-func buildPanelConfigurationPayload(request contract.Request) (map[string]any, []string, string, error) {
-	target := entityGetTargetFromRequest(request)
-	deviceID := firstNonEmptyString(target.id, firstRequestString(request.Parameters, "deviceId", "deviceID", "id"))
+func buildPanelConfigurationPayload(request contract.Request, entities api.EntityListResult) (map[string]any, []string, string, error) {
+	deviceID, err := resolvePanelConfigurationDeviceID(request, entities)
+	if err != nil {
+		return nil, nil, "", err
+	}
 	if strings.TrimSpace(deviceID) == "" {
 		return nil, nil, "", fmt.Errorf("invalid_panel_configuration_device")
 	}
 	switch request.Intent {
 	case "panel.button.configure":
-		buttons, ok := sanitizePanelButtonItems(request.Parameters["buttons"])
+		buttons, ok := sanitizePanelButtonItems(request.Parameters[semantic.FieldButtons])
 		if !ok {
 			return nil, nil, "", fmt.Errorf("invalid_panel_button_configure_payload")
 		}
 		return map[string]any{
-				"deviceId": deviceID,
-				"buttons":  buttons,
+				semantic.FieldDeviceID: deviceID,
+				semantic.FieldButtons:  buttons,
 			}, []string{
 				"提交前重新读取面板详情和按键配置",
 				"面板设备必须属于当前家庭",
 				"提交后通过 panel.get 验证按钮配置",
 			}, "配置面板按键", nil
 	case "panel.button_event.update":
-		event, ok := sanitizePanelButtonEvent(request.Parameters)
+		eventSource := request.Parameters
+		if nestedEvent, ok := request.Parameters[semantic.FieldButtonEvent].(map[string]any); ok {
+			eventSource = nestedEvent
+		}
+		event, ok := sanitizePanelButtonEvent(eventSource)
 		if !ok {
 			return nil, nil, "", fmt.Errorf("invalid_panel_button_event_payload")
 		}
 		return map[string]any{
-				"deviceId":    deviceID,
-				"buttonEvent": event,
+				semantic.FieldDeviceID:    deviceID,
+				semantic.FieldButtonEvent: event,
 			}, []string{
 				"提交前重新读取面板详情和按键事件配置",
 				"面板设备必须属于当前家庭",
 				"提交后通过 panel.get 验证按钮事件配置",
 			}, "更新面板按键动作", nil
 	case "panel.button_event.batch_update":
-		events, ok := sanitizePanelButtonEvents(request.Parameters["buttonEvents"])
+		events, ok := sanitizePanelButtonEvents(request.Parameters[semantic.FieldButtonEvents])
 		if !ok {
 			return nil, nil, "", fmt.Errorf("invalid_panel_button_event_batch_payload")
 		}
 		return map[string]any{
-				"deviceId":     deviceID,
-				"buttonEvents": events,
+				semantic.FieldDeviceID:     deviceID,
+				semantic.FieldButtonEvents: events,
 			}, []string{
 				"提交前重新读取面板详情和按键事件配置",
 				"面板设备必须属于当前家庭",
@@ -92,13 +99,13 @@ func buildPanelConfigurationPayload(request contract.Request) (map[string]any, [
 				"提交后通过 panel.get 验证按钮事件配置",
 			}, "批量更新面板按键动作", nil
 	case "panel.button_event.reset":
-		buttonEventID := firstRequestString(request.Parameters, "buttonEventId", "eventId", "id")
+		buttonEventID := firstRequestString(request.Parameters, semantic.FieldButtonEventID, semantic.FieldEventID, semantic.FieldID)
 		if strings.TrimSpace(buttonEventID) == "" {
 			return nil, nil, "", fmt.Errorf("invalid_panel_button_event_reset_payload")
 		}
 		return map[string]any{
-				"deviceId":      deviceID,
-				"buttonEventId": buttonEventID,
+				semantic.FieldDeviceID:      deviceID,
+				semantic.FieldButtonEventID: buttonEventID,
 			}, []string{
 				"提交前重新读取面板详情和按键事件配置",
 				"面板设备必须属于当前家庭",
@@ -106,26 +113,26 @@ func buildPanelConfigurationPayload(request contract.Request) (map[string]any, [
 				"提交后重新读取 panel.get 确认云端接受重置",
 			}, "重置面板按键动作", nil
 	case "knob.configure":
-		details, ok := sanitizeKnobDetails(request.Parameters["details"])
+		actions, ok := sanitizeKnobDetails(request.Parameters[semantic.FieldActions])
 		if !ok {
 			return nil, nil, "", fmt.Errorf("invalid_knob_configure_payload")
 		}
 		return map[string]any{
-				"deviceId": deviceID,
-				"details":  details,
+				semantic.FieldDeviceID: deviceID,
+				semantic.FieldDetails:  actions,
 			}, []string{
 				"提交前重新读取旋钮详情",
 				"旋钮设备必须属于当前家庭",
 				"提交后通过 knob.get 验证旋钮配置",
 			}, "配置旋钮", nil
 	case "knob.reset":
-		index, ok := requestInt(request.Parameters["index"])
+		index, ok := requestInt(request.Parameters[semantic.FieldIndex])
 		if !ok {
 			return nil, nil, "", fmt.Errorf("invalid_knob_reset_payload")
 		}
 		return map[string]any{
-				"deviceId": deviceID,
-				"index":    index,
+				semantic.FieldDeviceID: deviceID,
+				semantic.FieldIndex:    index,
 			}, []string{
 				"提交前重新读取旋钮详情",
 				"旋钮设备必须属于当前家庭",
@@ -135,6 +142,32 @@ func buildPanelConfigurationPayload(request contract.Request) (map[string]any, [
 	default:
 		return nil, nil, "", fmt.Errorf("unsupported_panel_configuration_intent")
 	}
+}
+
+func resolvePanelConfigurationDeviceID(request contract.Request, entities api.EntityListResult) (string, error) {
+	deviceID := firstRequestString(request.Parameters, semantic.FieldDeviceID, semantic.FieldPanelID, semantic.FieldKnobID)
+	target := entityGetTargetFromRequest(request)
+	if deviceID == "" && target.entityType == "device" {
+		deviceID = target.id
+	}
+	if deviceID != "" {
+		return deviceID, nil
+	}
+	deviceName := firstRequestString(request.Parameters, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName)
+	if deviceName == "" && target.entityType == "device" {
+		deviceName = target.name
+	}
+	if deviceName == "" {
+		return "", fmt.Errorf("invalid_panel_configuration_device")
+	}
+	match, candidates, _ := findEntity(entityGetTarget{name: deviceName, entityType: "device", roomID: target.roomID, roomName: target.roomName}, entities.Entities)
+	if match.ID != "" && len(candidates) == 1 {
+		return match.ID, nil
+	}
+	if len(candidates) > 1 {
+		return "", fmt.Errorf("ambiguous_panel_device_reference")
+	}
+	return "", fmt.Errorf("invalid_panel_device_reference")
 }
 
 func sanitizePanelButtonItems(value any) ([]any, bool) {
@@ -148,7 +181,8 @@ func sanitizePanelButtonItems(value any) ([]any, bool) {
 		if !ok {
 			return nil, false
 		}
-		clean := copyAllowedConfigFields(item, []string{"id", "deviceId", "name", "alias", "keyValue", "index", "resId", "resType", "visible", "icon", "sort", "type", "extend"})
+		item = normalizeTargetBinding(item, groupTypeCustom, semantic.InternalField(semantic.DomainPanel, semantic.FieldTargetType))
+		clean := copyAllowedConfigFields(item, semantic.PanelButtonWriteFields())
 		if len(clean) == 0 {
 			return nil, false
 		}
@@ -158,7 +192,7 @@ func sanitizePanelButtonItems(value any) ([]any, bool) {
 }
 
 func sanitizeKnobDetails(value any) ([]any, bool) {
-	rows, ok := value.([]any)
+	rows, ok := normalizePanelActionRows(value)
 	if !ok || len(rows) == 0 || len(rows) > 32 {
 		return nil, false
 	}
@@ -168,7 +202,7 @@ func sanitizeKnobDetails(value any) ([]any, bool) {
 		if !ok {
 			return nil, false
 		}
-		clean := copyAllowedConfigFields(item, []string{"id", "index", "configType", "mode", "model", "resId", "typeId", "resType", "resIndex", "resName", "param", "sens", "action", "property", "value", "details"})
+		clean := copyAllowedConfigFields(item, semantic.KnobDetailWriteFields())
 		if len(clean) == 0 {
 			return nil, false
 		}
@@ -198,26 +232,26 @@ func sanitizePanelButtonEvents(value any) ([]any, bool) {
 }
 
 func sanitizePanelButtonEvent(item map[string]any) (map[string]any, bool) {
-	buttonEventID := firstRequestString(item, "buttonEventId", "eventId", "id")
+	buttonEventID := firstRequestString(item, semantic.FieldButtonEventID, semantic.FieldEventID, semantic.FieldID)
 	if strings.TrimSpace(buttonEventID) == "" {
 		return nil, false
 	}
-	details, ok := sanitizePanelButtonEventDetails(item["details"])
+	actions, ok := sanitizePanelButtonEventDetails(item[semantic.FieldActions])
 	if !ok {
 		return nil, false
 	}
 	clean := map[string]any{
-		"buttonEventId": buttonEventID,
-		"details":       details,
+		semantic.FieldButtonEventID: buttonEventID,
+		semantic.FieldDetails:       actions,
 	}
-	if alias, ok := item["alias"].(string); ok && strings.TrimSpace(alias) != "" {
-		clean["alias"] = strings.TrimSpace(alias)
+	if alias, ok := item[semantic.FieldAlias].(string); ok && strings.TrimSpace(alias) != "" {
+		clean[semantic.FieldAlias] = strings.TrimSpace(alias)
 	}
 	return clean, true
 }
 
 func sanitizePanelButtonEventDetails(value any) ([]any, bool) {
-	rows, ok := value.([]any)
+	rows, ok := normalizePanelActionRows(value)
 	if !ok || len(rows) == 0 || len(rows) > 32 {
 		return nil, false
 	}
@@ -227,7 +261,7 @@ func sanitizePanelButtonEventDetails(value any) ([]any, bool) {
 		if !ok {
 			return nil, false
 		}
-		clean := copyAllowedConfigFields(item, []string{"id", "roomId", "resId", "typeId", "resType", "idx", "params", "rank", "resName", "repeatType", "repeatValue", "startTime", "endTime", "action", "property", "value", "delay", "duration"})
+		clean := copyAllowedConfigFields(item, semantic.PanelEventDetailWriteFields())
 		if len(clean) == 0 {
 			return nil, false
 		}
@@ -260,19 +294,19 @@ func copyAllowedConfigFields(source map[string]any, keys []string) map[string]an
 func panelConfigurationAcceptedFields(intent string) []string {
 	switch intent {
 	case "panel.button.configure":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.buttons"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldDeviceID, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldButtons)
 	case "panel.button_event.update":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.buttonEventId", "parameters.alias", "parameters.details"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.ParameterPath(semantic.FieldDeviceID), semantic.ParameterPath(semantic.FieldDeviceName), semantic.ParameterPath(semantic.FieldEntityName), semantic.ParameterPath(semantic.FieldTargetName), semantic.ParameterPath(semantic.FieldButtonEvent), semantic.ParameterPath(semantic.FieldButtonEvent, semantic.FieldButtonEventID), semantic.ParameterPath(semantic.FieldButtonEvent, semantic.FieldAlias), semantic.ParameterPath(semantic.FieldButtonEvent, semantic.FieldActions), semantic.ParameterPath(semantic.FieldButtonEvent, semantic.ArrayField(semantic.FieldActions), semantic.FieldTargetType), semantic.ParameterPath(semantic.FieldButtonEvent, semantic.ArrayField(semantic.FieldActions), semantic.FieldTargetID), semantic.ParameterPath(semantic.FieldButtonEvent, semantic.ArrayField(semantic.FieldActions), semantic.FieldTargetName), semantic.ParameterPath(semantic.FieldButtonEvent, semantic.ArrayField(semantic.FieldActions), semantic.FieldSet), semantic.ParameterPath(semantic.FieldButtonEventID), semantic.ParameterPath(semantic.FieldAlias), semantic.ParameterPath(semantic.FieldActions), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetType), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetID), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetName), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldSet)}
 	case "panel.button_event.batch_update":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.buttonEvents[].buttonEventId", "parameters.buttonEvents[].details"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.ParameterPath(semantic.FieldDeviceID), semantic.ParameterPath(semantic.FieldDeviceName), semantic.ParameterPath(semantic.FieldEntityName), semantic.ParameterPath(semantic.FieldTargetName), semanticParameterArrayPath(semantic.FieldButtonEvents, semantic.FieldButtonEventID), semanticParameterArrayPath(semantic.FieldButtonEvents, semantic.FieldActions), semantic.ParameterPath(semantic.ArrayField(semantic.FieldButtonEvents), semantic.ArrayField(semantic.FieldActions), semantic.FieldTargetType), semantic.ParameterPath(semantic.ArrayField(semantic.FieldButtonEvents), semantic.ArrayField(semantic.FieldActions), semantic.FieldTargetID), semantic.ParameterPath(semantic.ArrayField(semantic.FieldButtonEvents), semantic.ArrayField(semantic.FieldActions), semantic.FieldTargetName), semantic.ParameterPath(semantic.ArrayField(semantic.FieldButtonEvents), semantic.ArrayField(semantic.FieldActions), semantic.FieldSet)}
 	case "panel.button_event.reset":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.buttonEventId"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldDeviceID, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldButtonEventID, semantic.FieldIndex)
 	case "knob.configure":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.details"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.ParameterPath(semantic.FieldDeviceID), semantic.ParameterPath(semantic.FieldDeviceName), semantic.ParameterPath(semantic.FieldEntityName), semantic.ParameterPath(semantic.FieldTargetName), semantic.ParameterPath(semantic.FieldActions), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetType), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetID), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetName), semanticParameterArrayPath(semantic.FieldActions, semantic.FieldSet)}
 	case "knob.reset":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.index"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldDeviceID, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldIndex)
 	default:
-		return []string{"parameters.houseId", "parameters.deviceId"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldDeviceID, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName)
 	}
 }
 
@@ -281,7 +315,7 @@ func panelConfigurationClarificationResponse(request contract.Request, reason st
 }
 
 func (app *app) executePanelConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string, kind api.PanelConfigurationKind) (contract.Response, error) {
-	deviceID := executionPayloadString(record.Payload, "deviceId")
+	deviceID := executionPayloadString(record.Payload, semantic.FieldDeviceID)
 	result, err := api.NewPanelConfigurationClient(endpoint, nil).Run(ctx, api.PanelConfigurationRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,

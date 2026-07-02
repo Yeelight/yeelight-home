@@ -7,6 +7,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/credential"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type runtimeContext struct {
@@ -132,16 +133,16 @@ func firstNonEmpty(values ...string) string {
 
 func mergeProfileMetadata(base credential.ProfileMetadata, profile string, patch map[string]string) credential.ProfileMetadata {
 	base.Profile = profile
-	if value := strings.TrimSpace(patch["region"]); value != "" {
+	if value := strings.TrimSpace(patch[semantic.FieldRegion]); value != "" {
 		base.Region = value
 	}
-	if value := strings.TrimSpace(patch["clientId"]); value != "" {
+	if value := strings.TrimSpace(patch[semantic.FieldClientID]); value != "" {
 		base.ClientID = value
 	}
-	if value := strings.TrimSpace(patch["houseId"]); value != "" {
+	if value := strings.TrimSpace(patch[semantic.FieldHouseID]); value != "" {
 		base.HouseID = value
 	}
-	if value := strings.TrimSpace(patch["qrDevice"]); value != "" {
+	if value := strings.TrimSpace(patch[semantic.FieldQRDevice]); value != "" {
 		base.QRDevice = value
 	}
 	return base

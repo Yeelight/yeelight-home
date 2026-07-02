@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareMetadataDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,17 +17,21 @@ func (app *app) prepareMetadataDelete(ctx context.Context, request contract.Requ
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID),
+			"local profile houseId",
+		}), nil
 	}
 	targetType, targetIDKey, kind, ok := metadataDeleteIntentSpec(request.Intent)
 	if !ok {
-		return configureClarificationResponse(request, "unsupported_metadata_delete_intent", []string{"parameters.houseId"}), nil
+		return configureClarificationResponse(request, "unsupported_metadata_delete_intent", []string{semantic.ParameterPath(semantic.FieldHouseID)}), nil
 	}
-	targetID := firstRequestString(request.Parameters, targetIDKey, "id", "entityId")
+	targetID := firstRequestString(request.Parameters, targetIDKey, semantic.FieldID, semantic.FieldEntityID)
 	if targetID == "" {
-		targetID = firstValueIDString(request.Parameters, targetIDKey, "id", "entityId")
+		targetID = firstValueIDString(request.Parameters, targetIDKey, semantic.FieldID, semantic.FieldEntityID)
 	}
-	targetName := firstRequestString(request.Parameters, "name", "entityName", targetType+"Name")
+	targetName := firstRequestString(request.Parameters, metadataDeleteNameFields(targetType)...)
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
 		Credentials: api.EntityListCredentials{
@@ -38,31 +43,31 @@ func (app *app) prepareMetadataDelete(ctx context.Context, request contract.Requ
 		return contract.Response{}, err
 	}
 	match, candidates, matchedBy := findEntity(entityGetTarget{id: targetID, name: targetName, entityType: targetType}, entities.Entities)
-	if match.ID == "" {
-		return configureClarificationResponse(request, "entity_not_found", metadataDeleteAcceptedFields(request.Intent)), nil
-	}
 	if len(candidates) > 1 && targetID == "" {
 		return configureClarificationResponse(request, "ambiguous_target", metadataDeleteAcceptedFields(request.Intent)), nil
 	}
+	if match.ID == "" {
+		return configureClarificationResponse(request, "entity_not_found", metadataDeleteAcceptedFields(request.Intent)), nil
+	}
 	payload := map[string]any{
-		"houseId":    requestNumberOrString(houseID),
-		"capability": string(kind),
-		"entityType": targetType,
-		"entityId":   match.ID,
-		"name":       match.Name,
+		semantic.FieldHouseID:    requestNumberOrString(houseID),
+		semantic.FieldCapability: string(kind),
+		semantic.FieldEntityType: targetType,
+		semantic.FieldEntityID:   match.ID,
+		semantic.FieldName:       match.Name,
 	}
 	payload[targetIDKey] = match.ID
 	preview := map[string]any{
-		"deleteTarget": map[string]any{
-			"type":      match.Type,
-			"id":        match.ID,
-			"name":      match.Name,
-			"roomId":    match.RoomID,
-			"matchedBy": matchedBy,
+		semantic.FieldDeleteTarget: map[string]any{
+			semantic.FieldType:      match.Type,
+			semantic.FieldID:        match.ID,
+			semantic.FieldName:      match.Name,
+			semantic.FieldRoomID:    match.RoomID,
+			semantic.FieldMatchedBy: matchedBy,
 		},
-		"impact": metadataDeleteImpact(targetType, match, entities),
+		semantic.FieldImpact: metadataDeleteImpact(targetType, match, entities),
 	}
-	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("删除%s %s", metadataDeleteLabel(targetType), match.Name), payload, []string{
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("删除%s %s", metadataDeleteLabel(targetType), match.Name), operation.RiskR3, payload, []string{
 		"提交前重新读取家庭实体列表并确认目标仍存在",
 		"只删除本计划中已解析的单个目标对象",
 		"Runtime 根据当前请求构建受控删除 payload",
@@ -87,15 +92,15 @@ func firstValueIDString(values map[string]any, keys ...string) string {
 func metadataDeleteIntentSpec(intent string) (string, string, api.MetadataDeleteKind, bool) {
 	switch intent {
 	case "room.delete":
-		return "room", "roomId", api.MetadataDeleteRoom, true
+		return "room", semantic.FieldRoomID, api.MetadataDeleteRoom, true
 	case "area.delete":
-		return "area", "areaId", api.MetadataDeleteArea, true
+		return "area", semantic.FieldAreaID, api.MetadataDeleteArea, true
 	case "group.delete":
-		return "group", "groupId", api.MetadataDeleteGroup, true
+		return "group", semantic.FieldGroupID, api.MetadataDeleteGroup, true
 	case "scene.delete":
-		return "scene", "sceneId", api.MetadataDeleteScene, true
+		return "scene", semantic.FieldSceneID, api.MetadataDeleteScene, true
 	case "automation.delete":
-		return "automation", "automationId", api.MetadataDeleteAutomation, true
+		return "automation", semantic.FieldAutomationID, api.MetadataDeleteAutomation, true
 	default:
 		return "", "", "", false
 	}
@@ -104,18 +109,52 @@ func metadataDeleteIntentSpec(intent string) (string, string, api.MetadataDelete
 func metadataDeleteAcceptedFields(intent string) []string {
 	switch intent {
 	case "room.delete":
-		return []string{"parameters.houseId", "parameters.roomId", "parameters.name"}
+		return metadataDeleteAcceptedFieldsFor(semantic.FieldRoomID, "room")
 	case "area.delete":
-		return []string{"parameters.houseId", "parameters.areaId", "parameters.name"}
+		return metadataDeleteAcceptedFieldsFor(semantic.FieldAreaID, "area")
 	case "group.delete":
-		return []string{"parameters.houseId", "parameters.groupId", "parameters.name"}
+		return metadataDeleteAcceptedFieldsFor(semantic.FieldGroupID, "group")
 	case "scene.delete":
-		return []string{"parameters.houseId", "parameters.sceneId", "parameters.name"}
+		return metadataDeleteAcceptedFieldsFor(semantic.FieldSceneID, "scene")
 	case "automation.delete":
-		return []string{"parameters.houseId", "parameters.automationId", "parameters.name"}
+		return metadataDeleteAcceptedFieldsFor(semantic.FieldAutomationID, "automation")
 	default:
-		return []string{"parameters.houseId", "parameters.id", "parameters.name"}
+		return metadataDeleteAcceptedFieldsFor(semantic.FieldID, "")
 	}
+}
+
+func metadataDeleteAcceptedFieldsFor(idField string, targetType string) []string {
+	fields := []string{
+		semantic.ParameterPath(semantic.FieldHouseID),
+		semantic.ParameterPath(idField),
+	}
+	for _, nameField := range metadataDeleteNameFields(targetType) {
+		fields = append(fields, semantic.ParameterPath(nameField))
+	}
+	fields = append(fields, semantic.ParameterPath(semantic.FieldConfirmed))
+	return fields
+}
+
+func metadataDeleteNameFields(targetType string) []string {
+	fields := []string{
+		semantic.FieldName,
+		semantic.FieldEntityName,
+		semantic.FieldCurrentName,
+		semantic.FieldTargetName,
+	}
+	switch targetType {
+	case "room":
+		fields = append(fields, semantic.FieldRoomName)
+	case "area":
+		fields = append(fields, semantic.FieldAreaName)
+	case "group":
+		fields = append(fields, semantic.FieldGroupName)
+	case "scene":
+		fields = append(fields, semantic.FieldSceneName)
+	case "automation":
+		fields = append(fields, semantic.FieldAutomationName)
+	}
+	return fields
 }
 
 func metadataDeleteLabel(entityType string) string {
@@ -137,22 +176,22 @@ func metadataDeleteLabel(entityType string) string {
 
 func metadataDeleteImpact(entityType string, target api.EntitySummary, entities api.EntityListResult) map[string]any {
 	impact := map[string]any{
-		"mode": "single_target_delete",
+		semantic.FieldMode: "single_target_delete",
 	}
 	switch entityType {
 	case "room":
-		impact["deviceCountInRoom"] = countEntities(entities.Entities, func(entity api.EntitySummary) bool {
+		impact[semantic.FieldDeviceCountInRoom] = countEntities(entities.Entities, func(entity api.EntitySummary) bool {
 			return entity.Type == "device" && entity.RoomID == target.ID
 		})
-		impact["groupCountInRoom"] = countEntities(entities.Entities, func(entity api.EntitySummary) bool {
+		impact[semantic.FieldGroupCountInRoom] = countEntities(entities.Entities, func(entity api.EntitySummary) bool {
 			return entity.Type == "group" && entity.RoomID == target.ID
 		})
 	case "area":
-		impact["roomCountTotal"] = entities.Counts["room"]
+		impact[semantic.FieldRoomCountTotal] = entities.Counts["room"]
 	case "group":
-		impact["roomId"] = target.RoomID
+		impact[semantic.FieldRoomID] = target.RoomID
 	case "scene", "automation":
-		impact["status"] = target.Status
+		impact[semantic.FieldStatus] = target.Status
 	}
 	return impact
 }
@@ -171,7 +210,7 @@ func (app *app) executeMetadataDelete(ctx context.Context, request contract.Requ
 	result, err := api.NewMetadataDeleteClient(endpoint, nil).Run(ctx, api.MetadataDeleteRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
-		EntityID:       valueIDString(record.Payload["entityId"]),
+		EntityID:       valueIDString(record.Payload[semantic.FieldEntityID]),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.MetadataDeleteCredentials{

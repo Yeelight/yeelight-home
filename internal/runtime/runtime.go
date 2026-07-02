@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type Engine struct {
@@ -29,9 +30,9 @@ func (engine Engine) Invoke(request contract.Request) contract.Response {
 			Warnings:        []string{},
 			TraceID:         "local-auth-required",
 			Metrics: map[string]any{
-				"apiCalls":  0,
-				"cacheHits": 0,
-				"runtimeMs": engine.now().Sub(start).Milliseconds(),
+				semantic.FieldAPICalls:  0,
+				semantic.FieldCacheHits: 0,
+				semantic.FieldRuntimeMs: engine.now().Sub(start).Milliseconds(),
 			},
 		}
 	}
@@ -46,9 +47,9 @@ func (engine Engine) Invoke(request contract.Request) contract.Response {
 		Warnings:        []string{},
 		TraceID:         "local-contract-only",
 		Metrics: map[string]any{
-			"apiCalls":  0,
-			"cacheHits": 0,
-			"runtimeMs": engine.now().Sub(start).Milliseconds(),
+			semantic.FieldAPICalls:  0,
+			semantic.FieldCacheHits: 0,
+			semantic.FieldRuntimeMs: engine.now().Sub(start).Milliseconds(),
 		},
 	}
 }
@@ -85,19 +86,19 @@ func governedFallbackResponse(request contract.Request, policy governedFallbackP
 		Status:          "blocked",
 		UserMessage:     policy.userMessage,
 		Result: map[string]any{
-			"intent":           request.Intent,
-			"policyStatus":     policy.policyStatus,
-			"risk":             policy.risk,
-			"blockReason":      policy.blockReason,
-			"persistentWrites": false,
-			"nextAction":       policy.nextAction,
+			semantic.FieldIntent:           request.Intent,
+			semantic.FieldPolicyStatus:     policy.policyStatus,
+			semantic.FieldRisk:             policy.risk,
+			semantic.FieldBlockReason:      policy.blockReason,
+			semantic.FieldPersistentWrites: false,
+			semantic.FieldNextAction:       policy.nextAction,
 		},
 		Warnings: []string{policy.policyStatus, policy.blockReason},
 		TraceID:  "governed-intent-blocked",
 		Metrics: map[string]any{
-			"apiCalls":  0,
-			"cacheHits": 0,
-			"runtimeMs": runtimeMs,
+			semantic.FieldAPICalls:  0,
+			semantic.FieldCacheHits: 0,
+			semantic.FieldRuntimeMs: runtimeMs,
 		},
 		Error: &contract.Error{
 			Code:    policy.blockReason,

@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareDestructiveDelete(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -17,19 +18,28 @@ func (app *app) prepareDestructiveDelete(ctx context.Context, request contract.R
 	}
 	targetType, idKey, kind, ok := destructiveDeleteIntentSpec(request.Intent)
 	if !ok {
-		return configureClarificationResponse(request, "unsupported_destructive_delete_intent", []string{"parameters.houseId"}), nil
+		return configureClarificationResponse(request, "unsupported_destructive_delete_intent", []string{semantic.ParameterPath(semantic.FieldHouseID)}), nil
 	}
 	if strings.TrimSpace(houseID) == "" {
 		return configureClarificationResponse(request, "missing_house_id", destructiveDeleteAcceptedFields(request.Intent)), nil
 	}
-	targetID := firstRequestString(request.Parameters, idKey, "id", "entityId")
+	targetID := firstRequestString(request.Parameters, idKey, semantic.FieldID, semantic.FieldEntityID)
 	if targetID == "" {
-		targetID = firstValueIDString(request.Parameters, idKey, "id", "entityId")
+		targetID = firstValueIDString(request.Parameters, idKey, semantic.FieldID, semantic.FieldEntityID)
 	}
 	if targetID == "" && kind == api.DestructiveDeleteHome {
 		targetID = houseID
 	}
-	targetName := firstRequestString(request.Parameters, "name", "entityName", targetType+"Name")
+	targetNameKeys := []string{semantic.FieldName, semantic.FieldEntityName}
+	switch targetType {
+	case "device":
+		targetNameKeys = append(targetNameKeys, semantic.FieldDeviceName)
+	case "gateway":
+		targetNameKeys = append(targetNameKeys, semantic.FieldGatewayName)
+	case "home":
+		targetNameKeys = append(targetNameKeys, semantic.FieldHomeName, semantic.FieldHouseName)
+	}
+	targetName := firstRequestString(request.Parameters, targetNameKeys...)
 	target, entities, apiCalls, reason, err := resolveDestructiveDeleteTarget(ctx, request.Intent, targetType, targetID, targetName, houseID, endpoint, authorization, clientID)
 	if err != nil {
 		return contract.Response{}, err
@@ -38,11 +48,11 @@ func (app *app) prepareDestructiveDelete(ctx context.Context, request contract.R
 		return configureClarificationResponse(request, reason, destructiveDeleteAcceptedFields(request.Intent)), nil
 	}
 	payload := map[string]any{
-		"houseId":    requestNumberOrString(houseID),
-		"capability": string(kind),
-		"entityType": targetType,
-		"entityId":   target.ID,
-		"name":       target.Name,
+		semantic.FieldHouseID:    requestNumberOrString(houseID),
+		semantic.FieldCapability: string(kind),
+		semantic.FieldEntityType: targetType,
+		semantic.FieldEntityID:   target.ID,
+		semantic.FieldName:       target.Name,
 	}
 	payload[idKey] = target.ID
 	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("删除%s %s", metadataDeleteLabel(targetType), firstNonEmptyString(target.Name, target.ID)), operation.RiskR3, payload, []string{
@@ -55,15 +65,15 @@ func (app *app) prepareDestructiveDelete(ctx context.Context, request contract.R
 	}
 	app.preparedOperation = &record
 	preview := map[string]any{
-		"deleteTarget": map[string]any{
-			"type": target.Type,
-			"id":   target.ID,
-			"name": target.Name,
+		semantic.FieldDeleteTarget: map[string]any{
+			semantic.FieldType: target.Type,
+			semantic.FieldID:   target.ID,
+			semantic.FieldName: target.Name,
 		},
-		"impact": map[string]any{
-			"mode":                       "r3_destructive_delete",
-			"callerShouldConfirm":        true,
-			"runtimeApprovalStateStored": false,
+		semantic.FieldImpact: map[string]any{
+			semantic.FieldMode:                       "r3_destructive_delete",
+			semantic.FieldCallerShouldConfirm:        true,
+			semantic.FieldRuntimeApprovalStateStored: false,
 		},
 	}
 	return executionPreviewResponseWithDetails(request, record, entities, preview, apiCalls-entityListAPICalls(entities)), nil
@@ -72,11 +82,11 @@ func (app *app) prepareDestructiveDelete(ctx context.Context, request contract.R
 func destructiveDeleteIntentSpec(intent string) (string, string, api.DestructiveDeleteKind, bool) {
 	switch intent {
 	case "device.remove":
-		return "device", "deviceId", api.DestructiveDeleteDevice, true
+		return "device", semantic.FieldDeviceID, api.DestructiveDeleteDevice, true
 	case "gateway.delete":
-		return "gateway", "gatewayId", api.DestructiveDeleteGateway, true
+		return "gateway", semantic.FieldGatewayID, api.DestructiveDeleteGateway, true
 	case "home.delete":
-		return "home", "houseId", api.DestructiveDeleteHome, true
+		return "home", semantic.FieldHouseID, api.DestructiveDeleteHome, true
 	default:
 		return "", "", "", false
 	}
@@ -85,13 +95,13 @@ func destructiveDeleteIntentSpec(intent string) (string, string, api.Destructive
 func destructiveDeleteAcceptedFields(intent string) []string {
 	switch intent {
 	case "device.remove":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.name"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.ParameterPath(semantic.FieldDeviceID), semantic.ParameterPath(semantic.FieldName), semantic.ParameterPath(semantic.FieldConfirmed)}
 	case "gateway.delete":
-		return []string{"parameters.houseId", "parameters.gatewayId", "parameters.deviceId", "parameters.name"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.ParameterPath(semantic.FieldGatewayID), semantic.ParameterPath(semantic.FieldDeviceID), semantic.ParameterPath(semantic.FieldName), semantic.ParameterPath(semantic.FieldConfirmed)}
 	case "home.delete":
-		return []string{"parameters.houseId"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.ParameterPath(semantic.FieldConfirmed)}
 	default:
-		return []string{"parameters.houseId", "parameters.id", "parameters.name"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.ParameterPath(semantic.FieldID), semantic.ParameterPath(semantic.FieldName), semantic.ParameterPath(semantic.FieldConfirmed)}
 	}
 }
 
@@ -131,11 +141,11 @@ func resolveDestructiveDeleteTarget(ctx context.Context, intent string, targetTy
 		return api.EntitySummary{}, entities, entityListAPICalls(entities), "", err
 	}
 	match, candidates, _ := findEntity(entityGetTarget{id: targetID, name: targetName, entityType: targetType}, entities.Entities)
-	if match.ID == "" {
-		return api.EntitySummary{}, entities, entityListAPICalls(entities), "entity_not_found", nil
-	}
 	if len(candidates) > 1 && targetID == "" {
 		return api.EntitySummary{}, entities, entityListAPICalls(entities), "ambiguous_target", nil
+	}
+	if match.ID == "" {
+		return api.EntitySummary{}, entities, entityListAPICalls(entities), "entity_not_found", nil
 	}
 	return match, entities, entityListAPICalls(entities), "", nil
 }
@@ -151,6 +161,9 @@ func resolveHomeDeleteTarget(ctx context.Context, targetID string, targetName st
 			return api.EntitySummary{}, entities, entityListAPICalls(entities), "ambiguous_target", nil
 		}
 		return match, entities, entityListAPICalls(entities), "", nil
+	}
+	if len(candidates) > 1 && targetID == "" {
+		return api.EntitySummary{}, entities, entityListAPICalls(entities), "ambiguous_target", nil
 	}
 	if strings.TrimSpace(targetID) == "" {
 		return api.EntitySummary{}, entities, entityListAPICalls(entities), "entity_not_found", nil
@@ -177,7 +190,7 @@ func (app *app) executeDestructiveDelete(ctx context.Context, request contract.R
 	result, err := api.NewDestructiveDeleteClient(endpoint, nil).Run(ctx, api.DestructiveDeleteRequest{
 		Kind:           kind,
 		HouseID:        record.HouseID,
-		EntityID:       valueIDString(record.Payload["entityId"]),
+		EntityID:       valueIDString(record.Payload[semantic.FieldEntityID]),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.DestructiveDeleteCredentials{

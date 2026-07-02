@@ -125,3 +125,39 @@ func TestGatewayStatsRequiresHouseContextWithoutCloudCall(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestGatewayStatsListReturnsRedactedProjection(t *testing.T) {
+	var gotCall string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCall = request.Method + " " + request.URL.Path
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"deviceId":"gateway-1","name":"默认网关","deviceNum":9,"roomNum":2,"did":"raw-did","img":"raw.png","isBind":1,"attr":{"secret":"not-allowed"},"subDevices":[{"id":"child"}]}]}}`))
+	}))
+	defer server.Close()
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+
+	result, err := client.RunGatewayStatsList(context.Background(), MetadataReadonlyRequest{
+		HouseID:     "house-1",
+		Parameters:  map[string]any{},
+		Credentials: MetadataReadonlyCredentials{Authorization: "Bearer token-gateway-secret", ClientID: "client-1"},
+	})
+	if err != nil {
+		t.Fatalf("gateway stats err = %v", err)
+	}
+	if gotCall != "POST /apis/iot/v1/device/r/gatewayswithstats" || result.Capability != "gateway.stats.list" || result.APICalls != 1 {
+		t.Fatalf("gotCall=%q result=%#v", gotCall, result)
+	}
+	data, err := json.Marshal(result.Data)
+	if err != nil {
+		t.Fatalf("marshal result data: %v", err)
+	}
+	text := string(data)
+	for _, forbidden := range []string{"not-allowed", `"did"`, `"img"`, `"isBind"`, `"attr"`, `"subDevices"`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("gateway stats leaked %q: %s", forbidden, text)
+		}
+	}
+	if !strings.Contains(text, "deviceCount") || !strings.Contains(text, "roomCount") {
+		t.Fatalf("gateway stats missing summary counts: %s", text)
+	}
+}

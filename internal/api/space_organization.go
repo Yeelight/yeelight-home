@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type SpaceOrganizationKind string
@@ -139,47 +141,47 @@ var spaceOrganizationSpecs = map[SpaceOrganizationKind]spaceOrganizationSpec{
 	SpaceOrganizationRoomRename: {
 		kind:        SpaceOrganizationRoomRename,
 		entityType:  "room",
-		idKey:       "roomId",
-		nameKey:     "name",
+		idKey:       semantic.FieldRoomID,
+		nameKey:     semantic.FieldName,
 		pathPattern: "/v1/room/{id}/w/update",
 	},
 	SpaceOrganizationRoomUpdate: {
 		kind:        SpaceOrganizationRoomUpdate,
 		entityType:  "room",
-		idKey:       "roomId",
-		nameKey:     "name",
+		idKey:       semantic.FieldRoomID,
+		nameKey:     semantic.FieldName,
 		pathPattern: "/v1/room/{id}/w/update",
 	},
 	SpaceOrganizationDeviceRename: {
 		kind:        SpaceOrganizationDeviceRename,
 		entityType:  "device",
-		idKey:       "deviceId",
-		nameKey:     "name",
+		idKey:       semantic.FieldDeviceID,
+		nameKey:     semantic.FieldName,
 		pathPattern: "/v1/device/{id}/w/update",
 	},
 	SpaceOrganizationDeviceMove: {
 		kind:             SpaceOrganizationDeviceMove,
 		entityType:       "device",
-		idKey:            "deviceId",
+		idKey:            semantic.FieldDeviceID,
 		targetEntityType: "room",
-		targetIDKey:      "roomId",
+		targetIDKey:      semantic.FieldRoomID,
 		pathPattern:      "/v1/device/{id}/w/update",
 	},
 	SpaceOrganizationAreaUpdate: {
 		kind:            SpaceOrganizationAreaUpdate,
 		entityType:      "area",
-		idKey:           "areaId",
-		nameKey:         "name",
+		idKey:           semantic.FieldAreaID,
+		nameKey:         semantic.FieldName,
 		pathPattern:     "/v2/thing/manage/house/{houseId}/area/{id}/w/modify",
 		pathUsesHouseID: true,
 	},
 	SpaceOrganizationGroupUpdate: {
 		kind:             SpaceOrganizationGroupUpdate,
 		entityType:       "group",
-		idKey:            "groupId",
-		nameKey:          "name",
+		idKey:            semantic.FieldGroupID,
+		nameKey:          semantic.FieldName,
 		targetEntityType: "room",
-		targetIDKey:      "roomId",
+		targetIDKey:      semantic.FieldRoomID,
 		targetOptional:   true,
 		pathPattern:      "/v2/thing/manage/house/{houseId}/group/{id}/w/modify",
 		pathUsesHouseID:  true,
@@ -190,7 +192,7 @@ func (client SpaceOrganizationClient) write(ctx context.Context, spec spaceOrgan
 	body := mapWithoutKeys(payload, spec.idKey)
 	path := strings.ReplaceAll(spec.pathPattern, "{id}", entityID)
 	if spec.pathUsesHouseID {
-		path = strings.ReplaceAll(path, "{houseId}", pathSegment(stringFromAny(payload["houseId"])))
+		path = strings.ReplaceAll(path, "{houseId}", pathSegment(stringFromAny(payload[semantic.FieldHouseID])))
 	}
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+path, body, credentials)
 	if err != nil {
@@ -268,17 +270,17 @@ func (client SpaceOrganizationClient) findGroupDetailEntity(ctx context.Context,
 	}
 	return EntitySummary{
 		Type:    "group",
-		ID:      firstAnyString(item, "id", "groupId", "meshGroupId", "meshgroupId"),
-		Name:    firstAnyString(item, "name", "groupName"),
-		HouseID: firstNonEmpty(firstAnyString(item, "houseId"), houseID),
-		RoomID:  firstAnyString(item, "roomId"),
+		ID:      firstAnyString(item, semantic.FieldID, semantic.FieldGroupID, semantic.MeshGroupIDField(), semantic.FieldMeshGroupID),
+		Name:    firstAnyString(item, semantic.FieldName, semantic.FieldGroupName),
+		HouseID: firstNonEmpty(firstAnyString(item, semantic.FieldHouseID), houseID),
+		RoomID:  firstAnyString(item, semantic.FieldRoomID),
 	}, 1, nil
 }
 
 func groupDetailItem(data any) map[string]any {
 	switch typed := data.(type) {
 	case map[string]any:
-		if detail, ok := typed["detail"].(map[string]any); ok {
+		if detail, ok := typed[semantic.FieldDetail].(map[string]any); ok {
 			return detail
 		}
 		return typed
@@ -333,12 +335,12 @@ func validateSpaceOrganizationReferences(spec spaceOrganizationSpec, payload map
 		}
 	}
 	if spec.kind == SpaceOrganizationRoomUpdate {
-		if gatewayID := strings.TrimSpace(stringFromAny(payload["gatewayDeviceId"])); gatewayID != "" {
+		if gatewayID := strings.TrimSpace(stringFromAny(payload[semantic.FieldGatewayDeviceID])); gatewayID != "" {
 			if _, ok := findSpaceEntity(entities, "device", gatewayID); !ok {
 				return fmt.Errorf("device %s not found before write", gatewayID)
 			}
 		}
-		for _, key := range []string{"gatewayIds", "defaultGatewayIds"} {
+		for _, key := range []string{semantic.FieldGatewayIDs, semantic.FieldDefaultGatewayIDs} {
 			for _, gatewayID := range spaceOrganizationStringIDs(payload[key]) {
 				if _, ok := findSpaceEntity(entities, "device", gatewayID); !ok {
 					return fmt.Errorf("device %s not found before write", gatewayID)
@@ -350,7 +352,7 @@ func validateSpaceOrganizationReferences(spec spaceOrganizationSpec, payload map
 		return nil
 	}
 	areaID := strings.TrimSpace(stringFromAny(payload[spec.idKey]))
-	if parentID := strings.TrimSpace(stringFromAny(payload["parentId"])); parentID != "" {
+	if parentID := strings.TrimSpace(stringFromAny(payload[semantic.FieldParentID])); parentID != "" {
 		if parentID == areaID {
 			return fmt.Errorf("area parentId cannot reference itself")
 		}
@@ -358,7 +360,7 @@ func validateSpaceOrganizationReferences(spec spaceOrganizationSpec, payload map
 			return fmt.Errorf("area parent %s not found before write", parentID)
 		}
 	}
-	roomIDs, ok := payload["roomIds"].([]any)
+	roomIDs, ok := payload[semantic.FieldRoomIDs].([]any)
 	if !ok {
 		return nil
 	}

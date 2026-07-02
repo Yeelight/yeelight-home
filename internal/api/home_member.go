@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type HomeMemberKind string
@@ -100,36 +102,36 @@ func (client HomeMemberClient) preflight(ctx context.Context, kind HomeMemberKin
 		_, calls, err := client.readMembers(ctx, houseID, credentials)
 		return calls, err
 	case HomeMemberAccept:
-		if strings.TrimSpace(stringFromAny(payload["shareId"])) == "" {
+		if strings.TrimSpace(stringFromAny(payload[semantic.FieldShareID])) == "" {
 			return 0, fmt.Errorf("share id is required")
 		}
-		if strings.TrimSpace(stringFromAny(payload["createTime"])) == "" {
+		if strings.TrimSpace(stringFromAny(payload[semantic.FieldCreateTime])) == "" {
 			return 0, fmt.Errorf("share createTime is required")
 		}
-		if strings.TrimSpace(stringFromAny(payload["toUid"])) == "" {
+		if strings.TrimSpace(stringFromAny(payload[semantic.FieldToUID])) == "" {
 			return 0, fmt.Errorf("recipient uid is required")
 		}
 		return 0, nil
 	case HomeMemberConfigure:
-		memberID := strings.TrimSpace(stringFromAny(payload["memberId"]))
+		memberID := strings.TrimSpace(stringFromAny(payload[semantic.FieldMemberID]))
 		if memberID == "" {
 			return 0, fmt.Errorf("member id is required")
 		}
-		if !validConfigurableHomeRole(payload["userRole"]) {
+		if !validConfigurableHomeRole(payload[semantic.FieldUserRole]) {
 			return 0, fmt.Errorf("home member userRole must be 0 or 2")
 		}
-		if strings.TrimSpace(stringFromAny(payload["uid"])) == "" {
+		if strings.TrimSpace(stringFromAny(payload[semantic.FieldUID])) == "" {
 			return 0, fmt.Errorf("operator uid is required")
 		}
 		return client.requireMember(ctx, houseID, memberID, credentials)
 	case HomeMemberRemove, HomeMemberTransfer:
-		memberID := strings.TrimSpace(stringFromAny(payload["memberId"]))
+		memberID := strings.TrimSpace(stringFromAny(payload[semantic.FieldMemberID]))
 		if memberID == "" {
 			return 0, fmt.Errorf("member id is required")
 		}
 		return client.requireMutableMember(ctx, houseID, memberID, credentials)
 	case HomeMemberQuit:
-		uid := strings.TrimSpace(stringFromAny(payload["uid"]))
+		uid := strings.TrimSpace(stringFromAny(payload[semantic.FieldUID]))
 		if uid == "" {
 			return 0, fmt.Errorf("member uid is required")
 		}
@@ -142,8 +144,8 @@ func (client HomeMemberClient) preflight(ctx context.Context, kind HomeMemberKin
 func (client HomeMemberClient) write(ctx context.Context, kind HomeMemberKind, houseID string, payload map[string]any, credentials requestCredentials) (any, int, error) {
 	switch kind {
 	case HomeMemberInvite:
-		body := mapWithoutKeys(payload, "capability")
-		body["houseId"] = requestNumberOrStringForAPI(houseID)
+		body := mapWithoutKeys(payload, semantic.FieldCapability)
+		body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/share/r/housesharebarcode", body, credentials)
 		if err != nil {
 			return nil, 1, err
@@ -154,9 +156,9 @@ func (client HomeMemberClient) write(ctx context.Context, kind HomeMemberKind, h
 		return sanitizeCloudData(response["data"]), 1, nil
 	case HomeMemberAccept:
 		body := map[string]any{
-			"shareId":    payload["shareId"],
-			"createTime": payload["createTime"],
-			"toUid":      payload["toUid"],
+			semantic.FieldShareID:    payload[semantic.FieldShareID],
+			semantic.FieldCreateTime: payload[semantic.FieldCreateTime],
+			semantic.FieldToUID:      payload[semantic.FieldToUID],
 		}
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/share/w/acceptbarcodeshare", body, credentials)
 		if err != nil {
@@ -167,8 +169,8 @@ func (client HomeMemberClient) write(ctx context.Context, kind HomeMemberKind, h
 		}
 		return sanitizeCloudData(response["data"]), 1, nil
 	case HomeMemberConfigure:
-		body := mapWithoutKeys(payload, "capability")
-		body["houseId"] = requestNumberOrStringForAPI(houseID)
+		body := mapWithoutKeys(payload, semantic.FieldCapability)
+		body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/w/updateUserRole", body, credentials)
 		if err != nil {
 			return nil, 1, err
@@ -178,8 +180,8 @@ func (client HomeMemberClient) write(ctx context.Context, kind HomeMemberKind, h
 		}
 		return sanitizeCloudData(response["data"]), 1, nil
 	case HomeMemberRemove:
-		body := mapWithoutKeys(payload, "capability")
-		body["houseId"] = requestNumberOrStringForAPI(houseID)
+		body := mapWithoutKeys(payload, semantic.FieldCapability)
+		body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/w/remove", body, credentials)
 		if err != nil {
 			return nil, 1, err
@@ -189,8 +191,8 @@ func (client HomeMemberClient) write(ctx context.Context, kind HomeMemberKind, h
 		}
 		return sanitizeCloudData(response["data"]), 1, nil
 	case HomeMemberTransfer:
-		body := mapWithoutKeys(payload, "capability")
-		body["houseId"] = requestNumberOrStringForAPI(houseID)
+		body := mapWithoutKeys(payload, semantic.FieldCapability)
+		body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/w/transfer", body, credentials)
 		if err != nil {
 			return nil, 1, err
@@ -200,8 +202,8 @@ func (client HomeMemberClient) write(ctx context.Context, kind HomeMemberKind, h
 		}
 		return sanitizeCloudData(response["data"]), 1, nil
 	case HomeMemberQuit:
-		body := mapWithoutKeys(payload, "capability")
-		body["houseId"] = requestNumberOrStringForAPI(houseID)
+		body := mapWithoutKeys(payload, semantic.FieldCapability)
+		body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/w/quit", body, credentials)
 		if err != nil {
 			return nil, 1, err
@@ -233,13 +235,13 @@ func (client HomeMemberClient) verifyAfterWrite(ctx context.Context, kind HomeMe
 		case HomeMemberAccept:
 			ok, readCalls, err = client.verifyAcceptResult(ctx, houseID, payload, credentials)
 		case HomeMemberConfigure:
-			ok, readCalls, err = client.verifyMemberRole(ctx, houseID, strings.TrimSpace(stringFromAny(payload["memberId"])), payload["userRole"], credentials)
+			ok, readCalls, err = client.verifyMemberRole(ctx, houseID, strings.TrimSpace(stringFromAny(payload[semantic.FieldMemberID])), payload[semantic.FieldUserRole], credentials)
 		case HomeMemberTransfer:
-			ok, readCalls, err = client.verifyMemberRole(ctx, houseID, strings.TrimSpace(stringFromAny(payload["memberId"])), float64(1), credentials)
+			ok, readCalls, err = client.verifyMemberRole(ctx, houseID, strings.TrimSpace(stringFromAny(payload[semantic.FieldMemberID])), float64(1), credentials)
 		case HomeMemberRemove:
-			ok, readCalls, err = client.verifyMemberMissing(ctx, houseID, strings.TrimSpace(stringFromAny(payload["memberId"])), credentials)
+			ok, readCalls, err = client.verifyMemberMissing(ctx, houseID, strings.TrimSpace(stringFromAny(payload[semantic.FieldMemberID])), credentials)
 		case HomeMemberQuit:
-			ok, readCalls, err = client.verifyMemberMissing(ctx, houseID, strings.TrimSpace(stringFromAny(payload["uid"])), credentials)
+			ok, readCalls, err = client.verifyMemberMissing(ctx, houseID, strings.TrimSpace(stringFromAny(payload[semantic.FieldUID])), credentials)
 		default:
 			return false, calls, fmt.Errorf("unsupported home member kind %q", kind)
 		}
@@ -259,7 +261,7 @@ func (client HomeMemberClient) verifyAfterWrite(ctx context.Context, kind HomeMe
 }
 
 func (client HomeMemberClient) readMembers(ctx context.Context, houseID string, credentials requestCredentials) ([]map[string]any, int, error) {
-	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/r/memberlistV2", map[string]any{"houseId": requestNumberOrStringForAPI(houseID)}, credentials)
+	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/r/memberlistV2", map[string]any{semantic.FieldHouseID: requestNumberOrStringForAPI(houseID)}, credentials)
 	if err != nil {
 		return nil, 1, err
 	}
@@ -337,7 +339,7 @@ func (client HomeMemberClient) verifyInviteResult(ctx context.Context, houseID s
 	if err != nil {
 		return false, calls, err
 	}
-	return strings.TrimSpace(stringFromAny(payload["expiredTime"])) != "", calls, nil
+	return strings.TrimSpace(stringFromAny(firstNonNil(payload[semantic.FieldExpiresAt], payload[semantic.InternalField(semantic.DomainHomeMember, semantic.FieldExpiresAt)]))) != "", calls, nil
 }
 
 func (client HomeMemberClient) verifyAcceptResult(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, int, error) {
@@ -368,7 +370,7 @@ func (client HomeMemberClient) CurrentUserID(ctx context.Context, credentials Ho
 		return "", 1, fmt.Errorf("account.info returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
 	data, _ := response["data"].(map[string]any)
-	uid := firstAnyString(data, "uid", "userId", "id", "accountId")
+	uid := firstAnyString(data, semantic.AccountIDFields()...)
 	if uid == "" {
 		return "", 1, fmt.Errorf("account.info did not include a user id")
 	}
@@ -383,11 +385,11 @@ func (client HomeMemberClient) ProbeMembers(ctx context.Context, houseID string,
 }
 
 func homeMemberUID(member map[string]any) string {
-	return firstAnyString(member, "uid", "userId", "memberId", "id")
+	return firstAnyString(member, semantic.MemberIDFields()...)
 }
 
 func homeMemberRole(member map[string]any) string {
-	return firstAnyString(member, "role", "userRole", "memberRole")
+	return firstAnyString(member, semantic.MemberRoleFields()...)
 }
 
 func validConfigurableHomeRole(value any) bool {

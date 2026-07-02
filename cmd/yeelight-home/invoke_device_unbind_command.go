@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareDeviceUnbind(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,12 +17,10 @@ func (app *app) prepareDeviceUnbind(ctx context.Context, request contract.Reques
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "parameters.deviceId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", deviceUnbindAcceptedFields()), nil
 	}
-	deviceID := firstValueIDString(request.Parameters, "deviceId", "id", "entityId")
-	if deviceID == "" {
-		return configureClarificationResponse(request, "invalid_device_unbind_payload", []string{"parameters.houseId", "parameters.deviceId"}), nil
-	}
+	deviceID := firstValueIDString(request.Parameters, semantic.FieldDeviceID, semantic.FieldID, semantic.FieldEntityID)
+	deviceName := firstRequestString(request.Parameters, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName)
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
 		Credentials: api.EntityListCredentials{
@@ -32,19 +31,31 @@ func (app *app) prepareDeviceUnbind(ctx context.Context, request contract.Reques
 	if err != nil {
 		return contract.Response{}, err
 	}
-	target, ok := findEntitySummary(entities, "device", deviceID)
-	if !ok {
-		return configureClarificationResponse(request, "invalid_device_reference", []string{"parameters.houseId", "parameters.deviceId"}), nil
+	var target api.EntitySummary
+	if deviceID != "" {
+		if found, ok := findEntitySummary(entities, "device", deviceID); ok {
+			target = found
+		}
+	} else if deviceName != "" {
+		match, candidates, _ := findEntity(entityGetTarget{name: deviceName, entityType: "device"}, entities.Entities)
+		if len(candidates) > 1 {
+			response := entityGetClarificationResponse(request, "ambiguous_target", entityGetTarget{name: deviceName, entityType: "device"}, candidates, entityListAPICalls(entities))
+			return response, nil
+		}
+		target = match
 	}
-	clearMac := requestBoolDefault(request.Parameters["clearMac"], false)
-	unbindRelDevices := requestBoolDefault(request.Parameters["unbindRelDevices"], false)
+	if target.ID == "" {
+		return configureClarificationResponse(request, "invalid_device_reference", deviceUnbindAcceptedFields()), nil
+	}
+	clearMac := requestBoolDefault(request.Parameters[semantic.FieldClearMAC], false)
+	unbindRelDevices := requestBoolDefault(request.Parameters[semantic.FieldUnbindRelatedDevices], false)
 	payload := map[string]any{
-		"houseId":          requestNumberOrString(houseID),
-		"deviceId":         target.ID,
-		"entityId":         target.ID,
-		"name":             target.Name,
-		"clearMac":         clearMac,
-		"unbindRelDevices": unbindRelDevices,
+		semantic.FieldHouseID:              requestNumberOrString(houseID),
+		semantic.FieldDeviceID:             target.ID,
+		semantic.FieldEntityID:             target.ID,
+		semantic.FieldName:                 target.Name,
+		semantic.FieldClearMAC:             clearMac,
+		semantic.FieldUnbindRelatedDevices: unbindRelDevices,
 	}
 	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("解绑设备 %s", firstNonEmptyString(target.Name, target.ID)), operation.RiskR3, payload, []string{
 		"这是 R3 高影响设备解绑操作；调用方应在调用 Runtime 前完成自己的用户确认",
@@ -56,19 +67,31 @@ func (app *app) prepareDeviceUnbind(ctx context.Context, request contract.Reques
 	}
 	app.preparedOperation = &record
 	preview := map[string]any{
-		"unbindTarget": map[string]any{"type": "device", "id": target.ID, "name": target.Name},
-		"options":      map[string]any{"clearMac": clearMac, "unbindRelDevices": unbindRelDevices},
-		"impact":       map[string]any{"mode": "r3_device_unbind", "callerShouldConfirm": true, "runtimeApprovalStateStored": false},
+		semantic.FieldTarget:  map[string]any{semantic.FieldType: "device", semantic.FieldID: target.ID, semantic.FieldName: target.Name},
+		semantic.FieldOptions: map[string]any{semantic.FieldClearMAC: clearMac, semantic.FieldUnbindRelatedDevices: unbindRelDevices},
+		semantic.FieldImpact:  map[string]any{semantic.FieldMode: "r3_device_unbind", semantic.FieldCallerShouldConfirm: true, semantic.FieldRuntimeApprovalStateStored: false},
 	}
 	return executionPreviewResponseWithDetails(request, record, entities, preview, 0), nil
+}
+
+func deviceUnbindAcceptedFields() []string {
+	return semanticParameterPaths(
+		semantic.FieldHouseID,
+		semantic.FieldDeviceID,
+		semantic.FieldDeviceName,
+		semantic.FieldEntityName,
+		semantic.FieldName,
+		semantic.FieldClearMAC,
+		semantic.FieldUnbindRelatedDevices,
+	)
 }
 
 func (app *app) executeDeviceUnbind(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewDeviceUnbindClient(endpoint, nil).Run(ctx, api.DeviceUnbindRequest{
 		HouseID:          record.HouseID,
-		DeviceID:         valueIDString(record.Payload["deviceId"]),
-		ClearMac:         boolFromExecutionPayload(record.Payload["clearMac"]),
-		UnbindRelDevices: boolFromExecutionPayload(record.Payload["unbindRelDevices"]),
+		DeviceID:         valueIDString(record.Payload[semantic.FieldDeviceID]),
+		ClearMac:         boolFromExecutionPayload(record.Payload[semantic.FieldClearMAC]),
+		UnbindRelDevices: boolFromExecutionPayload(record.Payload[semantic.FieldUnbindRelatedDevices]),
 		VerifyAttempts:   5,
 		VerifyInterval:   time.Second,
 		Credentials: api.DeviceUnbindCredentials{

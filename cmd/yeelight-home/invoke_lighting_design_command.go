@@ -6,26 +6,37 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
-func (app *app) prepareLightingDesign(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {
+func (app *app) prepareLightingDesign(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID),
+			"local profile houseId",
+		}), nil
 	}
-	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
-		HouseID: houseID,
-		Credentials: api.EntityListCredentials{
-			Authorization: authorization,
-			ClientID:      clientID,
-		},
-	})
+	target := entityGetTargetFromRequest(request)
+	if target.id != "" || target.name != "" {
+		resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		return app.lightingDesignPlanResponse(ctx, request, endpoint, resolved.Entities, target, authorization, clientID)
+	}
+	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
 	if err != nil {
 		return contract.Response{}, err
 	}
-	scope, selectedDevices, clarification := lightingDesignScope(request, entities)
+	return app.lightingDesignPlanResponse(ctx, request, endpoint, entities, target, authorization, clientID)
+}
+
+func (app *app) lightingDesignPlanResponse(ctx context.Context, request contract.Request, endpoint api.Endpoint, entities api.EntityListResult, target entityGetTarget, authorization string, clientID string) (contract.Response, error) {
+	scope, selectedDevices, clarification := lightingDesignScopeTarget(request, entities, target)
 	if clarification != nil {
 		return *clarification, nil
 	}
@@ -48,16 +59,16 @@ func (app *app) prepareLightingDesign(ctx context.Context, request contract.Requ
 		message = "已生成本地照明设计计划，但仍缺少部分设备或规则证据。"
 	}
 	result := map[string]any{
-		"region":           entities.Region,
-		"houseId":          entities.HouseID,
-		"planType":         "local_lighting_design",
-		"persistentWrites": false,
-		"applyIntent":      "lighting.design.apply",
-		"applyBehavior":    "caller_authored_actions_required",
-		"scope":            scope,
-		"deviceEvidence":   capabilityEvidence,
-		"unknownEvidence":  unknowns,
-		"steps": []string{
+		semantic.FieldRegion:           entities.Region,
+		semantic.FieldHouseID:          entities.HouseID,
+		semantic.FieldPlanType:         "local_lighting_design",
+		semantic.FieldPersistentWrites: false,
+		semantic.FieldApplyIntent:      "lighting.design.apply",
+		semantic.FieldApplyBehavior:    "caller_authored_actions_required",
+		semantic.FieldScope:            scope,
+		semantic.FieldDeviceEvidence:   capabilityEvidence,
+		semantic.FieldUnknownEvidence:  unknowns,
+		semantic.FieldSteps: []string{
 			"读取当前家庭实体和设备能力证据",
 			"调用方或 Skill 根据用户目标生成明确的设备级动作",
 			"如需应用到真实设备，调用 lighting.design.apply 并传入 actions[] 或明确的 power/brightness/colorTemperature/color 参数",
@@ -72,17 +83,23 @@ func (app *app) prepareLightingDesign(ctx context.Context, request contract.Requ
 		Warnings:        warnings,
 		TraceID:         "lighting-design-plan-local",
 		Metrics: map[string]any{
-			"apiCalls":  entityListAPICalls(entities) + capabilityCalls,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  entityListAPICalls(entities) + capabilityCalls,
+			semantic.FieldCacheHits: topologyCacheHits(entities),
 		},
 	}, nil
 }
 
 func lightingDesignScope(request contract.Request, entities api.EntityListResult) (map[string]any, []api.EntitySummary, *contract.Response) {
-	target := entityGetTargetFromRequest(request)
+	return lightingDesignScopeTarget(request, entities, entityGetTargetFromRequest(request))
+}
+
+func lightingDesignScopeTarget(request contract.Request, entities api.EntityListResult, target entityGetTarget) (map[string]any, []api.EntitySummary, *contract.Response) {
 	if target.id == "" && target.name == "" {
 		devices := firstEntitiesByType(entities.Entities, "device", 0)
-		return map[string]any{"type": "home", "target": map[string]any{"houseId": entities.HouseID}}, devices, nil
+		return map[string]any{
+			semantic.FieldType:   "home",
+			semantic.FieldTarget: map[string]any{semantic.FieldHouseID: entities.HouseID},
+		}, devices, nil
 	}
 	match, candidates, _ := findEntity(target, entities.Entities)
 	if match.ID == "" {
@@ -91,8 +108,8 @@ func lightingDesignScope(request contract.Request, entities api.EntityListResult
 		return nil, nil, &response
 	}
 	scope := map[string]any{
-		"type":   match.Type,
-		"target": entitySummaryMap(match),
+		semantic.FieldType:   match.Type,
+		semantic.FieldTarget: entitySummaryMap(match),
 	}
 	switch match.Type {
 	case "device":
@@ -100,7 +117,7 @@ func lightingDesignScope(request contract.Request, entities api.EntityListResult
 	case "room":
 		return scope, devicesInRoom(entities.Entities, match.ID, 0), nil
 	default:
-		scope["limitations"] = []string{"当前 Runtime 只能直接确认房间和设备范围；区域、设备组成员关系仍需后续只读 adapter。"}
+		scope[semantic.FieldLimitations] = []string{"当前 Runtime 只能直接确认房间和设备范围；区域、设备组成员关系仍需后续只读能力支持。"}
 		return scope, []api.EntitySummary{}, nil
 	}
 }
@@ -117,9 +134,9 @@ func lightingDesignCapabilities(ctx context.Context, endpoint api.Endpoint, hous
 		}
 		apiCalls++
 		evidence = append(evidence, map[string]any{
-			"entity":       entitySummaryMap(device),
-			"schemaStatus": capability.SchemaStatus,
-			"propertyIds":  stateQueryPropertySet(capability.Device),
+			semantic.FieldEntity:              entitySummaryMap(device),
+			semantic.FieldSchemaStatus:        capability.SchemaStatus,
+			semantic.FieldSupportedProperties: stateQuerySupportedProperties(capability.Device),
 		})
 	}
 	return evidence, warnings, apiCalls

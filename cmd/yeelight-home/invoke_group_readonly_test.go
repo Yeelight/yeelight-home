@@ -29,7 +29,7 @@ func TestInvokeGroupListAndSearchUseCloudReadonlyAdapters(t *testing.T) {
 
 	for index, input := range []string{
 		`{"contractVersion":"1.0","requestId":"req-group-list","locale":"zh-CN","utterance":"列出这个家的设备组","intent":"group.list","parameters":{"houseId":"1001"}}`,
-		`{"contractVersion":"1.0","requestId":"req-group-search","locale":"zh-CN","utterance":"搜索二楼设备组","intent":"group.search","parameters":{"houseId":"1001","name":"二","pageNo":2,"pageSize":5}}`,
+		`{"contractVersion":"1.0","requestId":"req-group-search","locale":"zh-CN","utterance":"搜索二楼设备组","intent":"group.search","parameters":{"houseId":"1001","groupName":"二楼","pageNo":2,"pageSize":5}}`,
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -74,7 +74,7 @@ func TestInvokeGroupDetailGetUsesThingManageReadonlyAdapter(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		_, _ = writer.Write([]byte(`{"success":true,"data":{"id":22,"houseId":1001,"name":"二楼","details":[{"deviceId":"device-1"}],"accessToken":"not-allowed"}}`))
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"id":22,"houseId":1001,"name":"二楼","configs":[{"property":"name","desc":"名称","value":"二楼","access":6,"format":"string","scale":1,"zoom":0}],"devices":[{"deviceId":"device-1","name":"灯1","pid":"198666","pcid":"31"}],"accessToken":"not-allowed"}}`))
 	}))
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
@@ -90,7 +90,7 @@ func TestInvokeGroupDetailGetUsesThingManageReadonlyAdapter(t *testing.T) {
 	if gotCall != "GET /apis/iot/v2/thing/manage/house/1001/group/22/r/info" {
 		t.Fatalf("gotCall = %q", gotCall)
 	}
-	for _, forbidden := range []string{"token-group-secret", "not-allowed"} {
+	for _, forbidden := range []string{"token-group-secret", "not-allowed", "\"desc\"", "\"scale\"", "\"zoom\""} {
 		if strings.Contains(stdout.String(), forbidden) || strings.Contains(stderr.String(), forbidden) {
 			t.Fatalf("output leaked %q: stdout=%s stderr=%s", forbidden, stdout.String(), stderr.String())
 		}
@@ -106,5 +106,14 @@ func TestInvokeGroupDetailGetUsesThingManageReadonlyAdapter(t *testing.T) {
 	data := result["data"].(map[string]any)
 	if result["cloudWrites"] != false || data["detail"] == nil {
 		t.Fatalf("result = %#v", result)
+	}
+	detail := data["detail"].(map[string]any)
+	configs := detail["configs"].([]any)
+	config := configs[0].(map[string]any)
+	if config["description"] != "名称" || config["property"] != "name" || config["value"] != "二楼" {
+		t.Fatalf("config = %#v", config)
+	}
+	if detail["configCount"] == nil || detail["deviceCount"] == nil {
+		t.Fatalf("detail = %#v", detail)
 	}
 }

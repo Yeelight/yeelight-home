@@ -8,11 +8,19 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type entityLoadOptions struct {
 	PreferCache bool
 	Refresh     bool
+}
+
+type entityResolveResult struct {
+	Entities   api.EntityListResult
+	Match      api.EntitySummary
+	Candidates []api.EntitySummary
+	MatchedBy  string
 }
 
 func (app *app) loadEntities(ctx context.Context, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, options entityLoadOptions) (api.EntityListResult, error) {
@@ -39,6 +47,23 @@ func (app *app) loadEntities(ctx context.Context, endpoint api.Endpoint, profile
 	return result, nil
 }
 
+func (app *app) resolveEntity(ctx context.Context, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, target entityGetTarget) (entityResolveResult, error) {
+	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
+	if err != nil {
+		return entityResolveResult{}, err
+	}
+	match, candidates, matchedBy := findEntity(target, entities.Entities)
+	if match.ID != "" || len(candidates) > 0 || topologyCacheHits(entities) == 0 {
+		return entityResolveResult{Entities: entities, Match: match, Candidates: candidates, MatchedBy: matchedBy}, nil
+	}
+	refreshed, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{Refresh: true})
+	if err != nil {
+		return entityResolveResult{Entities: entities, Match: match, Candidates: candidates, MatchedBy: matchedBy}, nil
+	}
+	match, candidates, matchedBy = findEntity(target, refreshed.Entities)
+	return entityResolveResult{Entities: refreshed, Match: match, Candidates: candidates, MatchedBy: matchedBy}, nil
+}
+
 func (app *app) refreshTopologyCache(ctx context.Context, endpoint api.Endpoint, recordProfile string, recordRegion string, houseID string, authorization string, clientID string) (api.EntityListResult, error) {
 	return app.loadEntities(ctx, endpoint, recordProfile, recordRegion, houseID, authorization, clientID, entityLoadOptions{Refresh: true})
 }
@@ -57,7 +82,7 @@ func (app *app) refreshTopologyCacheAfterWrite(ctx context.Context, endpoint api
 		}
 		return response
 	}
-	if entities, ok := response.Internal["verifiedTopology"].(api.EntityListResult); ok && entities.Total > 0 {
+	if entities, ok := response.Internal[semantic.FieldVerifiedTopology].(api.EntityListResult); ok && entities.Total > 0 {
 		if saveErr := app.topologyCache.Save(record.Profile, record.Region, houseID, entities, time.Now()); saveErr != nil {
 			response.Warnings = appendWarning(response.Warnings, "topology_cache_save_failed")
 			return response
@@ -65,8 +90,8 @@ func (app *app) refreshTopologyCacheAfterWrite(ctx context.Context, endpoint api
 		if response.Metrics == nil {
 			response.Metrics = map[string]any{}
 		}
-		response.Metrics["topologyCacheRefreshApiCalls"] = 0
-		response.Metrics["topologyCacheWriteSource"] = "write_verification"
+		response.Metrics[semantic.FieldTopologyCacheRefreshCalls] = 0
+		response.Metrics[semantic.FieldTopologyCacheWriteSource] = "write_verification"
 		return response
 	}
 	if !intentAffectsTopologyCache(record.Intent) {
@@ -80,8 +105,8 @@ func (app *app) refreshTopologyCacheAfterWrite(ctx context.Context, endpoint api
 	if response.Metrics == nil {
 		response.Metrics = map[string]any{}
 	}
-	response.Metrics["topologyCacheRefreshApiCalls"] = entityListAPICalls(entities)
-	response.Metrics["topologyCacheWriteSource"] = "post_write_refresh"
+	response.Metrics[semantic.FieldTopologyCacheRefreshCalls] = entityListAPICalls(entities)
+	response.Metrics[semantic.FieldTopologyCacheWriteSource] = "post_write_refresh"
 	return response
 }
 
@@ -132,8 +157,8 @@ func intentAffectsTopologyCache(intent string) bool {
 
 func topologyRefreshHouseID(record operation.Prepared, response contract.Response) string {
 	for _, value := range []any{
-		response.Result["houseId"],
-		record.Payload["houseId"],
+		response.Result[semantic.FieldHouseID],
+		record.Payload[semantic.FieldHouseID],
 		record.HouseID,
 	} {
 		if houseID := valueIDString(value); houseID != "" {

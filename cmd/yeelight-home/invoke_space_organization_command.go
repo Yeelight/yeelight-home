@@ -10,6 +10,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareSpaceOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -17,7 +18,11 @@ func (app *app) prepareSpaceOrganization(ctx context.Context, request contract.R
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID),
+			"local profile houseId",
+		}), nil
 	}
 	payload, preconditions, summary, err := buildSpaceOrganizationPayload(request, houseID)
 	if err != nil {
@@ -32,6 +37,9 @@ func (app *app) prepareSpaceOrganization(ctx context.Context, request contract.R
 	})
 	if err != nil {
 		return contract.Response{}, err
+	}
+	if reason := resolveSpaceOrganizationReferences(request.Intent, payload, entities); reason != "" {
+		return spaceOrganizationClarificationResponse(request, reason), nil
 	}
 	if reason := validateSpaceOrganizationPayload(request.Intent, payload, entities); reason != "" {
 		return spaceOrganizationClarificationResponse(request, reason), nil
@@ -49,29 +57,38 @@ func (app *app) prepareSpaceOrganization(ctx context.Context, request contract.R
 func buildSpaceOrganizationPayload(request contract.Request, houseID string) (map[string]any, []string, string, error) {
 	switch request.Intent {
 	case "room.rename":
-		roomID := firstRequestString(request.Parameters, "roomId", "id")
-		name := firstRequestString(request.Parameters, "name", "newName", "roomName")
-		if roomID == "" || name == "" {
+		roomID := firstRequestString(request.Parameters, semantic.FieldRoomID, semantic.FieldID)
+		currentName := firstRequestString(request.Parameters, semantic.FieldCurrentName, semantic.FieldRoomName, semantic.FieldTargetRoomName, semantic.FieldEntityName, semantic.FieldTargetName)
+		name := firstRequestString(request.Parameters, semantic.FieldNewName, semantic.FieldName)
+		if name == "" || (roomID == "" && currentName == "") {
 			return nil, nil, "", fmt.Errorf("invalid_room_rename_payload")
 		}
-		return map[string]any{
-				"houseId": requestNumberOrString(houseID),
-				"roomId":  roomID,
-				"id":      roomID,
-				"name":    name,
-			}, []string{
-				"提交前重新读取家庭实体列表",
-				"目标房间必须属于当前家庭",
-				"提交后通过 entity.list 验证房间名称",
-			}, fmt.Sprintf("重命名房间为 %s", name), nil
-	case "room.update":
-		roomID := firstRequestString(request.Parameters, "roomId", "id")
 		payload := map[string]any{
-			"houseId": requestNumberOrString(houseID),
-			"roomId":  roomID,
-			"id":      roomID,
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.FieldRoomID:  roomID,
+			semantic.FieldID:      roomID,
+			semantic.FieldName:    name,
 		}
-		if !copyOptionalSpaceFields(payload, request.Parameters, []string{"name", "img", "gatewayDeviceId", "gatewayIds", "defaultGatewayIds", "seq", "capability"}) || roomID == "" {
+		if currentName != "" {
+			payload[semantic.FieldCurrentName] = currentName
+		}
+		return payload, []string{
+			"提交前重新读取家庭实体列表",
+			"目标房间必须属于当前家庭",
+			"提交后通过 entity.list 验证房间名称",
+		}, fmt.Sprintf("重命名房间为 %s", name), nil
+	case "room.update":
+		roomID := firstRequestString(request.Parameters, semantic.FieldRoomID, semantic.FieldID)
+		currentName := firstRequestString(request.Parameters, semantic.FieldCurrentName, semantic.FieldRoomName, semantic.FieldTargetRoomName, semantic.FieldEntityName, semantic.FieldTargetName)
+		payload := map[string]any{
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.FieldRoomID:  roomID,
+			semantic.FieldID:      roomID,
+		}
+		if currentName != "" {
+			payload[semantic.FieldCurrentName] = currentName
+		}
+		if !copyOptionalSpaceFields(payload, request.Parameters, []string{semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldImage, semantic.FieldGatewayDeviceID, semantic.FieldGatewayIDs, semantic.FieldDefaultGatewayIDs, semantic.FieldSequence, semantic.FieldCapability}) || (roomID == "" && currentName == "") {
 			return nil, nil, "", fmt.Errorf("invalid_room_update_payload")
 		}
 		return payload, []string{
@@ -80,13 +97,17 @@ func buildSpaceOrganizationPayload(request contract.Request, houseID string) (ma
 			"提交后通过 entity.list 验证房间名称；图片、网关和能力字段按云端写入响应确认",
 		}, "更新房间信息", nil
 	case "area.update":
-		areaID := firstRequestString(request.Parameters, "areaId", "id")
+		areaID := firstRequestString(request.Parameters, semantic.FieldAreaID, semantic.FieldID)
+		currentName := firstRequestString(request.Parameters, semantic.FieldCurrentName, semantic.FieldAreaName, semantic.FieldEntityName, semantic.FieldTargetName)
 		payload := map[string]any{
-			"houseId": requestNumberOrString(houseID),
-			"areaId":  areaID,
-			"id":      areaID,
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.FieldAreaID:  areaID,
+			semantic.FieldID:      areaID,
 		}
-		if !copyOptionalSpaceFields(payload, request.Parameters, []string{"name", "desc", "icon", "parentId", "roomIds"}) || areaID == "" {
+		if currentName != "" {
+			payload[semantic.FieldCurrentName] = currentName
+		}
+		if !copyOptionalSpaceFields(payload, request.Parameters, []string{semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldParentID, semantic.FieldRoomIDs}) || (areaID == "" && currentName == "") {
 			return nil, nil, "", fmt.Errorf("invalid_area_update_payload")
 		}
 		return payload, []string{
@@ -95,45 +116,69 @@ func buildSpaceOrganizationPayload(request contract.Request, houseID string) (ma
 			"提交后通过 entity.list 验证区域名称",
 		}, "更新区域信息", nil
 	case "device.rename":
-		deviceID := firstRequestString(request.Parameters, "deviceId", "id", "entityId")
-		name := firstRequestString(request.Parameters, "name", "newName", "deviceName", "alias")
-		if deviceID == "" || name == "" {
+		deviceID := firstRequestString(request.Parameters, semantic.FieldDeviceID, semantic.FieldID, semantic.FieldEntityID)
+		currentName := firstRequestString(request.Parameters, semantic.FieldCurrentName, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName)
+		name := firstRequestString(request.Parameters, semantic.FieldNewName, semantic.FieldName, semantic.FieldAlias)
+		if name == "" || (deviceID == "" && currentName == "") {
 			return nil, nil, "", fmt.Errorf("invalid_device_rename_payload")
 		}
-		return map[string]any{
-				"houseId":  requestNumberOrString(houseID),
-				"deviceId": deviceID,
-				"id":       deviceID,
-				"name":     name,
-			}, []string{
-				"提交前重新读取家庭实体列表",
-				"目标设备必须属于当前家庭",
-				"提交后通过 entity.list 验证设备名称",
-			}, fmt.Sprintf("重命名设备为 %s", name), nil
+		payload := map[string]any{
+			semantic.FieldHouseID:  requestNumberOrString(houseID),
+			semantic.FieldDeviceID: deviceID,
+			semantic.FieldID:       deviceID,
+			semantic.FieldName:     name,
+		}
+		if currentName != "" {
+			payload[semantic.FieldCurrentName] = currentName
+		}
+		return payload, []string{
+			"提交前重新读取家庭实体列表",
+			"目标设备必须属于当前家庭",
+			"提交后通过 entity.list 验证设备名称",
+		}, fmt.Sprintf("重命名设备为 %s", name), nil
 	case "device.move":
-		deviceID := firstRequestString(request.Parameters, "deviceId", "id", "entityId")
-		roomID := firstRequestString(request.Parameters, "roomId", "targetRoomId", "targetId")
-		if deviceID == "" || roomID == "" {
+		deviceID := firstRequestString(request.Parameters, semantic.FieldDeviceID, semantic.FieldID, semantic.FieldEntityID)
+		currentName := firstRequestString(request.Parameters, semantic.FieldCurrentName, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName)
+		roomID := firstRequestString(request.Parameters, semantic.FieldRoomID, semantic.FieldTargetRoomID, semantic.FieldTargetID)
+		targetRoomName := firstRequestString(request.Parameters, semantic.FieldTargetRoomName, semantic.FieldRoomName)
+		if (deviceID == "" && currentName == "") || (roomID == "" && targetRoomName == "") {
 			return nil, nil, "", fmt.Errorf("invalid_device_move_payload")
 		}
-		return map[string]any{
-				"houseId":  requestNumberOrString(houseID),
-				"deviceId": deviceID,
-				"id":       deviceID,
-				"roomId":   roomID,
-			}, []string{
-				"提交前重新读取家庭实体列表",
-				"目标设备和目标房间必须属于当前家庭",
-				"提交后通过 entity.list 验证设备 roomId",
-			}, "移动设备到指定房间", nil
-	case "group.update":
-		groupID := firstRequestString(request.Parameters, "groupId", "id")
 		payload := map[string]any{
-			"houseId": requestNumberOrString(houseID),
-			"groupId": groupID,
-			"id":      groupID,
+			semantic.FieldHouseID:  requestNumberOrString(houseID),
+			semantic.FieldDeviceID: deviceID,
+			semantic.FieldID:       deviceID,
+			semantic.FieldRoomID:   roomID,
 		}
-		if !copyOptionalSpaceFields(payload, request.Parameters, []string{"name", "desc", "icon", "roomId"}) || groupID == "" {
+		if currentName != "" {
+			payload[semantic.FieldCurrentName] = currentName
+		}
+		if targetRoomName != "" {
+			payload[semantic.FieldTargetRoomName] = targetRoomName
+		}
+		return payload, []string{
+			"提交前重新读取家庭实体列表",
+			"目标设备和目标房间必须属于当前家庭",
+			"提交后通过 entity.list 验证设备 roomId",
+		}, "移动设备到指定房间", nil
+	case "group.update":
+		groupID := firstRequestString(request.Parameters, semantic.FieldGroupID, semantic.FieldID)
+		currentName := firstRequestString(request.Parameters, semantic.FieldCurrentName, semantic.FieldGroupName, semantic.FieldEntityName, semantic.FieldTargetName)
+		targetRoomName := firstRequestString(request.Parameters, semantic.FieldTargetRoomName, semantic.FieldRoomName)
+		payload := map[string]any{
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.FieldGroupID: groupID,
+			semantic.FieldID:      groupID,
+		}
+		if currentName != "" {
+			payload[semantic.FieldCurrentName] = currentName
+		}
+		copied := copyOptionalSpaceFields(payload, request.Parameters, []string{semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldRoomID})
+		if targetRoomName != "" {
+			payload[semantic.FieldTargetRoomName] = targetRoomName
+			copied = true
+		}
+		if !copied || (groupID == "" && currentName == "") {
 			return nil, nil, "", fmt.Errorf("invalid_group_update_payload")
 		}
 		return payload, []string{
@@ -157,20 +202,20 @@ func copyOptionalSpaceFields(payload map[string]any, parameters map[string]any, 
 		switch typed := value.(type) {
 		case string:
 			if strings.TrimSpace(typed) != "" {
-				payload[key] = strings.TrimSpace(typed)
+				payload[semantic.InternalField(semantic.DomainCommon, key)] = strings.TrimSpace(typed)
 				copied = true
 			}
 		case float64, int, int64, bool:
-			payload[key] = typed
+			payload[semantic.InternalField(semantic.DomainCommon, key)] = typed
 			copied = true
 		case []any:
 			if len(typed) > 0 {
-				payload[key] = typed
+				payload[semantic.InternalField(semantic.DomainCommon, key)] = typed
 				copied = true
 			}
 		case map[string]any:
 			if len(typed) > 0 {
-				payload[key] = typed
+				payload[semantic.InternalField(semantic.DomainCommon, key)] = typed
 				copied = true
 			}
 		}
@@ -178,20 +223,121 @@ func copyOptionalSpaceFields(payload map[string]any, parameters map[string]any, 
 	return copied
 }
 
+func resolveSpaceOrganizationReferences(intent string, payload map[string]any, entities api.EntityListResult) string {
+	switch intent {
+	case "room.rename", "room.update":
+		if valueIDString(payload[semantic.FieldRoomID]) != "" {
+			return ""
+		}
+		currentName := strings.TrimSpace(requestString(payload[semantic.FieldCurrentName]))
+		if currentName == "" {
+			if intent == "room.update" {
+				return "invalid_room_update_payload"
+			}
+			return "invalid_room_rename_payload"
+		}
+		match, ambiguous := findUniqueEntityByName(entities, "room", currentName)
+		if ambiguous {
+			return "ambiguous_room_reference"
+		}
+		if match.ID == "" {
+			return "invalid_room_reference"
+		}
+		payload[semantic.FieldRoomID] = match.ID
+		payload[semantic.FieldID] = match.ID
+	case "device.rename", "device.move":
+		if valueIDString(payload[semantic.FieldDeviceID]) == "" {
+			currentName := strings.TrimSpace(requestString(payload[semantic.FieldCurrentName]))
+			if currentName == "" {
+				return "invalid_device_reference"
+			}
+			match, ambiguous := findUniqueEntityByName(entities, "device", currentName)
+			if ambiguous {
+				return "ambiguous_device_reference"
+			}
+			if match.ID == "" {
+				return "invalid_device_reference"
+			}
+			payload[semantic.FieldDeviceID] = match.ID
+			payload[semantic.FieldID] = match.ID
+		}
+		if intent == "device.move" && valueIDString(payload[semantic.FieldRoomID]) == "" {
+			targetRoomName := strings.TrimSpace(requestString(payload[semantic.FieldTargetRoomName]))
+			if targetRoomName == "" {
+				return "invalid_target_room_reference"
+			}
+			match, ambiguous := findUniqueEntityByName(entities, "room", targetRoomName)
+			if ambiguous {
+				return "ambiguous_target_room_reference"
+			}
+			if match.ID == "" {
+				return "invalid_target_room_reference"
+			}
+			payload[semantic.FieldRoomID] = match.ID
+		}
+	case "group.update":
+		if valueIDString(payload[semantic.FieldGroupID]) == "" {
+			currentName := strings.TrimSpace(requestString(payload[semantic.FieldCurrentName]))
+			if currentName == "" {
+				return "invalid_group_reference"
+			}
+			match, ambiguous := findUniqueEntityByName(entities, "group", currentName)
+			if ambiguous {
+				return "ambiguous_group_reference"
+			}
+			if match.ID == "" {
+				return "invalid_group_reference"
+			}
+			payload[semantic.FieldGroupID] = match.ID
+			payload[semantic.FieldID] = match.ID
+		}
+		if valueIDString(payload[semantic.FieldRoomID]) == "" {
+			targetRoomName := strings.TrimSpace(requestString(payload[semantic.FieldTargetRoomName]))
+			if targetRoomName != "" {
+				match, ambiguous := findUniqueEntityByName(entities, "room", targetRoomName)
+				if ambiguous {
+					return "ambiguous_target_room_reference"
+				}
+				if match.ID == "" {
+					return "invalid_target_room_reference"
+				}
+				payload[semantic.FieldRoomID] = match.ID
+			}
+		}
+	case "area.update":
+		if valueIDString(payload[semantic.FieldAreaID]) == "" {
+			currentName := strings.TrimSpace(requestString(payload[semantic.FieldCurrentName]))
+			if currentName == "" {
+				return "invalid_area_update_payload"
+			}
+			match, ambiguous := findUniqueEntityByName(entities, "area", currentName)
+			if ambiguous {
+				return "ambiguous_area_reference"
+			}
+			if match.ID == "" {
+				return "invalid_area_reference"
+			}
+			payload[semantic.FieldAreaID] = match.ID
+			payload[semantic.FieldID] = match.ID
+		}
+	}
+	return ""
+}
+
 func validateSpaceOrganizationPayload(intent string, payload map[string]any, entities api.EntityListResult) string {
 	switch intent {
 	case "room.rename", "room.update":
-		roomID := valueIDString(payload["roomId"])
+		roomID := valueIDString(payload[semantic.FieldRoomID])
 		current, ok := findEntitySummary(entities, "room", roomID)
 		if !ok {
 			return "invalid_room_reference"
 		}
-		name := strings.TrimSpace(requestString(payload["name"]))
+		name := strings.TrimSpace(requestString(payload[semantic.FieldName]))
 		if intent == "room.update" && name == "" {
 			if current.Name == "" {
 				return "invalid_room_update_payload"
 			}
-			payload["name"] = current.Name
+			payload[semantic.FieldName] = current.Name
 			name = current.Name
 		}
 		for _, entity := range entities.Entities {
@@ -205,17 +351,17 @@ func validateSpaceOrganizationPayload(intent string, payload map[string]any, ent
 			}
 		}
 	case "area.update":
-		areaID := valueIDString(payload["areaId"])
+		areaID := valueIDString(payload[semantic.FieldAreaID])
 		if !entityExists(entities, "area", areaID) {
 			return "invalid_area_reference"
 		}
-		if parentID := valueIDString(payload["parentId"]); parentID != "" && parentID != areaID && !entityExists(entities, "area", parentID) {
+		if parentID := valueIDString(payload[semantic.FieldParentID]); parentID != "" && parentID != areaID && !entityExists(entities, "area", parentID) {
 			return "invalid_parent_area_reference"
 		}
-		if parentID := valueIDString(payload["parentId"]); parentID == areaID {
+		if parentID := valueIDString(payload[semantic.FieldParentID]); parentID == areaID {
 			return "invalid_parent_area_reference"
 		}
-		if roomIDs, ok := payload["roomIds"].([]any); ok {
+		if roomIDs, ok := payload[semantic.FieldRoomIDs].([]any); ok {
 			if len(roomIDs) > 50 {
 				return "area_room_limit_exceeded"
 			}
@@ -225,7 +371,7 @@ func validateSpaceOrganizationPayload(intent string, payload map[string]any, ent
 				}
 			}
 		}
-		if name := strings.TrimSpace(requestString(payload["name"])); name != "" {
+		if name := strings.TrimSpace(requestString(payload[semantic.FieldName])); name != "" {
 			for _, entity := range entities.Entities {
 				if entity.Type == "area" && entity.ID != areaID && entity.Name == name {
 					return "area_name_already_exists"
@@ -233,25 +379,25 @@ func validateSpaceOrganizationPayload(intent string, payload map[string]any, ent
 			}
 		}
 	case "device.rename":
-		if !entityExists(entities, "device", valueIDString(payload["deviceId"])) {
+		if !entityExists(entities, "device", valueIDString(payload[semantic.FieldDeviceID])) {
 			return "invalid_device_reference"
 		}
 	case "device.move":
-		if !entityExists(entities, "device", valueIDString(payload["deviceId"])) {
+		if !entityExists(entities, "device", valueIDString(payload[semantic.FieldDeviceID])) {
 			return "invalid_device_reference"
 		}
-		if !entityExists(entities, "room", valueIDString(payload["roomId"])) {
+		if !entityExists(entities, "room", valueIDString(payload[semantic.FieldRoomID])) {
 			return "invalid_target_room_reference"
 		}
 	case "group.update":
-		groupID := valueIDString(payload["groupId"])
+		groupID := valueIDString(payload[semantic.FieldGroupID])
 		if !entityExists(entities, "group", groupID) {
 			return "invalid_group_reference"
 		}
-		if roomID := valueIDString(payload["roomId"]); roomID != "" && !entityExists(entities, "room", roomID) {
+		if roomID := valueIDString(payload[semantic.FieldRoomID]); roomID != "" && !entityExists(entities, "room", roomID) {
 			return "invalid_target_room_reference"
 		}
-		if name := strings.TrimSpace(requestString(payload["name"])); name != "" {
+		if name := strings.TrimSpace(requestString(payload[semantic.FieldName])); name != "" {
 			for _, entity := range entities.Entities {
 				if entity.Type == "group" && entity.ID != groupID && entity.Name == name {
 					return "group_name_already_exists"
@@ -270,32 +416,45 @@ func spaceOrganizationPreview(intent string, payload map[string]any, entities ap
 	var entityID string
 	switch intent {
 	case "room.rename", "room.update":
-		entityType, entityID = "room", valueIDString(payload["roomId"])
+		entityType, entityID = "room", valueIDString(payload[semantic.FieldRoomID])
 	case "area.update":
-		entityType, entityID = "area", valueIDString(payload["areaId"])
+		entityType, entityID = "area", valueIDString(payload[semantic.FieldAreaID])
 	case "device.rename", "device.move":
-		entityType, entityID = "device", valueIDString(payload["deviceId"])
+		entityType, entityID = "device", valueIDString(payload[semantic.FieldDeviceID])
 	case "group.update":
-		entityType, entityID = "group", valueIDString(payload["groupId"])
+		entityType, entityID = "group", valueIDString(payload[semantic.FieldGroupID])
 	default:
 		return preview
 	}
 	if current, ok := findEntitySummary(entities, entityType, entityID); ok {
-		preview["current"] = map[string]any{
-			"type":   current.Type,
-			"id":     current.ID,
-			"name":   current.Name,
-			"roomId": current.RoomID,
+		preview[semantic.FieldCurrent] = map[string]any{
+			semantic.FieldType:   current.Type,
+			semantic.FieldID:     current.ID,
+			semantic.FieldName:   current.Name,
+			semantic.FieldRoomID: current.RoomID,
 		}
 	}
 	planned := map[string]any{}
-	for _, key := range []string{"name", "desc", "icon", "parentId", "roomIds", "roomId", "img", "gatewayDeviceId", "gatewayIds", "defaultGatewayIds", "seq", "capability"} {
-		if value, ok := payload[key]; ok {
+	for _, key := range []string{
+		semantic.FieldName,
+		semantic.FieldDescription,
+		semantic.FieldIcon,
+		semantic.FieldParentID,
+		semantic.FieldRoomIDs,
+		semantic.FieldRoomID,
+		semantic.FieldImage,
+		semantic.FieldGatewayDeviceID,
+		semantic.FieldGatewayIDs,
+		semantic.FieldDefaultGatewayIDs,
+		semantic.FieldSequence,
+		semantic.FieldCapability,
+	} {
+		if value, ok := payload[semantic.InternalField(semantic.DomainCommon, key)]; ok {
 			planned[key] = value
 		}
 	}
 	if len(planned) > 0 {
-		preview["planned"] = planned
+		preview[semantic.FieldPlanned] = planned
 	}
 	return preview
 }
@@ -309,22 +468,34 @@ func findEntitySummary(entities api.EntityListResult, entityType string, entityI
 	return api.EntitySummary{}, false
 }
 
+func findUniqueEntityByName(entities api.EntityListResult, entityType string, name string) (api.EntitySummary, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return api.EntitySummary{}, false
+	}
+	match, candidates, _ := findEntity(entityGetTarget{name: name, entityType: entityType}, entities.Entities)
+	if match.ID != "" {
+		return match, false
+	}
+	return api.EntitySummary{}, len(candidates) > 0
+}
+
 func spaceOrganizationAcceptedFields(intent string) []string {
 	switch intent {
 	case "room.rename":
-		return []string{"parameters.houseId", "parameters.roomId", "parameters.name"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldRoomID, semantic.FieldCurrentName, semantic.FieldRoomName, semantic.FieldNewName, semantic.FieldName)
 	case "room.update":
-		return []string{"parameters.houseId", "parameters.roomId", "parameters.name", "parameters.img", "parameters.gatewayDeviceId", "parameters.gatewayIds", "parameters.defaultGatewayIds", "parameters.seq", "parameters.capability"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldRoomID, semantic.FieldCurrentName, semantic.FieldRoomName, semantic.FieldTargetRoomName, semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldImage, semantic.FieldGatewayDeviceID, semantic.FieldGatewayIDs, semantic.FieldDefaultGatewayIDs, semantic.FieldSequence, semantic.FieldCapability)
 	case "area.update":
-		return []string{"parameters.houseId", "parameters.areaId", "parameters.name", "parameters.desc", "parameters.icon", "parameters.parentId", "parameters.roomIds"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldAreaID, semantic.FieldCurrentName, semantic.FieldAreaName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldParentID, semantic.FieldRoomIDs)
 	case "device.rename":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.name"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldDeviceID, semantic.FieldCurrentName, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldNewName, semantic.FieldName, semantic.FieldAlias)
 	case "device.move":
-		return []string{"parameters.houseId", "parameters.deviceId", "parameters.roomId"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldDeviceID, semantic.FieldCurrentName, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldRoomID, semantic.FieldTargetRoomID, semantic.FieldTargetRoomName, semantic.FieldRoomName)
 	case "group.update":
-		return []string{"parameters.houseId", "parameters.groupId", "parameters.name", "parameters.desc", "parameters.icon", "parameters.roomId"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldGroupID, semantic.FieldCurrentName, semantic.FieldGroupName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldRoomID, semantic.FieldTargetRoomName, semantic.FieldRoomName)
 	default:
-		return []string{"parameters.houseId"}
+		return semanticParameterPaths(semantic.FieldHouseID)
 	}
 }
 
@@ -333,10 +504,10 @@ func spaceOrganizationClarificationResponse(request contract.Request, reason str
 }
 
 func validateRoomUpdateGatewayReferences(payload map[string]any, entities api.EntityListResult) string {
-	if gatewayID := valueIDString(payload["gatewayDeviceId"]); gatewayID != "" && !entityExists(entities, "device", gatewayID) {
+	if gatewayID := valueIDString(payload[semantic.FieldGatewayDeviceID]); gatewayID != "" && !entityExists(entities, "device", gatewayID) {
 		return "invalid_gateway_device_reference"
 	}
-	for _, key := range []string{"gatewayIds", "defaultGatewayIds"} {
+	for _, key := range []string{semantic.FieldGatewayIDs, semantic.FieldDefaultGatewayIDs} {
 		for _, gatewayID := range valueIDList(payload[key]) {
 			if !entityExists(entities, "device", gatewayID) {
 				return "invalid_gateway_device_reference"
@@ -369,7 +540,7 @@ func (app *app) prepareSpaceBatchOrganization(ctx context.Context, request contr
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	payload, preconditions, summary, err := buildSpaceBatchOrganizationPayload(request, houseID)
 	if err != nil {
@@ -384,6 +555,9 @@ func (app *app) prepareSpaceBatchOrganization(ctx context.Context, request contr
 	})
 	if err != nil {
 		return contract.Response{}, err
+	}
+	if reason := resolveSpaceBatchOrganizationPayload(request.Intent, payload, entities); reason != "" {
+		return spaceBatchOrganizationClarificationResponse(request, reason), nil
 	}
 	if reason := validateSpaceBatchOrganizationPayload(request.Intent, payload, entities); reason != "" {
 		return spaceBatchOrganizationClarificationResponse(request, reason), nil
@@ -401,13 +575,16 @@ func (app *app) prepareSpaceBatchOrganization(ctx context.Context, request contr
 func buildSpaceBatchOrganizationPayload(request contract.Request, houseID string) (map[string]any, []string, string, error) {
 	switch request.Intent {
 	case "device.move_room.batch":
-		items, ok := normalizeDeviceRoomBatchItems(request.Parameters["items"])
+		items, ok := normalizeDeviceRoomBatchItems(request.Parameters[semantic.FieldItems])
 		if !ok {
-			return nil, nil, "", fmt.Errorf("invalid_device_move_room_batch_payload")
+			items, ok = normalizeDeviceRoomBatchNaturalItems(request.Parameters)
+			if !ok {
+				return nil, nil, "", fmt.Errorf("invalid_device_move_room_batch_payload")
+			}
 		}
 		return map[string]any{
-				"houseId": requestNumberOrString(houseID),
-				"items":   items,
+				semantic.FieldHouseID: requestNumberOrString(houseID),
+				semantic.FieldItems:   items,
 			}, []string{
 				"提交前重新读取家庭实体列表",
 				"每个目标设备和目标房间必须属于当前家庭",
@@ -437,8 +614,8 @@ func normalizeDeviceRoomBatchItems(value any) (map[string]any, bool) {
 			if !ok {
 				return nil, false
 			}
-			deviceID := firstRequestString(item, "deviceId", "id", "entityId")
-			roomID := firstRequestString(item, "roomId", "targetRoomId", "targetId")
+			deviceID := firstRequestString(item, semantic.FieldDeviceID, semantic.FieldID, semantic.FieldEntityID, semantic.FieldDeviceName, semantic.FieldEntityName, semantic.FieldName)
+			roomID := firstRequestString(item, semantic.FieldRoomID, semantic.FieldTargetRoomID, semantic.FieldTargetID, semantic.FieldTargetRoomName)
 			if deviceID == "" || roomID == "" {
 				return nil, false
 			}
@@ -456,10 +633,74 @@ func normalizeDeviceRoomBatchItems(value any) (map[string]any, bool) {
 	return result, true
 }
 
+func normalizeDeviceRoomBatchNaturalItems(parameters map[string]any) (map[string]any, bool) {
+	deviceNames := requestStringList(parameters[semantic.FieldDeviceNames])
+	if len(deviceNames) == 0 || len(deviceNames) > 20 {
+		return nil, false
+	}
+	targetRoom := firstRequestString(parameters, semantic.FieldRoomID, semantic.FieldTargetRoomID, semantic.FieldTargetRoomName)
+	if targetRoom == "" {
+		return nil, false
+	}
+	result := map[string]any{}
+	for _, deviceName := range deviceNames {
+		deviceName = strings.TrimSpace(deviceName)
+		if deviceName == "" {
+			return nil, false
+		}
+		if _, exists := result[deviceName]; exists {
+			return nil, false
+		}
+		result[deviceName] = targetRoom
+	}
+	return result, true
+}
+
+func resolveSpaceBatchOrganizationPayload(intent string, payload map[string]any, entities api.EntityListResult) string {
+	if intent != "device.move_room.batch" {
+		return ""
+	}
+	items, ok := payload[semantic.FieldItems].(map[string]any)
+	if !ok || len(items) == 0 {
+		return "invalid_device_move_room_batch_payload"
+	}
+	resolved := map[string]any{}
+	for rawDevice, rawRoom := range items {
+		deviceID := strings.TrimSpace(rawDevice)
+		if !entityExists(entities, "device", deviceID) {
+			match, candidates, _ := findEntity(entityGetTarget{name: deviceID, entityType: "device"}, entities.Entities)
+			if len(candidates) > 1 {
+				return "ambiguous_device_reference"
+			}
+			if match.ID == "" {
+				return "invalid_device_reference"
+			}
+			deviceID = match.ID
+		}
+		roomID := valueIDString(rawRoom)
+		if !entityExists(entities, "room", roomID) {
+			match, candidates, _ := findEntity(entityGetTarget{name: roomID, entityType: "room"}, entities.Entities)
+			if len(candidates) > 1 {
+				return "ambiguous_target_room_reference"
+			}
+			if match.ID == "" {
+				return "invalid_target_room_reference"
+			}
+			roomID = match.ID
+		}
+		if _, exists := resolved[deviceID]; exists {
+			return "duplicate_device_reference"
+		}
+		resolved[deviceID] = roomID
+	}
+	payload[semantic.FieldItems] = resolved
+	return ""
+}
+
 func validateSpaceBatchOrganizationPayload(intent string, payload map[string]any, entities api.EntityListResult) string {
 	switch intent {
 	case "device.move_room.batch":
-		items, ok := payload["items"].(map[string]any)
+		items, ok := payload[semantic.FieldItems].(map[string]any)
 		if !ok || len(items) == 0 || len(items) > 20 {
 			return "invalid_device_move_room_batch_payload"
 		}
@@ -481,7 +722,7 @@ func spaceBatchOrganizationPreview(intent string, payload map[string]any, entiti
 	if intent != "device.move_room.batch" {
 		return map[string]any{}
 	}
-	items, _ := payload["items"].(map[string]any)
+	items, _ := payload[semantic.FieldItems].(map[string]any)
 	deviceIDs := make([]string, 0, len(items))
 	for deviceID := range items {
 		deviceIDs = append(deviceIDs, deviceID)
@@ -490,27 +731,38 @@ func spaceBatchOrganizationPreview(intent string, payload map[string]any, entiti
 	previewItems := make([]any, 0, len(deviceIDs))
 	for _, deviceID := range deviceIDs {
 		item := map[string]any{
-			"deviceId":     deviceID,
-			"targetRoomId": valueIDString(items[deviceID]),
+			semantic.FieldDeviceID:     deviceID,
+			semantic.FieldTargetRoomID: valueIDString(items[deviceID]),
 		}
 		if current, ok := findEntitySummary(entities, "device", deviceID); ok {
-			item["currentRoomId"] = current.RoomID
-			item["deviceName"] = current.Name
+			item[semantic.FieldCurrentRoomID] = current.RoomID
+			item[semantic.FieldDeviceName] = current.Name
 		}
 		previewItems = append(previewItems, item)
 	}
 	return map[string]any{
-		"itemCount": len(previewItems),
-		"items":     previewItems,
+		semantic.FieldItemCount: len(previewItems),
+		semantic.FieldItems:     previewItems,
 	}
 }
 
 func spaceBatchOrganizationAcceptedFields(intent string) []string {
 	switch intent {
 	case "device.move_room.batch":
-		return []string{"parameters.houseId", "parameters.items[].deviceId", "parameters.items[].roomId", "parameters.items as {deviceId: roomId}"}
+		return []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semantic.ParameterPath(semantic.ArrayField(semantic.FieldItems), semantic.FieldDeviceID),
+			semantic.ParameterPath(semantic.ArrayField(semantic.FieldItems), semantic.FieldDeviceName),
+			semantic.ParameterPath(semantic.ArrayField(semantic.FieldItems), semantic.FieldRoomID),
+			semantic.ParameterPath(semantic.ArrayField(semantic.FieldItems), semantic.FieldTargetRoomName),
+			semantic.ParameterPath(semantic.FieldDeviceNames),
+			semantic.ParameterPath(semantic.FieldTargetRoomName),
+			semantic.ParameterPath(semantic.FieldRoomID),
+			semantic.ParameterPath(semantic.FieldItems) + " as {deviceId: roomId}",
+			semantic.ParameterPath(semantic.FieldItems) + " as {deviceName: targetRoomName}",
+		}
 	default:
-		return []string{"parameters.houseId"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID)}
 	}
 }
 
@@ -537,16 +789,16 @@ func (app *app) executeSpaceBatchOrganization(ctx context.Context, request contr
 }
 
 func (app *app) executeDeviceMove(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
-	deviceID := valueIDString(firstNonNil(record.Payload["deviceId"], record.Payload["id"]))
-	roomID := valueIDString(record.Payload["roomId"])
+	deviceID := valueIDString(firstNonNil(record.Payload[semantic.FieldDeviceID], record.Payload[semantic.FieldID]))
+	roomID := valueIDString(record.Payload[semantic.FieldRoomID])
 	if deviceID == "" || roomID == "" {
 		return contract.Response{}, fmt.Errorf("invalid_device_move_payload")
 	}
 	batchRecord := record
 	batchRecord.Intent = "device.move_room.batch"
 	batchRecord.Payload = map[string]any{
-		"houseId": record.HouseID,
-		"items": map[string]any{
+		semantic.FieldHouseID: record.HouseID,
+		semantic.FieldItems: map[string]any{
 			deviceID: roomID,
 		},
 	}
@@ -565,6 +817,6 @@ func (app *app) executeDeviceMove(ctx context.Context, request contract.Request,
 		return contract.Response{}, err
 	}
 	response := spaceBatchOrganizationExecuteResponse(request, batchRecord, result)
-	response.Result["capability"] = "device.move"
+	response.Result[semantic.FieldCapability] = "device.move"
 	return response, nil
 }

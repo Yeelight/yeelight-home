@@ -118,19 +118,17 @@
       "houseId": "house-1",
       "sceneId": "scene-1",
       "name": "回家灯光更新",
-      "details": [
+      "actions": [
         {
-          "typeId": 2,
-          "resId": "device-1",
-          "resName": "主灯",
+          "targetType": "device",
+          "targetId": "device-1",
+          "targetName": "主灯",
           "rank": 0,
           "action": 0,
-          "params": {
-            "set": {
-              "p": true,
-              "l": 60,
-              "ct": 3000
-            }
+          "set": {
+            "power": true,
+            "brightness": 60,
+            "colorTemperature": 3000
           }
         }
       ]
@@ -305,8 +303,8 @@
     "intent": "home.sort.list",
     "parameters": {
       "houseId": "house-1",
-      "typeId": 2,
-      "resId": "device-1",
+      "targetType": "device",
+      "targetId": "device-1",
       "roomId": "room-1"
     }
   },
@@ -619,7 +617,7 @@
     "intent": "thing.schema.get",
     "parameters": {
       "houseId": "house-1",
-      "productId": "1001"
+      "capabilityPid": "1001"
     }
   },
   {
@@ -630,7 +628,7 @@
     "intent": "thing.schema.event.list",
     "parameters": {
       "houseId": "house-1",
-      "productId": "1001"
+      "capabilityPid": "1001"
     }
   },
   {
@@ -646,13 +644,13 @@
   },
   {
     "contractVersion": "1.0",
-    "requestId": "fixture-product-pedia-material-code-1",
+    "requestId": "fixture-product-pedia-sku-1",
     "locale": "zh-CN",
     "utterance": "帮我找一下 1-000003268 的说明书",
     "intent": "product.pedia.search",
     "parameters": {
       "multiField": "1-000003268",
-      "materialCode": "1-000003268",
+      "skuCode": "1-000003268",
       "limit": 5
     }
   },
@@ -697,7 +695,7 @@
     "intent": "thing.product.info.batch_get",
     "parameters": {
       "houseId": "house-1",
-      "productId": "1001"
+      "capabilityPid": "1001"
     }
   },
   {
@@ -708,7 +706,7 @@
     "intent": "thing.product.info.v3.batch_get",
     "parameters": {
       "houseId": "house-1",
-      "productId": "1001",
+      "capabilityPid": "1001",
       "version": 2
     }
   },
@@ -737,8 +735,8 @@
     ],
     "parameters": {
       "houseId": "house-1",
-      "typeId": 2,
-      "resId": "device-1",
+      "targetType": "device",
+      "targetId": "device-1",
       "rank": 1
     }
   },
@@ -755,8 +753,8 @@
       "roomId": "room-1",
       "items": [
         {
-          "typeId": 2,
-          "resId": "device-1",
+          "targetType": "device",
+          "targetId": "device-1",
           "rank": 1
         }
       ]
@@ -772,13 +770,13 @@
       "houseId": "house-1",
       "items": [
         {
-          "typeId": 2,
-          "resId": "device-1",
+          "targetType": "device",
+          "targetId": "device-1",
           "rank": 1
         },
         {
-          "typeId": 6,
-          "resId": "scene-1",
+          "targetType": "scene",
+          "targetId": "scene-1",
           "rank": 2
         }
       ]
@@ -803,8 +801,8 @@
         {
           "id": "btn-1",
           "keyValue": 1,
-          "resId": "scene-1",
-          "resType": 6,
+          "targetId": "scene-1",
+          "targetType": "scene",
           "visible": 1
         }
       ]
@@ -827,10 +825,10 @@
       "houseId": "house-1",
       "buttonEventId": "event-1",
       "alias": "单击",
-      "details": [
+      "actions": [
         {
-          "resId": "scene-1",
-          "typeId": 6
+          "targetId": "scene-1",
+          "targetType": "scene"
         }
       ]
     }
@@ -854,20 +852,20 @@
         {
           "buttonEventId": "event-1",
           "alias": "单击",
-          "details": [
+          "actions": [
             {
-              "resId": "scene-1",
-              "typeId": 6
+              "targetId": "scene-1",
+              "targetType": "scene"
             }
           ]
         },
         {
           "buttonEventId": "event-2",
           "alias": "双击",
-          "details": [
+          "actions": [
             {
-              "resId": "scene-2",
-              "typeId": 6
+              "targetId": "scene-2",
+              "targetType": "scene"
             }
           ]
         }
@@ -930,12 +928,13 @@
     ],
     "parameters": {
       "houseId": "house-1",
-      "details": [
+      "actions": [
         {
           "id": "detail-1",
           "index": 1,
           "mode": "scene",
-          "resId": "scene-1"
+          "targetId": "scene-1",
+          "targetType": "scene"
         }
       ]
     }
@@ -975,31 +974,25 @@
       "houseId": "house-1",
       "automationId": "automation-1",
       "name": "回家开灯更新",
-      "startTime": "00:00:00",
-      "endTime": "23:59:59",
-      "repeatType": 2,
-      "repeatValue": "0x7f",
-      "params": {
-        "type": "and",
-        "conditions": [
-          {
-            "type": "alarm",
-            "clock": "18:00:00"
-          }
-        ]
+      "activeWindow": {
+        "start": "00:00:00",
+        "end": "23:59:59"
+      },
+      "repeat": "daily",
+      "trigger": {
+        "conditionKind": "alarm",
+        "time": "18:00:00"
       },
       "actions": [
         {
-          "typeId": 2,
-          "resId": "device-1",
-          "resName": "主灯",
+          "targetType": "device",
+          "targetId": "device-1",
+          "targetName": "主灯",
           "rank": 0,
-          "params": {
-            "set": {
-              "p": true,
-              "l": 60,
-              "ct": 3000
-            }
+          "set": {
+            "power": true,
+            "brightness": 60,
+            "colorTemperature": 3000
           }
         }
       ]
@@ -1210,8 +1203,8 @@
     "intent": "node.sorted_device.list",
     "parameters": {
       "houseId": "house-1",
-      "resType": "1",
-      "resId": "room-1"
+      "targetType": "room",
+      "targetId": "room-1"
     }
   },
   {
@@ -1278,7 +1271,7 @@
     "utterance": "查看这个产品的帮助问题",
     "intent": "thing.product_faq.list",
     "parameters": {
-      "productId": "1001"
+      "capabilityPid": "1001"
     }
   },
   {
@@ -1314,7 +1307,7 @@
     "utterance": "查看亮度组件定义",
     "intent": "thing.component.get",
     "parameters": {
-      "componentId": "81"
+      "componentKey": "81"
     }
   },
   {
@@ -1356,7 +1349,7 @@
     "utterance": "分页查看这个产品的帮助 FAQ",
     "intent": "thing.product_faq.page.list",
     "parameters": {
-      "productId": "pid-1",
+      "capabilityPid": "product-1",
       "pageNo": 1,
       "pageSize": 20
     }
@@ -1368,7 +1361,7 @@
     "utterance": "分页查看这个产品的帮助 FAQ 详情",
     "intent": "thing.product_faq.page_detail.list",
     "parameters": {
-      "pid": "pid-1",
+      "capabilityPid": "product-1",
       "pageNo": 1,
       "pageSize": 20
     }
@@ -1395,8 +1388,8 @@
             "roomId": "401398",
             "items": [
               {
-                "entityType": "device",
-                "resId": "50018330",
+                "targetType": "device",
+                "targetId": "50018330",
                 "rank": 1
               }
             ]
@@ -1406,7 +1399,7 @@
           "intent": "favorite.add",
           "parameters": {
             "entityType": "device",
-            "resId": "50018330",
+            "targetId": "50018330",
             "rank": 1
           }
         }

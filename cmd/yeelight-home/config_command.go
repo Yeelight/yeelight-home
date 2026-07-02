@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) runConfig(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -35,18 +37,18 @@ func (app *app) runConfigGet(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInvalidInput
 	}
 	result := map[string]any{
-		"ok": true,
-		"precedence": []string{
+		semantic.FieldOK: true,
+		semantic.FieldPrecedence: []string{
 			"command flags",
 			"environment variables",
 			"profile metadata and credential store",
 			"defaults",
 		},
-		"profile":      context.Profile,
-		"region":       context.Region,
-		"houseId":      context.HouseID,
-		"tokenPresent": context.TokenPresent,
-		"tokenSource":  context.TokenSource,
+		semantic.FieldProfile:      context.Profile,
+		semantic.FieldRegion:       context.Region,
+		semantic.FieldHouseID:      context.HouseID,
+		semantic.FieldTokenPresent: context.TokenPresent,
+		semantic.FieldTokenSource:  context.TokenSource,
 	}
 	if flags.bool("json") {
 		return writeJSON(stdout, stderr, result)
@@ -72,9 +74,9 @@ func (app *app) runConfigSet(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInternalError
 	}
 	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
-		"region":   flags.string("region", ""),
-		"houseId":  flags.string("house-id", ""),
-		"qrDevice": flags.string("qr-device", ""),
+		semantic.FieldRegion:   flags.string("region", ""),
+		semantic.FieldHouseID:  flags.string("house-id", ""),
+		semantic.FieldQRDevice: flags.string("qr-device", ""),
 	})
 	if metadata.Region == "" {
 		metadata.Region = defaultRuntimeRegion
@@ -84,7 +86,7 @@ func (app *app) runConfigSet(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInternalError
 	}
 	if flags.bool("json") {
-		return writeJSON(stdout, stderr, map[string]any{"ok": true, "profile": profileMetadataMap(metadata)})
+		return writeJSON(stdout, stderr, map[string]any{semantic.FieldOK: true, semantic.FieldProfile: profileMetadataMap(metadata)})
 	}
 	_, _ = fmt.Fprintf(stdout, "updated profile=%s\n", profile)
 	return exitOK
@@ -121,7 +123,7 @@ func (app *app) runConfigUnset(args []string, stdout io.Writer, stderr io.Writer
 		return exitInternalError
 	}
 	if flags.bool("json") {
-		return writeJSON(stdout, stderr, map[string]any{"ok": true, "profile": profileMetadataMap(metadata)})
+		return writeJSON(stdout, stderr, map[string]any{semantic.FieldOK: true, semantic.FieldProfile: profileMetadataMap(metadata)})
 	}
 	_, _ = fmt.Fprintf(stdout, "updated profile=%s\n", profile)
 	return exitOK

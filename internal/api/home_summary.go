@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type HomeSummaryCredentials struct {
@@ -18,7 +20,7 @@ type HouseSummary struct {
 	ID       string         `json:"id"`
 	Name     string         `json:"name"`
 	Icon     string         `json:"icon,omitempty"`
-	Desc     string         `json:"desc,omitempty"`
+	Desc     string         `json:"description,omitempty"`
 	AreaCode string         `json:"areaCode,omitempty"`
 	AreaName string         `json:"areaName,omitempty"`
 	Counts   map[string]int `json:"counts,omitempty"`
@@ -114,18 +116,18 @@ func (client HomeSummaryClient) callHomeList(ctx context.Context, path string, c
 
 func (client HomeSummaryClient) RunSearch(ctx context.Context, parameters map[string]any, credentials HomeSummaryCredentials) (HomeSummaryResult, error) {
 	fuzzyName := strings.TrimSpace(firstNonEmpty(
-		stringFromAny(parameters["fuzzyName"]),
-		stringFromAny(parameters["name"]),
-		stringFromAny(parameters["keyword"]),
-		stringFromAny(parameters["query"]),
+		stringFromAny(parameters[semantic.FieldFuzzyName]),
+		stringFromAny(parameters[semantic.FieldName]),
+		stringFromAny(parameters[semantic.FieldKeyword]),
+		stringFromAny(parameters[semantic.FieldQuery]),
 	))
 	if fuzzyName == "" {
 		return HomeSummaryResult{}, fmt.Errorf("home search requires fuzzyName or name")
 	}
 	body := map[string]any{
-		"fuzzyName": fuzzyName,
-		"pageNo":    positiveInt(firstNonNil(parameters["pageNo"], parameters["page"]), 1),
-		"pageSize":  positiveInt(firstNonNil(parameters["pageSize"], parameters["size"], parameters["limit"]), 20),
+		semantic.FieldFuzzyName: fuzzyName,
+		semantic.FieldPageNo:    positiveInt(parameters[semantic.FieldPageNo], 1),
+		semantic.FieldPageSize:  positiveInt(firstNonNil(parameters[semantic.FieldPageSize], parameters[semantic.FieldLimit]), 20),
 	}
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/r/fuzzy", body, requestCredentials{
 		Authorization: credentials.Authorization,
@@ -138,13 +140,46 @@ func (client HomeSummaryClient) RunSearch(ctx context.Context, parameters map[st
 		return HomeSummaryResult{}, fmt.Errorf("home search returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
 	houses := extractHouseSummaries(response)
+	apiCalls := 1
+	source := "/v1/house/r/fuzzy"
+	rawShape := responseDataType(response)
+	if len(houses) == 0 {
+		fallback, calls, err := client.findHouseSearchFallback(ctx, fuzzyName, credentials)
+		apiCalls += calls
+		if err != nil {
+			return HomeSummaryResult{}, err
+		}
+		if len(fallback) > 0 {
+			houses = fallback
+			source = "/v1/house/r/fuzzy+local_name_match"
+			rawShape += ",local_name_match"
+		}
+	}
 	return HomeSummaryResult{
 		Region:     client.endpoint.Region,
 		HouseCount: len(houses),
 		Houses:     houses,
-		RawShape:   responseDataType(response),
-		APICalls:   1,
+		RawShape:   rawShape,
+		APICalls:   apiCalls,
+		Source:     source,
 	}, nil
+}
+
+func (client HomeSummaryClient) findHouseSearchFallback(ctx context.Context, name string, credentials HomeSummaryCredentials) ([]HouseSummary, int, error) {
+	summary, err := client.RunList(ctx, credentials)
+	if err != nil {
+		return nil, summary.APICalls, err
+	}
+	ranked := semantic.RankNameMatches(name, summary.Houses, func(house HouseSummary) string {
+		return house.Name
+	})
+	houses := make([]HouseSummary, 0, len(ranked))
+	for _, match := range ranked {
+		house := match.Value
+		house.Source = match.Match.Kind
+		houses = append(houses, house)
+	}
+	return houses, summary.APICalls, nil
 }
 
 func extractHouseSummaries(response map[string]any) []HouseSummary {
@@ -156,12 +191,12 @@ func extractHouseSummaries(response map[string]any) []HouseSummary {
 			continue
 		}
 		house := HouseSummary{
-			ID:       firstString(item, "id", "houseId"),
-			Name:     firstString(item, "name", "houseName"),
-			Icon:     firstString(item, "icon", "img"),
-			Desc:     firstString(item, "desc", "description"),
-			AreaCode: firstString(item, "areaCode"),
-			AreaName: firstString(item, "areaName"),
+			ID:       firstString(item, semantic.FieldID, semantic.FieldHouseID),
+			Name:     firstString(item, semantic.FieldName, semantic.FieldHouseName),
+			Icon:     firstString(item, semantic.HouseSummaryIconFields()...),
+			Desc:     firstString(item, semantic.HouseSummaryDescriptionFields()...),
+			AreaCode: firstString(item, semantic.FieldAreaCode),
+			AreaName: firstString(item, semantic.FieldAreaName),
 		}
 		if house.ID == "" {
 			continue
@@ -180,7 +215,7 @@ func houseRowsFromAny(value any) []any {
 		if looksLikeHouseRow(typed) {
 			return []any{typed}
 		}
-		for _, key := range []string{"rows", "list", "data", "records", "items", "result", "page", "houses", "houseList", "house_list", "content", "results", "dataList"} {
+		for _, key := range semantic.ResponseRowsContainers() {
 			if rows := houseRowsFromAny(typed[key]); len(rows) > 0 {
 				return rows
 			}
@@ -190,12 +225,12 @@ func houseRowsFromAny(value any) []any {
 }
 
 func looksLikeHouseRow(value map[string]any) bool {
-	if firstString(value, "id", "houseId") == "" {
+	if firstString(value, semantic.FieldID, semantic.FieldHouseID) == "" {
 		return false
 	}
-	return firstString(value, "name", "houseName") != "" ||
-		firstString(value, "areaCode", "areaName", "icon", "img", "desc", "description") != "" ||
-		hasAnyHouseKey(value, "roomNum", "deviceNum", "gatewayNum", "sceneNum", "automationNum", "areaNum")
+	return firstString(value, semantic.FieldName, semantic.FieldHouseName) != "" ||
+		firstString(value, semantic.HouseSummaryPresenceFields()...) != "" ||
+		hasAnyHouseKey(value, semantic.HouseSummaryCountFields()...)
 }
 
 func hasAnyHouseKey(value map[string]any, keys ...string) bool {
@@ -209,18 +244,12 @@ func hasAnyHouseKey(value map[string]any, keys ...string) bool {
 
 func houseCountProjection(item map[string]any) map[string]int {
 	counts := map[string]int{}
-	for outputKey, inputKey := range map[string]string{
-		"rooms":           "roomNum",
-		"devices":         "deviceNum",
-		"unboundDevices":  "unbindDeviceNum",
-		"gateways":        "gatewayNum",
-		"unboundGateways": "unbindGatewayNum",
-		"scenes":          "sceneNum",
-		"automations":     "automationNum",
-		"areas":           "areaNum",
-	} {
-		if value, ok := item[inputKey]; ok {
-			counts[outputKey] = intFromAny(value)
+	for _, mapping := range semantic.HouseSummaryCountMappings() {
+		for _, inputKey := range mapping.Internal {
+			if value, ok := item[inputKey]; ok {
+				counts[mapping.Public] = intFromAny(value)
+				break
+			}
 		}
 	}
 	if len(counts) == 0 {

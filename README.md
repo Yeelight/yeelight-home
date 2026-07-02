@@ -2,15 +2,15 @@
 
 Default language: English. Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md).
 
-`yeelight-home` is the standalone local Runtime CLI for Yeelight smart-home Skills and automation scripts. It runs on the user's machine, keeps credentials local, resolves semantic smart-home requests, calls Yeelight cloud APIs directly, and returns redacted structured results.
+`yeelight-home` is the standalone local Runtime CLI for Yeelight smart-home Skills and automation scripts. It runs on the user's machine, keeps credentials local, resolves smart-home requests, executes supported Yeelight home capabilities, and returns redacted structured results.
 
 The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-home` through `YEELIGHT_HOME_BIN` or `PATH` and sends one JSON request to `yeelight-home invoke --stdin`.
 
 ## Features
 
-- Direct Yeelight cloud API access for homes, rooms, areas, devices, groups, gateways, scenes, automations, diagnostics, lighting design, product knowledge, memory, and personalization.
-- Product pedia search for fuzzy product lookup, material codes, product metadata, attachment records, and candidate manual or FAQ resource URLs.
-- Thin execution model for persistent changes: semantic writes execute directly after Runtime validation; callers own any user confirmation and can use dry-run previews when needed.
+- Yeelight home capabilities for homes, rooms, areas, devices, groups, gateways, scenes, automations, diagnostics, lighting design, product knowledge, memory, and personalization.
+- Product pedia search for fuzzy product lookup, product codes, product metadata, attachment records, and candidate manual or FAQ resource URLs.
+- Thin execution model for persistent changes: supported writes execute directly after Runtime validation; callers own any user confirmation and can use dry-run previews when needed.
 - Local credential handling: access tokens are stored in the system credential store when available, with a protected local fallback.
 - Multiple profiles for different accounts, regions, or homes.
 - Region-aware cloud endpoints with default region `cn`.
@@ -32,7 +32,7 @@ The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-
 | Diagnostics | gateway/device diagnostics, upgrade files, operation progress, install and credential checks |
 | Local intelligence | local preference memory, recommendation list, recommendation feedback and cooldown |
 
-Reads execute immediately. Persistent writes and deletes also execute through semantic Runtime adapters after validation; use `--dry-run`, `--preview-only`, or `options.dryRun=true` only when the caller wants a no-write preview before its own user confirmation.
+Reads execute immediately. Persistent writes and deletes also execute after Runtime validation; use `--dry-run`, `--preview-only`, or `options.dryRun=true` only when the caller wants a no-write preview before its own user confirmation.
 
 ## Install
 
@@ -171,14 +171,14 @@ yeelight-home intent schema --intent lighting.design.import --json
 yeelight-home explain lighting.design.import --json
 ```
 
-These commands are offline. They print the SkillRequest envelope, accepted parameter keys, nested payload shape, examples, and nextStep hints so Skills and traditional programs do not need to guess large JSON fields such as HouseMeta, scene `details`, automation `params`, panel button events, or batch operations.
+These commands are offline. They print the SkillRequest envelope, accepted parameter keys, nested payload shape, examples, and nextStep hints so Skills and traditional programs do not need to guess large JSON fields such as lighting design models, scene `actions[]`, automation `trigger` / `conditions` / `actions[]`, panel button events, or batch operations.
 
-For uncommon fields, pass advanced parameters without dropping to raw stdin:
+For uncommon fields, pass advanced parameters through the documented request contract:
 
 ```sh
 yeelight-home room search --name 客厅 --json
-yeelight-home scene create --params-json '{"name":"回家灯光","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}' --json
-yeelight-home favorite add --set typeId=2,resId=50018330,rank=1 --json
+yeelight-home scene create --params-json '{"name":"回家灯光","actions":[{"targetType":"device","targetId":"50018330","set":{"power":true}}]}' --json
+yeelight-home favorite add --set targetType=device,targetId=50018330,rank=1 --json
 yeelight-home product search --multi-field 青空灯 --json
 yeelight-home product search --product-model YP-0117 --json
 yeelight-home thing schema-get --schema-id <schema-id> --json
@@ -190,11 +190,11 @@ yeelight-home panel button-configure --device-id <panel-id> --params-json '<json
 
 ```sh
 yeelight-home product search --multi-field 青空灯 --json
-yeelight-home product search --material-code 1-000003268 --json
+yeelight-home product search --product-code 1-000003268 --json
 yeelight-home product search --product-model YP-0117 --json
 ```
 
-`product search` calls the product pedia search adapter. Results include redacted product metadata such as product name, brand, model, SKU/SPU, category/class fields, material code, support markers, status, attachments, and candidate manual or FAQ resource URLs when they can be derived safely. Product knowledge explains what a product is; it does not prove that a matching device is installed in a user's home. Use `entity capabilities`, `device detail`, or `state query` for installed-device truth.
+`product search` returns redacted product metadata such as product name, brand, model, SKU/SPU, category/class fields, product code, support markers, status, attachments, and candidate manual or FAQ resource URLs when they can be derived safely. Product knowledge explains what a product is; it does not prove that a matching device is installed in a user's home. Use `entity capabilities`, `device detail`, or `state query` for installed-device truth.
 
 ### Local Memory And Recommendations
 
@@ -350,7 +350,7 @@ If QR login is unavailable and the user already has an authorized token, import 
 printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn
 ```
 
-Skills must not call raw URLs, raw headers, curl, compatibility services, or token-bearing commands.
+Skills must use `yeelight-home` commands instead of URLs, headers, curl, third-party services, or token-bearing commands.
 
 ## Release And Packaging
 
@@ -362,7 +362,7 @@ One tagged public `v*` release can produce:
 
 - macOS, Linux, Windows archives for `amd64`, `arm64`, and Linux `armv7`.
 - Checksums and release metadata.
-- Homebrew tap Formula compatibility and Cask automation.
+- Homebrew tap Formula and Cask automation.
 - Scoop bucket manifest.
 - Linux packages through nFPM: `.deb`, `.rpm`, `.apk`, and Arch package artifacts.
 - Docker/GHCR and Docker Hub multi-arch images.
@@ -378,4 +378,4 @@ See [DISTRIBUTION.md](DISTRIBUTION.md) and [RELEASING.md](RELEASING.md).
 - Do not paste tokens, passwords, or account secrets into AI chat.
 - `auth status`, `doctor`, and `invoke` responses are redacted.
 - Profile metadata contains non-secret values such as profile name, region, selected home, and QR device identity. Tokens stay in credential storage.
-- Persistent writes use semantic Runtime adapters; the model cannot execute arbitrary raw API payloads. Callers own user confirmation for high-impact operations.
+- Persistent writes use supported Runtime intents; the model cannot execute arbitrary low-level payloads. Callers own user confirmation for high-impact operations.

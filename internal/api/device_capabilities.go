@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type DeviceCapabilitiesCredentials struct {
@@ -31,18 +33,18 @@ type DeviceCapabilitiesResult struct {
 }
 
 type DeviceCapability struct {
-	ID         string                `json:"id"`
-	Name       string                `json:"name,omitempty"`
-	PID        string                `json:"pid,omitempty"`
-	PCID       string                `json:"pcId,omitempty"`
-	CID        string                `json:"cid,omitempty"`
-	Category   string                `json:"category,omitempty"`
-	RoomID     string                `json:"roomId,omitempty"`
-	NodeType   string                `json:"nodeType,omitempty"`
-	Properties []PropertyCapability  `json:"properties,omitempty"`
-	Components []ComponentCapability `json:"components,omitempty"`
-	Events     []EventCapability     `json:"events,omitempty"`
-	Actions    []ActionCapability    `json:"actions,omitempty"`
+	ID          string                `json:"id"`
+	Name        string                `json:"name,omitempty"`
+	ProductID   string                `json:"capabilityPid,omitempty"`
+	CategoryID  string                `json:"productComponentId,omitempty"`
+	ComponentID string                `json:"componentId,omitempty"`
+	Category    string                `json:"category,omitempty"`
+	RoomID      string                `json:"roomId,omitempty"`
+	NodeType    string                `json:"nodeType,omitempty"`
+	Properties  []PropertyCapability  `json:"properties,omitempty"`
+	Components  []ComponentCapability `json:"components,omitempty"`
+	Events      []EventCapability     `json:"events,omitempty"`
+	Actions     []ActionCapability    `json:"actions,omitempty"`
 }
 
 type ComponentCapability struct {
@@ -76,12 +78,12 @@ type PropertyRange struct {
 
 type PropertyValue struct {
 	Code string `json:"code"`
-	Desc string `json:"desc,omitempty"`
+	Desc string `json:"description,omitempty"`
 }
 
 type EventCapability struct {
 	ID     string               `json:"id,omitempty"`
-	TypeID string               `json:"typeId,omitempty"`
+	TypeID string               `json:"eventTypeId,omitempty"`
 	Name   string               `json:"name,omitempty"`
 	Params []PropertyCapability `json:"params,omitempty"`
 }
@@ -154,18 +156,18 @@ func findDeviceCapability(deviceID string, rows []any) (DeviceCapability, bool) 
 
 func projectDeviceCapability(item map[string]any) DeviceCapability {
 	return DeviceCapability{
-		ID:         firstAnyString(item, "id", "deviceId"),
-		Name:       firstAnyString(item, "name"),
-		PID:        firstAnyString(item, "pid"),
-		PCID:       firstAnyString(item, "pcId"),
-		CID:        firstAnyString(item, "cid"),
-		Category:   firstAnyString(item, "category"),
-		RoomID:     firstAnyString(item, "roomId"),
-		NodeType:   firstAnyString(item, "nodeType"),
-		Properties: projectProperties(item["properties"]),
-		Components: projectComponents(item["subDevices"]),
-		Events:     projectEvents(item["events"]),
-		Actions:    projectActions(item["supportActions"]),
+		ID:          firstAnyString(item, semantic.FieldID, semantic.FieldDeviceID),
+		Name:        firstAnyString(item, semantic.FieldName),
+		ProductID:   firstAnyString(item, semantic.DeviceCapabilityProductIDFields()...),
+		CategoryID:  firstAnyString(item, semantic.DeviceCapabilityProductCategoryIDFields()...),
+		ComponentID: firstAnyString(item, semantic.ComponentIDFields()...),
+		Category:    firstAnyString(item, semantic.FieldCategory),
+		RoomID:      firstAnyString(item, semantic.FieldRoomID),
+		NodeType:    firstAnyString(item, semantic.FieldNodeType),
+		Properties:  projectProperties(item[semantic.FieldProperties]),
+		Components:  projectComponents(item[semantic.SubDevicesField()]),
+		Events:      projectEvents(item[semantic.FieldEvents]),
+		Actions:     projectActions(item[semantic.FieldSupportActions]),
 	}
 }
 
@@ -181,14 +183,14 @@ func projectComponents(value any) []ComponentCapability {
 			continue
 		}
 		components = append(components, ComponentCapability{
-			ID:         firstAnyString(item, "cid"),
-			Index:      firstAnyString(item, "index"),
-			Name:       firstAnyString(item, "name"),
-			Type:       firstAnyString(item, "type"),
-			Category:   firstAnyString(item, "category"),
-			Properties: projectProperties(item["properties"]),
-			Events:     projectEvents(item["events"]),
-			Actions:    projectActions(item["supportActions"]),
+			ID:         firstAnyString(item, semantic.ComponentIDFields()...),
+			Index:      firstAnyString(item, semantic.FieldIndex),
+			Name:       firstAnyString(item, semantic.FieldName),
+			Type:       firstAnyString(item, semantic.FieldType),
+			Category:   firstAnyString(item, semantic.FieldCategory),
+			Properties: projectProperties(item[semantic.FieldProperties]),
+			Events:     projectEvents(item[semantic.FieldEvents]),
+			Actions:    projectActions(item[semantic.FieldSupportActions]),
 		})
 	}
 	return components
@@ -205,16 +207,17 @@ func projectProperties(value any) []PropertyCapability {
 		if !ok {
 			continue
 		}
+		propertyID := firstAnyString(item, semantic.PropertyIDFields()...)
 		property := PropertyCapability{
-			ID:          firstAnyString(item, "propId", "id"),
-			Description: firstAnyString(item, "desc", "description"),
-			Access:      firstAnyString(item, "access"),
-			Format:      firstAnyString(item, "format"),
-			Unit:        firstAnyString(item, "unit"),
-			Type:        firstAnyString(item, "type"),
-			Range:       projectPropertyRange(item["valueRange"]),
-			ValueList:   projectPropertyValues(item["valueList"]),
-			Operators:   projectStringList(item["operators"]),
+			ID:          semantic.PropertyName(propertyID),
+			Description: firstAnyString(item, semantic.DescriptionFields()...),
+			Access:      firstAnyString(item, semantic.FieldAccess),
+			Format:      firstAnyString(item, semantic.FieldFormat),
+			Unit:        firstAnyString(item, semantic.FieldUnit),
+			Type:        firstAnyString(item, semantic.FieldType),
+			Range:       projectPropertyRange(item[semantic.FieldValueRange]),
+			ValueList:   projectPropertyValues(item[semantic.FieldValueList]),
+			Operators:   projectStringList(item[semantic.FieldOperators]),
 		}
 		if property.ID != "" {
 			properties = append(properties, property)
@@ -235,10 +238,10 @@ func projectEvents(value any) []EventCapability {
 			continue
 		}
 		events = append(events, EventCapability{
-			ID:     firstAnyString(item, "eventId"),
-			TypeID: firstAnyString(item, "eventTypeId"),
-			Name:   firstAnyString(item, "name"),
-			Params: projectProperties(item["params"]),
+			ID:     firstAnyString(item, semantic.FieldEventID),
+			TypeID: firstAnyString(item, semantic.FieldEventTypeID),
+			Name:   firstAnyString(item, semantic.FieldName),
+			Params: projectProperties(item[semantic.FieldParameters]),
 		})
 	}
 	return events
@@ -256,8 +259,8 @@ func projectActions(value any) []ActionCapability {
 			continue
 		}
 		action := ActionCapability{
-			ID:     firstAnyString(item, "actionName", "id", "name"),
-			Params: projectProperties(item["params"]),
+			ID:     firstAnyString(item, semantic.ActionIDFields()...),
+			Params: projectProperties(item[semantic.FieldParameters]),
 		}
 		if action.ID != "" {
 			actions = append(actions, action)
@@ -272,9 +275,9 @@ func projectPropertyRange(value any) *PropertyRange {
 		return nil
 	}
 	return &PropertyRange{
-		Min:  intFromAny(item["min"]),
-		Max:  intFromAny(item["max"]),
-		Step: intFromAny(item["step"]),
+		Min:  intFromAny(item[semantic.FieldMin]),
+		Max:  intFromAny(item[semantic.FieldMax]),
+		Step: intFromAny(item[semantic.FieldStep]),
 	}
 }
 
@@ -289,8 +292,8 @@ func projectPropertyValues(value any) []PropertyValue {
 		if !ok {
 			continue
 		}
-		if code := firstAnyString(item, "code"); code != "" {
-			values = append(values, PropertyValue{Code: code, Desc: firstAnyString(item, "desc")})
+		if code := firstAnyString(item, semantic.FieldCode); code != "" {
+			values = append(values, PropertyValue{Code: code, Desc: firstAnyString(item, semantic.DescriptionFields()...)})
 		}
 	}
 	return values
@@ -319,7 +322,7 @@ func extractDeviceSchemaRows(response map[string]any) []any {
 	case []any:
 		return typed
 	case map[string]any:
-		for _, key := range []string{"devices", "rows", "list"} {
+		for _, key := range semantic.DeviceSchemaRowContainers() {
 			if rows, ok := typed[key].([]any); ok {
 				return rows
 			}

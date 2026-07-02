@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type DevSeedAutomationRequest struct {
@@ -98,16 +100,16 @@ func (client DevSeedClient) buildAutomationSeedPayload(request DevSeedAutomation
 		deviceName = deviceID
 	}
 	params := map[string]any{
-		"type": "and",
-		"conditions": []any{
+		semantic.InternalField(semantic.DomainAutomation, semantic.FieldConditionType): "and",
+		semantic.FieldConditions: []any{
 			map[string]any{
-				"type":  "alarm",
-				"clock": "23:59:00",
+				semantic.InternalField(semantic.DomainAutomation, semantic.FieldConditionKind): "alarm",
+				semantic.InternalField(semantic.DomainAutomation, semantic.FieldTime):          "23:59:00",
 			},
 		},
 	}
 	actionParams, err := compactJSON(map[string]any{
-		"set": map[string]any{propertyName: request.PropertyValue},
+		semantic.FieldSet: map[string]any{propertyName: request.PropertyValue},
 	})
 	if err != nil {
 		return nil, err
@@ -117,11 +119,11 @@ func (client DevSeedClient) buildAutomationSeedPayload(request DevSeedAutomation
 		return nil, err
 	}
 	action := map[string]any{
-		"typeId":  2,
-		"resId":   parsedDeviceID,
-		"resName": deviceName,
-		"rank":    0,
-		"params":  actionParams,
+		semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType): semantic.ResourceDevice,
+		semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID):   parsedDeviceID,
+		semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName): deviceName,
+		semantic.FieldRank:                   0,
+		semantic.InternalActionParamsField(): actionParams,
 	}
 	return BuildAutomationCreatePayload(
 		houseID,

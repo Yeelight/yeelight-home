@@ -6,9 +6,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
-func TestInvokeDeviceRemoveExecutesDirectlyAfterCallerConfirmation(t *testing.T) {
+func TestInvokeDeviceRemoveRequiresExplicitConfirmationBeforeExecuting(t *testing.T) {
 	deviceVisible := true
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -46,11 +48,66 @@ func TestInvokeDeviceRemoveExecutesDirectlyAfterCallerConfirmation(t *testing.T)
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "destructive-delete-execute" {
+	if response[semantic.FieldStatus] != "clarification_required" || response[semantic.FieldTraceID] != "r3-confirmation-required" {
 		t.Fatalf("response = %#v", response)
 	}
-	result := response["result"].(map[string]any)
-	if result["capability"] != "device.remove" || result["risk"] != "R3" || result["verified"] != true {
+	if !strings.Contains(requestString(response[semantic.FieldUserMessage]), "高影响操作") {
+		t.Fatalf("response = %#v", response)
+	}
+	deleteCalls := 0
+	for _, call := range gotCalls {
+		if strings.Contains(call, "DELETE /apis/iot/v2/thing/manage/house/200171/device/50018330/w/info") {
+			deleteCalls++
+		}
+	}
+	if deleteCalls != 0 {
+		t.Fatalf("delete calls = %#v", gotCalls)
+	}
+}
+
+func TestInvokeDeviceRemoveExecutesAfterExplicitConfirmation(t *testing.T) {
+	deviceVisible := true
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/200171/device/r/info/1/100":
+			if deviceVisible {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"50018330","name":"主灯","roomId":"401398"}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/device/50018330/w/info":
+			deviceVisible = false
+			_, _ = writer.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-r3-secret", "client-r3-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-device-remove-confirmed","locale":"zh-CN","utterance":"确认删除主灯","intent":"device.remove","parameters":{"houseId":"200171","deviceId":"50018330","confirmed":true}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response[semantic.FieldStatus] != "success" || response[semantic.FieldTraceID] != "destructive-delete-execute" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response[semantic.FieldResult].(map[string]any)
+	if result[semantic.FieldCapability] != "device.remove" || result[semantic.FieldRisk] != "R3" || result[semantic.FieldVerified] != true {
 		t.Fatalf("result = %#v", result)
 	}
 	deleteCalls := 0
@@ -95,7 +152,7 @@ func TestInvokeHomeDeleteUsesHouseScopedFallbackForNewlyCreatedHome(t *testing.T
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-home-delete-secret", "client-home-delete-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-home-delete-plan","locale":"zh-CN","utterance":"删除临时家庭","intent":"home.delete","parameters":{"houseId":"200181","name":"临时家庭"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-home-delete-plan","locale":"zh-CN","utterance":"确认删除临时家庭","intent":"home.delete","parameters":{"houseId":"200181","name":"临时家庭","confirmed":true}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -103,12 +160,57 @@ func TestInvokeHomeDeleteUsesHouseScopedFallbackForNewlyCreatedHome(t *testing.T
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "success" || response["traceId"] != "destructive-delete-execute" {
+	if response[semantic.FieldStatus] != "success" || response[semantic.FieldTraceID] != "destructive-delete-execute" {
 		t.Fatalf("response = %#v, calls=%#v", response, gotCalls)
 	}
-	result := response["result"].(map[string]any)
-	if result["capability"] != "home.delete" || result["risk"] != "R3" || result["verified"] != true {
+	result := response[semantic.FieldResult].(map[string]any)
+	if result[semantic.FieldCapability] != "home.delete" || result[semantic.FieldRisk] != "R3" || result[semantic.FieldVerified] != true {
 		t.Fatalf("result = %#v", result)
+	}
+	if result[semantic.FieldVerifiedBy] != "home.list" {
+		t.Fatalf("home.delete must verify against account home list, result = %#v", result)
+	}
+}
+
+func TestInvokeHomeDeleteFailsWhenAccountListStillContainsHome(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/house/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"200181","name":"临时家庭"}]}}`))
+		case "/apis/iot/v1/house/200181/w/delete":
+			_, _ = writer.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-home-delete-secret", "client-home-delete-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-home-delete-still-listed","locale":"zh-CN","utterance":"确认删除临时家庭","intent":"home.delete","parameters":{"houseId":"200181","name":"临时家庭","confirmed":true}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code == exitOK {
+		t.Fatalf("home.delete must fail when account list still contains the home, stdout=%s calls=%#v", stdout.String(), gotCalls)
+	}
+	if !strings.Contains(stderr.String(), "home.delete delete verification mismatch") {
+		t.Fatalf("stderr = %s, calls=%#v", stderr.String(), gotCalls)
+	}
+	deleteCalls := 0
+	for _, call := range gotCalls {
+		if call == "POST /apis/iot/v1/house/200181/w/delete" {
+			deleteCalls++
+		}
+		if strings.Contains(call, "/v2/thing/manage/house/200181/") {
+			t.Fatalf("post-delete home verification must not use house-scoped entity fallback: %#v", gotCalls)
+		}
+	}
+	if deleteCalls != 1 {
+		t.Fatalf("delete calls = %#v", gotCalls)
 	}
 }
 
@@ -141,11 +243,11 @@ func TestInvokeGatewayDeleteInvalidGatewayReturnsClarification(t *testing.T) {
 		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
-	if response["status"] != "clarification_required" {
+	if response[semantic.FieldStatus] != "clarification_required" {
 		t.Fatalf("response = %#v", response)
 	}
-	clarification := response["clarification"].(map[string]any)
-	if clarification["reason"] != "entity_not_found" {
+	clarification := response[semantic.FieldClarification].(map[string]any)
+	if clarification[semantic.FieldReason] != "entity_not_found" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
 }

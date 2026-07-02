@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const (
@@ -19,21 +21,21 @@ const (
 	homeSortGroupTypeScene  = 6
 )
 
-// NormalizeHomeSortPayload converts user-facing sort words into the cloud API's
-// byte sort type and target fields. The cloud API rejects textual sort types.
+// NormalizeHomeSortPayload converts user-facing sort words into the backend's
+// byte sort type and target fields. The backend rejects textual sort types.
 func NormalizeHomeSortPayload(houseID string, source map[string]any) (map[string]any, string) {
 	houseID = strings.TrimSpace(houseID)
 	if source == nil {
 		source = map[string]any{}
 	}
-	body := map[string]any{"houseId": requestNumberOrStringForSort(houseID)}
-	for _, key := range []string{"typeId", "resId", "roomId", "subIndex"} {
+	body := map[string]any{semantic.FieldHouseID: requestNumberOrStringForSort(houseID)}
+	for _, key := range []string{semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType), semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID), semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldTargetRoomName, semantic.FieldAreaID, semantic.FieldAreaName, semantic.FieldDeviceName, semantic.FieldSubIndex} {
 		if value, ok := source[key]; ok {
 			body[key] = value
 		}
 	}
-	if items, ok := source["items"]; ok {
-		body["items"] = items
+	if items, ok := source[semantic.FieldItems]; ok {
+		body[semantic.FieldItems] = items
 	}
 	sortType, typeProvided, typeValid := homeSortType(source)
 	if typeProvided && !typeValid {
@@ -50,16 +52,16 @@ func NormalizeHomeSortPayload(houseID string, source map[string]any) (map[string
 	if target == "" {
 		return nil, "home_sort_target_missing"
 	}
-	body["type"] = sortType
-	body["target"] = requestNumberOrStringForSort(target)
+	body[semantic.FieldType] = sortType
+	body[semantic.FieldTarget] = requestNumberOrStringForSort(target)
 	if sortType == homeSortDeviceRoom || sortType == homeSortSceneRoom {
-		body["roomId"] = requestNumberOrStringForSort(target)
+		body[semantic.FieldRoomID] = requestNumberOrStringForSort(target)
 	}
 	return body, ""
 }
 
 func homeSortType(source map[string]any) (int, bool, bool) {
-	raw := firstHomeSortString(source, "type", "sortType", "orderType", "sortKind")
+	raw := firstHomeSortString(source, semantic.FieldType, semantic.FieldSortType)
 	if raw == "" {
 		return 0, false, false
 	}
@@ -71,16 +73,16 @@ func homeSortType(source map[string]any) (int, bool, bool) {
 }
 
 func inferHomeSortType(source map[string]any) (int, bool) {
-	if roomID := firstHomeSortString(source, "roomId"); roomID != "" {
+	if roomID := firstHomeSortString(source, semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldTargetRoomName); roomID != "" {
 		if itemType, ok := firstHomeSortItemType(source); ok && itemType == homeSortGroupTypeScene {
 			return homeSortSceneRoom, true
 		}
 		return homeSortDeviceRoom, true
 	}
-	if areaID := firstHomeSortString(source, "areaId", "regionId"); areaID != "" {
+	if areaID := firstHomeSortString(source, semantic.FieldAreaID, semantic.FieldAreaName); areaID != "" {
 		return homeSortAreaRooms, true
 	}
-	if targetDeviceID := firstHomeSortString(source, "parentDeviceId", "targetDeviceId"); targetDeviceID != "" {
+	if targetDeviceID := firstHomeSortString(source, semantic.FieldParentID, semantic.FieldTargetID, semantic.FieldDeviceName); targetDeviceID != "" {
 		return homeSortSubDevice, true
 	}
 	if itemType, ok := firstHomeSortItemType(source); ok && itemType == homeSortGroupTypeRoom {
@@ -92,16 +94,16 @@ func inferHomeSortType(source map[string]any) (int, bool) {
 func homeSortTarget(houseID string, sortType int, source map[string]any) string {
 	switch sortType {
 	case homeSortDeviceRoom, homeSortSceneRoom:
-		return firstHomeSortString(source, "target", "roomId")
+		return firstHomeSortString(source, semantic.FieldTarget, semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldTargetRoomName)
 	case homeSortHomeRooms:
-		if target := firstHomeSortString(source, "target", "houseId", "homeId", "familyId"); target != "" {
+		if target := firstHomeSortString(source, semantic.FieldTarget, semantic.FieldHouseID); target != "" {
 			return target
 		}
 		return houseID
 	case homeSortSubDevice:
-		return firstHomeSortString(source, "target", "parentDeviceId", "targetDeviceId", "deviceId", "resId")
+		return firstHomeSortString(source, semantic.FieldTarget, semantic.FieldParentID, semantic.FieldTargetID, semantic.FieldDeviceID, semantic.FieldDeviceName, semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID))
 	case homeSortAreaRooms:
-		return firstHomeSortString(source, "target", "areaId", "regionId")
+		return firstHomeSortString(source, semantic.FieldTarget, semantic.FieldAreaID, semantic.FieldAreaName)
 	default:
 		return ""
 	}
@@ -126,7 +128,7 @@ func homeSortTypeFromAlias(value string) (int, bool) {
 }
 
 func firstHomeSortItemType(source map[string]any) (int, bool) {
-	if items, ok := source["items"].([]any); ok {
+	if items, ok := source[semantic.FieldItems].([]any); ok {
 		for _, raw := range items {
 			item, ok := raw.(map[string]any)
 			if !ok {
@@ -141,12 +143,12 @@ func firstHomeSortItemType(source map[string]any) (int, bool) {
 }
 
 func homeSortResourceType(source map[string]any, allowTypeKey bool) (int, bool) {
-	if value, ok := intFromAnyForSort(firstNonNilForSort(source["typeId"], source["resourceTypeId"])); ok {
+	if value, ok := intFromAnyForSort(firstNonNilForSort(source[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType)], source[semantic.FieldResourceTypeID])); ok {
 		return value, true
 	}
-	keys := []string{"entityType", "resourceType"}
+	keys := []string{semantic.FieldEntityType}
 	if allowTypeKey {
-		keys = append(keys, "type")
+		keys = append(keys, semantic.FieldType)
 	}
 	entityType := compactHomeSortToken(firstHomeSortString(source, keys...))
 	switch entityType {

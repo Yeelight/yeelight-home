@@ -18,7 +18,7 @@ func TestInvokeAreaDetailGetUsesCloudReadonlyAdapter(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"area-1","name":"一楼","rooms":[{"id":"room-1","name":"客厅"}],"accessToken":"not-allowed"}}`))
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"area-1","name":"一楼","desc":"公共活动区","rooms":[{"id":"room-1","name":"客厅","desc":"会客","deviceNum":2,"gatewayIds":["gw-1"],"rank":1}],"accessToken":"not-allowed"}}`))
 	}))
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
@@ -34,7 +34,7 @@ func TestInvokeAreaDetailGetUsesCloudReadonlyAdapter(t *testing.T) {
 	if len(gotCalls) != 1 || gotCalls[0] != "GET /apis/iot/v2/thing/manage/house/house-1/area/area-1/r/info" {
 		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
-	for _, forbidden := range []string{"token-area-detail-secret", "not-allowed"} {
+	for _, forbidden := range []string{"token-area-detail-secret", "not-allowed", "\"desc\"", "\"deviceNum\""} {
 		if strings.Contains(stdout.String(), forbidden) || strings.Contains(stderr.String(), forbidden) {
 			t.Fatalf("output leaked %q: stdout=%s stderr=%s", forbidden, stdout.String(), stderr.String())
 		}
@@ -50,6 +50,15 @@ func TestInvokeAreaDetailGetUsesCloudReadonlyAdapter(t *testing.T) {
 	data := result["data"].(map[string]any)
 	if result["cloudWrites"] != false || data["detail"] == nil {
 		t.Fatalf("result = %#v", result)
+	}
+	detail := data["detail"].(map[string]any)
+	if detail["description"] != "公共活动区" {
+		t.Fatalf("detail = %#v", detail)
+	}
+	rooms := detail["rooms"].([]any)
+	room := rooms[0].(map[string]any)
+	if room["description"] != "会客" || room["deviceCount"] == nil || room["gatewayIds"] == nil {
+		t.Fatalf("room = %#v", room)
 	}
 }
 

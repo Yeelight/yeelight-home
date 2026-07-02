@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type SpaceBatchOrganizationKind string
@@ -83,6 +85,9 @@ func (client SpaceBatchOrganizationClient) Run(ctx context.Context, request Spac
 	if !ok {
 		return SpaceBatchOrganizationResult{}, fmt.Errorf("%s write verification mismatch", request.Kind)
 	}
+	if err := detectDeviceMoveRoomBatchSideEffects(entities, verifiedEntities); err != nil {
+		return SpaceBatchOrganizationResult{}, err
+	}
 	return SpaceBatchOrganizationResult{
 		Region:           client.endpoint.Region,
 		HouseID:          houseID,
@@ -111,8 +116,8 @@ func (client SpaceBatchOrganizationClient) listEntities(ctx context.Context, hou
 
 func (client SpaceBatchOrganizationClient) writeDeviceRoomBatch(ctx context.Context, houseID string, items map[string]string, credentials requestCredentials) error {
 	body := map[string]any{
-		"houseId": requestNumberOrStringForAPI(houseID),
-		"items":   items,
+		semantic.FieldHouseID: requestNumberOrStringForAPI(houseID),
+		semantic.FieldItems:   items,
 	}
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/device/room/w/batch-modify", body, credentials)
 	if err != nil {
@@ -153,7 +158,7 @@ func (client SpaceBatchOrganizationClient) verifyDeviceRoomBatch(ctx context.Con
 }
 
 func deviceRoomBatchItems(payload map[string]any) (map[string]string, error) {
-	raw, ok := payload["items"]
+	raw, ok := payload[semantic.FieldItems]
 	if !ok {
 		return nil, fmt.Errorf("device room batch items are required")
 	}
@@ -173,8 +178,8 @@ func deviceRoomBatchItems(payload map[string]any) (map[string]string, error) {
 			if !ok {
 				return nil, fmt.Errorf("invalid device room batch item")
 			}
-			deviceID := strings.TrimSpace(firstNonEmpty(stringFromAny(item["deviceId"]), stringFromAny(item["id"]), stringFromAny(item["entityId"])))
-			roomID := strings.TrimSpace(firstNonEmpty(stringFromAny(item["roomId"]), stringFromAny(item["targetRoomId"]), stringFromAny(item["targetId"])))
+			deviceID := strings.TrimSpace(firstNonEmpty(stringFromAny(item[semantic.FieldDeviceID]), stringFromAny(item[semantic.FieldID]), stringFromAny(item[semantic.FieldEntityID])))
+			roomID := strings.TrimSpace(firstNonEmpty(stringFromAny(item[semantic.FieldRoomID]), stringFromAny(item[semantic.FieldTargetRoomID]), stringFromAny(item[semantic.FieldTargetID])))
 			if deviceID == "" || roomID == "" {
 				return nil, fmt.Errorf("invalid device room batch item")
 			}
@@ -212,4 +217,32 @@ func deviceRoomBatchMatches(items map[string]string, entities EntityListResult) 
 		}
 	}
 	return true
+}
+
+func detectDeviceMoveRoomBatchSideEffects(before EntityListResult, after EntityListResult) error {
+	drops := []string{}
+	for _, entityType := range []string{"group", "scene", "automation"} {
+		beforeCount := entityCount(before, entityType)
+		afterCount := entityCount(after, entityType)
+		if afterCount < beforeCount {
+			drops = append(drops, fmt.Sprintf("%s %d->%d", entityType, beforeCount, afterCount))
+		}
+	}
+	if len(drops) == 0 {
+		return nil
+	}
+	return fmt.Errorf("device.move_room.batch caused dependent entity count drop: %s", strings.Join(drops, ", "))
+}
+
+func entityCount(result EntityListResult, entityType string) int {
+	if result.Counts != nil {
+		return result.Counts[entityType]
+	}
+	count := 0
+	for _, entity := range result.Entities {
+		if entity.Type == entityType {
+			count++
+		}
+	}
+	return count
 }

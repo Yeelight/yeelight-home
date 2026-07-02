@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareHomeLock(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,7 +17,11 @@ func (app *app) prepareHomeLock(ctx context.Context, request contract.Request, e
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID),
+			"local profile houseId",
+		}), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -33,7 +38,7 @@ func (app *app) prepareHomeLock(ctx context.Context, request contract.Request, e
 		return configureClarificationResponse(request, err.Error(), homeLockAcceptedFields(request.Intent)), nil
 	}
 	now := time.Now()
-	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now)
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, summary, operation.RiskR3, payload, preconditions, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -45,8 +50,8 @@ func buildHomeLockPayload(request contract.Request, houseID string, entities api
 	switch request.Intent {
 	case "home.lock_all":
 		return map[string]any{
-				"houseId":     requestNumberOrString(houseID),
-				"deviceCount": entities.Counts["device"],
+				semantic.FieldHouseID:     requestNumberOrString(houseID),
+				semantic.FieldDeviceCount: entities.Counts["device"],
 			}, []string{
 				"提交前重新读取家庭实体列表",
 				"影响范围是当前家庭下所有设备的重置锁定能力",
@@ -54,8 +59,8 @@ func buildHomeLockPayload(request contract.Request, houseID string, entities api
 			}, fmt.Sprintf("锁定当前家庭全部设备的重置能力，当前可见设备数 %d", entities.Counts["device"]), nil
 	case "home.unlock_all":
 		return map[string]any{
-				"houseId":     requestNumberOrString(houseID),
-				"deviceCount": entities.Counts["device"],
+				semantic.FieldHouseID:     requestNumberOrString(houseID),
+				semantic.FieldDeviceCount: entities.Counts["device"],
 			}, []string{
 				"提交前重新读取家庭实体列表",
 				"影响范围是当前家庭下所有设备的重置锁定能力",
@@ -72,19 +77,19 @@ func homeLockPreview(intent string, entities api.EntityListResult) map[string]an
 		action = "unlock"
 	}
 	return map[string]any{
-		"affectedScope": "whole_house",
-		"deviceCount":   entities.Counts["device"],
-		"action":        action,
-		"verification":  "write_ack_plus_entity_list_accessible",
+		semantic.FieldAffectedScope: "whole_house",
+		semantic.FieldDeviceCount:   entities.Counts["device"],
+		semantic.FieldAction:        action,
+		semantic.FieldVerification:  "write_ack_plus_entity_list_accessible",
 	}
 }
 
 func homeLockAcceptedFields(intent string) []string {
 	switch intent {
 	case "home.lock_all", "home.unlock_all":
-		return []string{"parameters.houseId", "homeRef.id"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID), semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID), semantic.ParameterPath(semantic.FieldConfirmed)}
 	default:
-		return []string{"parameters.houseId"}
+		return []string{semantic.ParameterPath(semantic.FieldHouseID)}
 	}
 }
 

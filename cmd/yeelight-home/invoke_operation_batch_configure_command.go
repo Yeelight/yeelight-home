@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const maxOperationBatchConfigureSteps = 20
@@ -28,9 +29,9 @@ func (app *app) prepareOperationBatchConfigure(ctx context.Context, request cont
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
-	rawSteps, ok := requestMapList(firstNonNil(request.Parameters["operations"], request.Parameters["steps"]))
+	rawSteps, ok := requestMapList(firstNonNil(request.Parameters[semantic.FieldOperations], request.Parameters[semantic.FieldSteps]))
 	if !ok || len(rawSteps) == 0 || len(rawSteps) > maxOperationBatchConfigureSteps {
 		return operationBatchConfigureClarificationResponse(request, "invalid_operation_batch_payload"), nil
 	}
@@ -58,8 +59,8 @@ func (app *app) prepareOperationBatchConfigure(ctx context.Context, request cont
 		extraAPICalls += step.APICalls
 	}
 	payload := map[string]any{
-		"houseId": requestNumberOrString(houseID),
-		"steps":   operationBatchStepsPayload(steps),
+		semantic.FieldHouseID: requestNumberOrString(houseID),
+		semantic.FieldSteps:   operationBatchStepsPayload(steps),
 	}
 	record, err := operation.NewPrepared(profile, region, houseID, "operation.batch.configure", request.RequestID, fmt.Sprintf("批量配置%d个添加或修改操作", len(steps)), payload, []string{
 		"执行前重新校验 profile、region、家庭和请求载荷",
@@ -73,21 +74,24 @@ func (app *app) prepareOperationBatchConfigure(ctx context.Context, request cont
 	}
 	app.preparedOperation = &record
 	preview := map[string]any{
-		"mode":        "direct_batch_configure",
-		"stepCount":   len(steps),
-		"steps":       operationBatchStepsPreview(steps),
-		"exclusions":  operationBatchConfigureExclusions(),
-		"writePolicy": "direct_execute_allowlisted_add_update_configure_steps",
+		semantic.FieldMode:        "direct_batch_configure",
+		semantic.FieldStepCount:   len(steps),
+		semantic.FieldSteps:       operationBatchStepsPreview(steps),
+		semantic.FieldExclusions:  operationBatchConfigureExclusions(),
+		semantic.FieldWritePolicy: "direct_execute_allowlisted_add_update_configure_steps",
 	}
 	return executionPreviewResponseWithDetails(request, record, entities, preview, extraAPICalls), nil
 }
 
 func operationBatchConfigureClarificationResponse(request contract.Request, reason string) contract.Response {
-	return configureClarificationResponseWithGuide(request, reason, []string{"parameters.operations[].intent", "parameters.operations[].parameters"}, operationBatchConfigurePayloadGuide())
+	return configureClarificationResponseWithGuide(request, reason, []string{
+		semantic.ParameterPath(semantic.ArrayField(semantic.FieldOperations), semantic.FieldIntent),
+		semantic.ParameterPath(semantic.ArrayField(semantic.FieldOperations), semantic.FieldParameters),
+	}, operationBatchConfigurePayloadGuide())
 }
 
 func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent contract.Request, endpoint api.Endpoint, profile string, region string, defaultHouseID string, authorization string, clientID string, entities api.EntityListResult, raw map[string]any, stepNumber int) (operationBatchStep, string, error) {
-	intent := strings.TrimSpace(requestString(raw["intent"]))
+	intent := strings.TrimSpace(requestString(raw[semantic.FieldIntent]))
 	if intent == "home.create" {
 		return operationBatchStep{}, "operation_batch_contains_account_scoped_intent", nil
 	}
@@ -97,7 +101,7 @@ func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent con
 		}
 		return operationBatchStep{}, "operation_batch_contains_unsupported_intent", nil
 	}
-	parameters, ok := raw["parameters"].(map[string]any)
+	parameters, ok := raw[semantic.FieldParameters].(map[string]any)
 	if !ok {
 		parameters = map[string]any{}
 	}
@@ -127,8 +131,8 @@ func (app *app) buildOperationBatchConfigureStep(ctx context.Context, parent con
 	if stepRequest.Parameters == nil {
 		stepRequest.Parameters = map[string]any{}
 	}
-	if _, exists := stepRequest.Parameters["houseId"]; !exists {
-		stepRequest.Parameters["houseId"] = houseID
+	if _, exists := stepRequest.Parameters[semantic.FieldHouseID]; !exists {
+		stepRequest.Parameters[semantic.FieldHouseID] = houseID
 	}
 	payload, preconditions, summary, preview, calls, reason, err := app.buildOperationBatchStepPreparedPayload(ctx, stepRequest, endpoint, profile, region, houseID, authorization, clientID, entities)
 	if err != nil || reason != "" {
@@ -171,11 +175,11 @@ func (app *app) executeOperationBatchConfigure(ctx context.Context, request cont
 		if response.Status != "success" {
 			return responseWithVerifiedTopology(operationBatchPartialResponse(request, record, results, step, response, totalAPICalls), verifiedTopology), nil
 		}
-		if entities, ok := response.Internal["verifiedTopology"].(api.EntityListResult); ok && entities.Total > 0 {
+		if entities, ok := response.Internal[semantic.FieldVerifiedTopology].(api.EntityListResult); ok && entities.Total > 0 {
 			verifiedTopology = entities
 		}
 		results = append(results, operationBatchStepResult(index+1, step, response))
-		totalAPICalls += responseMetricInt(response, "apiCalls")
+		totalAPICalls += responseMetricInt(response, semantic.FieldAPICalls)
 	}
 	return responseWithVerifiedTopology(operationBatchExecuteResponse(request, record, results, totalAPICalls), verifiedTopology), nil
 }
@@ -184,11 +188,11 @@ func operationBatchStepsPayload(steps []operationBatchStep) []any {
 	result := make([]any, 0, len(steps))
 	for _, step := range steps {
 		result = append(result, map[string]any{
-			"intent":  step.Intent,
-			"houseId": step.HouseID,
-			"summary": step.Summary,
-			"payload": step.Payload,
-			"preview": step.Preview,
+			semantic.FieldIntent:  step.Intent,
+			semantic.FieldHouseID: step.HouseID,
+			semantic.FieldSummary: step.Summary,
+			semantic.FieldPayload: step.Payload,
+			semantic.FieldPreview: step.Preview,
 		})
 	}
 	return result
@@ -198,12 +202,12 @@ func operationBatchStepsPreview(steps []operationBatchStep) []any {
 	result := make([]any, 0, len(steps))
 	for _, step := range steps {
 		item := map[string]any{
-			"index":   step.StepNumber,
-			"intent":  step.Intent,
-			"summary": step.Summary,
+			semantic.FieldIndex:   step.StepNumber,
+			semantic.FieldIntent:  step.Intent,
+			semantic.FieldSummary: step.Summary,
 		}
 		if len(step.Preview) > 0 {
-			item["preview"] = step.Preview
+			item[semantic.FieldPreview] = step.Preview
 		}
 		result = append(result, item)
 	}
@@ -211,7 +215,7 @@ func operationBatchStepsPreview(steps []operationBatchStep) []any {
 }
 
 func operationBatchStepsFromPreparedPayload(payload map[string]any) ([]operationBatchStep, string) {
-	rawSteps, ok := payload["steps"].([]any)
+	rawSteps, ok := payload[semantic.FieldSteps].([]any)
 	if !ok || len(rawSteps) == 0 || len(rawSteps) > maxOperationBatchConfigureSteps {
 		return nil, "invalid_operation_batch_payload"
 	}
@@ -221,15 +225,15 @@ func operationBatchStepsFromPreparedPayload(payload map[string]any) ([]operation
 		if !ok {
 			return nil, "invalid_operation_batch_step"
 		}
-		intent := strings.TrimSpace(requestString(item["intent"]))
+		intent := strings.TrimSpace(requestString(item[semantic.FieldIntent]))
 		if !operationBatchConfigureAllowedIntent(intent) {
 			return nil, "operation_batch_contains_unsupported_intent"
 		}
-		stepPayload, ok := item["payload"].(map[string]any)
+		stepPayload, ok := item[semantic.FieldPayload].(map[string]any)
 		if !ok || len(stepPayload) == 0 {
 			return nil, "invalid_operation_batch_step_payload"
 		}
-		houseID := firstNonEmptyString(requestString(item["houseId"]), requestString(payload["houseId"]))
+		houseID := firstNonEmptyString(requestString(item[semantic.FieldHouseID]), requestString(payload[semantic.FieldHouseID]))
 		if strings.TrimSpace(houseID) == "" {
 			return nil, "missing_house_id"
 		}
@@ -237,7 +241,7 @@ func operationBatchStepsFromPreparedPayload(payload map[string]any) ([]operation
 			Intent:     intent,
 			HouseID:    houseID,
 			Payload:    stepPayload,
-			Summary:    requestString(item["summary"]),
+			Summary:    requestString(item[semantic.FieldSummary]),
 			StepNumber: index + 1,
 		})
 	}
@@ -333,7 +337,7 @@ func operationBatchConfigureExclusions() []string {
 }
 
 func requestTargets(raw map[string]any, fallback []map[string]any) []map[string]any {
-	rows, ok := raw["targets"].([]any)
+	rows, ok := raw[semantic.FieldTargets].([]any)
 	if !ok {
 		return fallback
 	}

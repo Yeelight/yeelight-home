@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestInvokeHomeUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
@@ -86,7 +88,7 @@ func TestInvokeRoomAreaConfigureRejectsUnknownArea(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-room-area-secret", "client-room-area-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-room-area-missing","locale":"zh-CN","utterance":"把客厅加入不存在的区域","intent":"room.area.configure","parameters":{"houseId":"200171","roomId":"401398","addAreaList":["area-missing"]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-room-area-missing","locale":"zh-CN","utterance":"把客厅加入不存在的区域","intent":"room.area.configure","parameters":{"houseId":"200171","roomId":"401398","addAreaIds":["area-missing"]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -100,6 +102,45 @@ func TestInvokeRoomAreaConfigureRejectsUnknownArea(t *testing.T) {
 	clarification := response["clarification"].(map[string]any)
 	if clarification["reason"] != "invalid_area_reference" {
 		t.Fatalf("clarification = %#v", clarification)
+	}
+}
+
+func TestInvokeRoomAreaConfigureResolvesRoomAndAreaNames(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		writeSeededHouseScopedListForConfigureTest(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-room-area-secret", "client-room-area-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-room-area-by-name","locale":"zh-CN","utterance":"把客厅加入南区","intent":"room.area.configure","parameters":{"houseId":"200171","roomName":"客厅","addAreaNames":["南区"]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response[semantic.FieldStatus] != "success" || response[semantic.FieldTraceID] != "invoke-preview" {
+		t.Fatalf("response = %#v, calls=%#v", response, gotCalls)
+	}
+	result := response[semantic.FieldResult].(map[string]any)
+	preview := result[semantic.FieldPreview].(map[string]any)
+	payloadPreview := preview[semantic.FieldPayloadPreview].(map[string]any)
+	semanticPreview := payloadPreview[semantic.FieldSemanticPreview].(map[string]any)
+	current := semanticPreview[semantic.FieldCurrent].(map[string]any)
+	planned := semanticPreview[semantic.FieldPlanned].(map[string]any)
+	addAreaIDs := planned[semantic.FieldAddAreaIDs].([]any)
+	if payloadPreview[semantic.FieldRoomID] != "401398" || current[semantic.FieldName] != "客厅" || addAreaIDs[0] != "300001" || result[semantic.FieldDryRun] != true {
+		t.Fatalf("payloadPreview = %#v semanticPreview=%#v result=%#v", payloadPreview, semanticPreview, result)
+	}
+	for _, call := range gotCalls {
+		if strings.Contains(call, "/area/w/") || strings.Contains(call, "/room/w/") {
+			t.Fatalf("room.area.configure dry-run should not write: %#v", gotCalls)
+		}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/config"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -29,22 +30,22 @@ func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int
 	}
 	paths := config.ResolveFromEnv()
 	response := map[string]any{
-		"status":        status,
-		"warnings":      warnings,
-		"authenticated": context.TokenPresent || authStatus.Authenticated,
-		"profile":       context.Profile,
-		"region":        context.Region,
-		"houseId":       context.HouseID,
-		"tokenPresent":  context.TokenPresent,
-		"tokenSource":   context.TokenSource,
-		"homeDir":       paths.HomeDir,
-		"configDir":     paths.ConfigDir,
-		"dataDir":       paths.DataDir,
-		"cacheDir":      paths.CacheDir,
-		"install":       installDiagnostics(flags.bool("online")),
-		"memoryMigrations": map[string]any{
-			"status": "available",
-			"count":  len(storage.MemoryMigrations()),
+		semantic.FieldStatus:        status,
+		semantic.FieldWarnings:      warnings,
+		semantic.FieldAuthenticated: context.TokenPresent || authStatus.Authenticated,
+		semantic.FieldProfile:       context.Profile,
+		semantic.FieldRegion:        context.Region,
+		semantic.FieldHouseID:       context.HouseID,
+		semantic.FieldTokenPresent:  context.TokenPresent,
+		semantic.FieldTokenSource:   context.TokenSource,
+		semantic.FieldHomeDir:       paths.HomeDir,
+		semantic.FieldConfigDir:     paths.ConfigDir,
+		semantic.FieldDataDir:       paths.DataDir,
+		semantic.FieldCacheDir:      paths.CacheDir,
+		semantic.FieldInstall:       installDiagnostics(flags.bool("online")),
+		semantic.FieldMemoryMigrations: map[string]any{
+			semantic.FieldStatus: "available",
+			semantic.FieldCount:  len(storage.MemoryMigrations()),
 		},
 	}
 	if !flags.bool("json") {
@@ -55,38 +56,38 @@ func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int
 
 func writeDoctorText(stdout io.Writer, response map[string]any) int {
 	_, _ = fmt.Fprintf(stdout, "Yeelight Home Doctor\n")
-	_, _ = fmt.Fprintf(stdout, "Status: %s\n", stringFromDiagnostic(response, "status"))
-	_, _ = fmt.Fprintf(stdout, "Authenticated: %t\n", boolFromDiagnostic(response, "authenticated"))
-	_, _ = fmt.Fprintf(stdout, "Profile: %s\n", stringFromDiagnostic(response, "profile"))
-	_, _ = fmt.Fprintf(stdout, "Region: %s\n", stringFromDiagnostic(response, "region"))
-	houseID := stringFromDiagnostic(response, "houseId")
+	_, _ = fmt.Fprintf(stdout, "Status: %s\n", stringFromDiagnostic(response, semantic.FieldStatus))
+	_, _ = fmt.Fprintf(stdout, "Authenticated: %t\n", boolFromDiagnostic(response, semantic.FieldAuthenticated))
+	_, _ = fmt.Fprintf(stdout, "Profile: %s\n", stringFromDiagnostic(response, semantic.FieldProfile))
+	_, _ = fmt.Fprintf(stdout, "Region: %s\n", stringFromDiagnostic(response, semantic.FieldRegion))
+	houseID := stringFromDiagnostic(response, semantic.FieldHouseID)
 	if houseID == "" {
 		houseID = "(not selected)"
 	}
 	_, _ = fmt.Fprintf(stdout, "House ID: %s\n", houseID)
-	_, _ = fmt.Fprintf(stdout, "Home dir: %s\n", stringFromDiagnostic(response, "homeDir"))
-	if install, ok := response["install"].(map[string]any); ok {
-		_, _ = fmt.Fprintf(stdout, "Runtime version: %s\n", stringFromDiagnostic(install, "version"))
-		_, _ = fmt.Fprintf(stdout, "Executable: %s\n", stringFromDiagnostic(install, "executable"))
-		_, _ = fmt.Fprintf(stdout, "PATH lookup: %s\n", stringFromDiagnostic(install, "pathLookup"))
+	_, _ = fmt.Fprintf(stdout, "Home dir: %s\n", stringFromDiagnostic(response, semantic.FieldHomeDir))
+	if install, ok := response[semantic.FieldInstall].(map[string]any); ok {
+		_, _ = fmt.Fprintf(stdout, "Runtime version: %s\n", stringFromDiagnostic(install, semantic.FieldVersion))
+		_, _ = fmt.Fprintf(stdout, "Executable: %s\n", stringFromDiagnostic(install, semantic.FieldExecutable))
+		_, _ = fmt.Fprintf(stdout, "PATH lookup: %s\n", stringFromDiagnostic(install, semantic.FieldPathLookup))
 		writeInstallSourceSummary(stdout, install)
-		if packageManagers, ok := install["packageManagers"].(map[string]any); ok {
-			writePackageManagerText(stdout, "npm", packageManagers["npm"])
-			writePackageManagerText(stdout, "homebrew", packageManagers["homebrew"])
+		if packageManagers, ok := install[semantic.FieldPackageManagers].(map[string]any); ok {
+			writePackageManagerText(stdout, semantic.FieldNPM, packageManagers[semantic.FieldNPM])
+			writePackageManagerText(stdout, semantic.FieldHomebrew, packageManagers[semantic.FieldHomebrew])
 		}
-		writeLatestVersionsText(stdout, install["latest"])
-		writeWarningsText(stdout, "Install warnings", install["warnings"])
-		writeWarningsText(stdout, "Suggested fixes", install["remediations"])
+		writeLatestVersionsText(stdout, install[semantic.FieldLatest])
+		writeWarningsText(stdout, "Install warnings", install[semantic.FieldWarnings])
+		writeWarningsText(stdout, "Suggested fixes", install[semantic.FieldRemediations])
 	}
-	writeWarningsText(stdout, "Warnings", response["warnings"])
+	writeWarningsText(stdout, "Warnings", response[semantic.FieldWarnings])
 	return exitOK
 }
 
 func writeInstallSourceSummary(stdout io.Writer, install map[string]any) {
 	summary := []string{}
-	pathLookup := stringFromDiagnostic(install, "pathLookupResolved")
+	pathLookup := stringFromDiagnostic(install, semantic.FieldPathLookupResolved)
 	if pathLookup == "" {
-		pathLookup = stringFromDiagnostic(install, "pathLookup")
+		pathLookup = stringFromDiagnostic(install, semantic.FieldPathLookup)
 	}
 	if pathLookup != "" {
 		if containsPathSegment(pathLookup, "node_modules/yeelight-home") {
@@ -95,21 +96,21 @@ func writeInstallSourceSummary(stdout io.Writer, install map[string]any) {
 			summary = append(summary, "PATH channel: direct binary or package-manager shim")
 		}
 	}
-	if wrapper := stringFromDiagnostic(install, "npmWrapperResolved"); wrapper != "" {
+	if wrapper := stringFromDiagnostic(install, semantic.FieldNPMWrapperResolved); wrapper != "" {
 		summary = append(summary, "Running through npm wrapper: true")
-	} else if wrapper := stringFromDiagnostic(install, "npmWrapper"); wrapper != "" {
+	} else if wrapper := stringFromDiagnostic(install, semantic.FieldNPMWrapper); wrapper != "" {
 		summary = append(summary, "Running through npm wrapper: true")
 	}
-	if packageManagers, ok := install["packageManagers"].(map[string]any); ok {
-		if npm, ok := packageManagers["npm"].(map[string]any); ok && boolFromDiagnostic(npm, "installed") {
-			summary = append(summary, "npm global version: "+fallbackVersion(stringFromDiagnostic(npm, "version")))
+	if packageManagers, ok := install[semantic.FieldPackageManagers].(map[string]any); ok {
+		if npm, ok := packageManagers[semantic.FieldNPM].(map[string]any); ok && boolFromDiagnostic(npm, semantic.FieldInstalled) {
+			summary = append(summary, "npm global version: "+fallbackVersion(stringFromDiagnostic(npm, semantic.FieldVersion)))
 		}
-		if homebrew, ok := packageManagers["homebrew"].(map[string]any); ok {
-			if formula, ok := homebrew["formula"].(map[string]any); ok && boolFromDiagnostic(formula, "installed") {
-				summary = append(summary, "Homebrew formula version: "+fallbackVersion(stringFromDiagnostic(formula, "version")))
+		if homebrew, ok := packageManagers[semantic.FieldHomebrew].(map[string]any); ok {
+			if formula, ok := homebrew[semantic.FieldFormula].(map[string]any); ok && boolFromDiagnostic(formula, semantic.FieldInstalled) {
+				summary = append(summary, "Homebrew formula version: "+fallbackVersion(stringFromDiagnostic(formula, semantic.FieldVersion)))
 			}
-			if cask, ok := homebrew["cask"].(map[string]any); ok && boolFromDiagnostic(cask, "installed") {
-				summary = append(summary, "Homebrew cask version: "+fallbackVersion(stringFromDiagnostic(cask, "version")))
+			if cask, ok := homebrew[semantic.FieldCask].(map[string]any); ok && boolFromDiagnostic(cask, semantic.FieldInstalled) {
+				summary = append(summary, "Homebrew cask version: "+fallbackVersion(stringFromDiagnostic(cask, semantic.FieldVersion)))
 			}
 		}
 	}
@@ -127,16 +128,16 @@ func writePackageManagerText(stdout io.Writer, name string, value any) {
 	if !ok {
 		return
 	}
-	available := boolFromDiagnostic(info, "available")
-	installed := boolFromDiagnostic(info, "installed")
-	version := stringFromDiagnostic(info, "version")
+	available := boolFromDiagnostic(info, semantic.FieldAvailable)
+	installed := boolFromDiagnostic(info, semantic.FieldInstalled)
+	version := stringFromDiagnostic(info, semantic.FieldVersion)
 	if version == "" {
 		version = "-"
 	}
 	_, _ = fmt.Fprintf(stdout, "%s: available=%t installed=%t version=%s\n", name, available, installed, version)
-	if name == "homebrew" {
-		writeHomebrewChannelText(stdout, "formula", info["formula"])
-		writeHomebrewChannelText(stdout, "cask", info["cask"])
+	if name == semantic.FieldHomebrew {
+		writeHomebrewChannelText(stdout, semantic.FieldFormula, info[semantic.FieldFormula])
+		writeHomebrewChannelText(stdout, semantic.FieldCask, info[semantic.FieldCask])
 	}
 }
 
@@ -145,33 +146,33 @@ func writeHomebrewChannelText(stdout io.Writer, name string, value any) {
 	if !ok {
 		return
 	}
-	version := stringFromDiagnostic(info, "version")
+	version := stringFromDiagnostic(info, semantic.FieldVersion)
 	if version == "" {
 		version = "-"
 	}
-	_, _ = fmt.Fprintf(stdout, "  %s: installed=%t version=%s\n", name, boolFromDiagnostic(info, "installed"), version)
+	_, _ = fmt.Fprintf(stdout, "  %s: installed=%t version=%s\n", name, boolFromDiagnostic(info, semantic.FieldInstalled), version)
 }
 
 func writeLatestVersionsText(stdout io.Writer, value any) {
 	latest, ok := value.(map[string]any)
-	if !ok || !boolFromDiagnostic(latest, "checked") {
+	if !ok || !boolFromDiagnostic(latest, semantic.FieldChecked) {
 		return
 	}
-	channels, ok := latest["channels"].(map[string]any)
+	channels, ok := latest[semantic.FieldChannels].(map[string]any)
 	if !ok {
 		return
 	}
 	_, _ = fmt.Fprintln(stdout, "Public latest:")
-	for _, name := range []string{"githubRelease", "npm", "homebrew", "homebrewCask"} {
+	for _, name := range []string{semantic.FieldGitHubRelease, semantic.FieldNPM, semantic.FieldHomebrew, semantic.FieldHomebrewCask} {
 		info, ok := channels[name].(map[string]any)
 		if !ok {
 			continue
 		}
-		version := stringFromDiagnostic(info, "version")
+		version := stringFromDiagnostic(info, semantic.FieldVersion)
 		if version == "" {
 			version = "-"
 		}
-		_, _ = fmt.Fprintf(stdout, "  - %s: ok=%t version=%s\n", name, boolFromDiagnostic(info, "ok"), version)
+		_, _ = fmt.Fprintf(stdout, "  - %s: ok=%t version=%s\n", name, boolFromDiagnostic(info, semantic.FieldOK), version)
 	}
 }
 

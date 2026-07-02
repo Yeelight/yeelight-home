@@ -27,7 +27,7 @@ func TestEntityListClientReturnsRedactedEntitiesForHouse(t *testing.T) {
 		case "/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"scene-1","name":"晚安"}]}}`))
 		case "/apis/iot/v1/automations/r/list":
-			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"auto-1","name":"回家开灯","status":0}]}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"auto-1","ruleId":"rule-1","name":"回家开灯","status":0}]}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -70,6 +70,9 @@ func TestEntityListClientReturnsRedactedEntitiesForHouse(t *testing.T) {
 	}
 	if result.Entities[2].Type != "device" || result.Entities[2].RoomID != "room-1" {
 		t.Fatalf("device entity = %#v", result.Entities[2])
+	}
+	if result.Entities[5].Type != "automation" || result.Entities[5].ID != "auto-1" {
+		t.Fatalf("automation entity = %#v", result.Entities[5])
 	}
 }
 

@@ -1,6 +1,10 @@
 package api
 
-import "context"
+import (
+	"context"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
+)
 
 func metadataReadonlyFromHomeOrganization(client HomeOrganizationClient) MetadataReadonlyClient {
 	return MetadataReadonlyClient{endpoint: client.endpoint, client: client.client}
@@ -13,7 +17,7 @@ func (client MetadataReadonlyClient) enrichSortedDeviceRows(ctx context.Context,
 	needsLookup := false
 	for _, raw := range rows {
 		row, ok := raw.(map[string]any)
-		if ok && nodeSortRowID(row) == "" && firstAnyString(row, "name", "alias") != "" {
+		if ok && nodeSortRowID(row) == "" && firstAnyString(row, semantic.FieldName, semantic.FieldAlias) != "" {
 			needsLookup = true
 			break
 		}
@@ -48,8 +52,8 @@ func (client MetadataReadonlyClient) enrichSortedDeviceRows(ctx context.Context,
 			enriched = append(enriched, row)
 			continue
 		}
-		name := firstAnyString(row, "name", "alias")
-		roomID := firstAnyString(row, "roomId")
+		name := firstAnyString(row, semantic.FieldName, semantic.FieldAlias)
+		roomID := firstAnyString(row, semantic.FieldRoomID)
 		entity, ok := byNameRoom[name+"\x00"+roomID]
 		if !ok {
 			enriched = append(enriched, row)
@@ -59,9 +63,9 @@ func (client MetadataReadonlyClient) enrichSortedDeviceRows(ctx context.Context,
 		for key, value := range row {
 			copyRow[key] = value
 		}
-		copyRow["id"] = entity.ID
-		copyRow["resId"] = entity.ID
-		copyRow["typeId"] = "2"
+		copyRow[semantic.FieldID] = entity.ID
+		copyRow[semantic.FieldTargetID] = entity.ID
+		copyRow[semantic.FieldTargetType] = semantic.ResourceTypeName(semantic.ResourceDevice)
 		enriched = append(enriched, copyRow)
 	}
 	return enriched, nil

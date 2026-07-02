@@ -43,15 +43,15 @@ func TestDevSeedClientCreatesAndVerifiesVirtualBoundDevice(t *testing.T) {
 
 	client := NewDevSeedClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
 	result, err := client.EnsureDevice(context.Background(), DevSeedDeviceRequest{
-		HouseID:        "house-1",
-		Name:           "Codex Dev Test Device",
-		PID:            1,
-		DeviceType:     1,
-		ConnectType:    0,
-		Bound:          true,
-		AllowWriteDev:  true,
-		VerifyAttempts: 1,
-		Credentials:    DevSeedCredentials{Authorization: "secret-token", ClientID: "client-1"},
+		HouseID:             "house-1",
+		Name:                "Codex Dev Test Device",
+		CapabilityProductID: 1,
+		DeviceType:          1,
+		ConnectType:         0,
+		Bound:               true,
+		AllowWriteDev:       true,
+		VerifyAttempts:      1,
+		Credentials:         DevSeedCredentials{Authorization: "secret-token", ClientID: "client-1"},
 	})
 	if err != nil {
 		t.Fatalf("EnsureDevice error: %v", err)

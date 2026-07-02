@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestInvokeAccountInfoReturnsRedactedResult(t *testing.T) {
@@ -57,9 +59,9 @@ func TestInvokePanelGetUsesCloudReadonlyAdapters(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/apis/iot/v1/panel/r/detail/device-1":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":1,"did":"device-1","name":"面板","mac":"AA:BB:CC:DD","localToken":"not-allowed"}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":1,"did":"device-1","name":"面板","mac":"AA:BB:CC:DD","localToken":"not-allowed","valid":1}}`))
 		case "/apis/iot/v1/panel/r/button/info/device-1":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"click":[{"buttonId":"1","name":"单击"}]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"click":[{"buttonId":"1","name":"单击","type":2,"valid":1,"sort":3,"buttonEvents":[{"id":"event-1","name":"单击","type":1,"valid":1}]}]}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -95,6 +97,82 @@ func TestInvokePanelGetUsesCloudReadonlyAdapters(t *testing.T) {
 	data, ok := result["data"].(map[string]any)
 	if !ok || data["detail"] == nil || data["buttons"] == nil {
 		t.Fatalf("data = %#v", result["data"])
+	}
+	detail := data["detail"].(map[string]any)
+	if _, ok := detail[semantic.FieldValid]; ok {
+		t.Fatalf("panel detail leaked raw valid field: %#v", detail)
+	}
+	buttonsByType := data["buttons"].(map[string]any)
+	clickButtons := buttonsByType["click"].([]any)
+	button := clickButtons[0].(map[string]any)
+	for _, leaked := range []string{semantic.FieldType, semantic.FieldValid, semantic.FieldSort} {
+		if _, ok := button[leaked]; ok {
+			t.Fatalf("panel button leaked raw %s field: %#v", leaked, button)
+		}
+	}
+	if button[semantic.FieldButtonType] == nil || button[semantic.FieldAvailable] == nil || button[semantic.FieldRank] == nil {
+		t.Fatalf("panel button missing semantic projection: %#v", button)
+	}
+	event := button[semantic.FieldButtonEvents].([]any)[0].(map[string]any)
+	for _, leaked := range []string{semantic.FieldType, semantic.FieldValid} {
+		if _, ok := event[leaked]; ok {
+			t.Fatalf("panel event leaked raw %s field: %#v", leaked, event)
+		}
+	}
+	if event[semantic.FieldEventTypeID] == nil || event[semantic.FieldAvailable] == nil {
+		t.Fatalf("panel event missing semantic projection: %#v", event)
+	}
+}
+
+func TestInvokePanelGetResolvesNaturalPanelName(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"deviceId":"panel-device-1","name":"scene_panel-智能情景面板-四键","roomId":"room-panel"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v1/panel/r/detail/panel-device-1":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":1,"did":"panel-device-1","name":"智能情景面板","localToken":"not-allowed"}}`))
+		case "/apis/iot/v1/panel/r/button/info/panel-device-1":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"click":[{"buttonId":"1","name":"单击"}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-panel-name-secret", "client-panel-name-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-panel-get-name","locale":"zh-CN","utterance":"看看情景面板的按钮配置","intent":"panel.get","parameters":{"houseId":"house-1","panelName":"智能情景面板"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(strings.Join(gotCalls, "\n"), "POST /apis/iot/v1/panel/r/detail/panel-device-1") {
+		t.Fatalf("panel.get should resolve panelName before readonly call: %#v", gotCalls)
+	}
+	if strings.Contains(stdout.String(), "not-allowed") {
+		t.Fatalf("sensitive panel data leaked: %s", stdout.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["deviceId"] != "panel-device-1" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -187,7 +265,7 @@ func TestInvokeHomeMemberListUsesCloudReadonlyAdapterWithRedaction(t *testing.T)
 		t.Fatalf("response = %#v", response)
 	}
 	metrics := response["metrics"].(map[string]any)
-	if metrics["apiCalls"] != float64(1) {
+	if metrics[semantic.FieldAPICalls] != float64(1) {
 		t.Fatalf("metrics = %#v", metrics)
 	}
 }
@@ -295,7 +373,7 @@ func TestInvokeHomeMemberCurrentDefaultsToCurrentAccountUID(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 	metrics := response["metrics"].(map[string]any)
-	if metrics["apiCalls"] != float64(2) {
+	if metrics[semantic.FieldAPICalls] != float64(2) {
 		t.Fatalf("metrics = %#v", metrics)
 	}
 }
@@ -402,7 +480,7 @@ func TestInvokeFavoriteListUsesCloudReadonlyAdapter(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		_, _ = writer.Write([]byte(`{"success":true,"data":[{"resId":"device-1","typeId":2,"rank":1}]}`))
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"deviceId":"device-1","name":"收藏灯","rank":1,"capabilityPid":198666,"gatewayDeviceId":"gw-1","attr":{"p":1},"isBind":true,"typeName":"筒灯","did":"raw-did"}],"meshgroups":[{"meshgroupId":"group-1","name":"收藏灯组","rank":2,"capabilityPid":198666}],"userscenes":[{"sceneId":"scene-1","name":"收藏情景","rank":3,"details":[{"typeId":2,"resId":"device-1"}]}]}}`))
 	}))
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
@@ -425,7 +503,56 @@ func TestInvokeFavoriteListUsesCloudReadonlyAdapter(t *testing.T) {
 	result := response["result"].(map[string]any)
 	data := result["data"].(map[string]any)
 	favorites := data["favorites"].([]any)
-	if len(favorites) != 1 {
+	if len(favorites) != 3 {
+		t.Fatalf("favorites = %#v", favorites)
+	}
+	favorite := favorites[0].(map[string]any)
+	if favorite["targetType"] != "device" || favorite["targetId"] != "device-1" {
+		t.Fatalf("favorite should expose public target fields: %#v", favorite)
+	}
+	groupFavorite := favorites[1].(map[string]any)
+	if groupFavorite["targetType"] != "meshGroup" || groupFavorite["targetId"] != "group-1" {
+		t.Fatalf("group favorite should expose public target fields: %#v", groupFavorite)
+	}
+	sceneFavorite := favorites[2].(map[string]any)
+	if sceneFavorite["targetType"] != "scene" || sceneFavorite["targetId"] != "scene-1" {
+		t.Fatalf("scene favorite should expose public target fields: %#v", sceneFavorite)
+	}
+	for _, forbidden := range []string{`"typeId"`, `"resId"`, `"capabilityPid"`, `"gatewayDeviceId"`, `"attr"`, `"did"`, `"typeName"`, `"isBind"`, `"details"`} {
+		if strings.Contains(stdout.String(), forbidden) {
+			t.Fatalf("favorite list leaked %s: %s", forbidden, stdout.String())
+		}
+	}
+}
+
+func TestInvokeFavoriteListSkipsEmptyCloudContainer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/favourite/r/all" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{}}`))
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-favorite-empty-secret", "client-fav-empty-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-favorite-empty-list","locale":"zh-CN","utterance":"查看收藏","intent":"favorite.list","parameters":{"houseId":"house-1"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	result := response["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	favorites := data["favorites"].([]any)
+	if len(favorites) != 0 {
 		t.Fatalf("favorites = %#v", favorites)
 	}
 }
@@ -469,7 +596,66 @@ func TestInvokeHomeSortListReadsCloudWithTypeAndTarget(t *testing.T) {
 	data := result["data"].(map[string]any)
 	sortRows := data["sort"].([]any)
 	if len(sortRows) != 1 {
+		t.Fatalf("sortRows = %#v", sortRows)
+	}
+	sortRow := sortRows[0].(map[string]any)
+	if sortRow["targetType"] != "device" || sortRow["targetId"] != float64(50018330) {
+		t.Fatalf("sort row should expose public target fields: %#v", sortRow)
+	}
+	for _, forbidden := range []string{`"typeId"`, `"resId"`} {
+		if strings.Contains(stdout.String(), forbidden) {
+			t.Fatalf("home sort leaked %s: %s", forbidden, stdout.String())
+		}
+	}
+	if len(sortRows) != 1 {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeHomeSortListResolvesRoomNameBeforeCloudRead(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v1/sort/r/getSort":
+			if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+				t.Fatalf("decode sort list body: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-sort-secret", "client-sort-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-sort-list-room-name","locale":"zh-CN","utterance":"查看客厅设备排序","intent":"home.sort.list","parameters":{"houseId":"house-1","sortType":"device_room","roomName":"客厅"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	if requestString(gotBody["target"]) != "room-1" || requestString(gotBody["roomId"]) != "room-1" {
+		t.Fatalf("gotBody = %#v", gotBody)
 	}
 }
 
@@ -512,9 +698,55 @@ func TestInvokeAutomationListPageUsesCloudReadonlyAdapter(t *testing.T) {
 	}
 	result := response["result"].(map[string]any)
 	data := result["data"].(map[string]any)
-	automations := data["automations"].(map[string]any)["rows"].([]any)
+	automations := data["automations"].(map[string]any)[semantic.FieldEntries].([]any)
 	if len(automations) != 1 || result["cloudWrites"] != false {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeAutomationSupportedV2ProjectsPublicResponse(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/automations/r/supported/v2" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":[{"pid":8784640,"actions":[{"id":1,"type":"event","desc":[{"languageId":"1","value":"Button event"},{"languageId":"2","value":"按键事件"}],"argsDesc":[{"type":"eventId","dataType":"int","unit":"","valueRange":"1,2"}],"supportVersion":"v1,v2"}]}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-auto-supported-secret", "client-auto-supported-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-auto-supported-v2","locale":"zh-CN","utterance":"看看自动化支持哪些事件","intent":"automation.supported.v2.list","parameters":{"houseId":"house-1"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(gotCalls) != 1 || gotCalls[0] != "POST /apis/iot/v1/automations/r/supported/v2" {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	output := stdout.String()
+	for _, forbidden := range []string{"token-auto-supported-secret", `"pid"`, `"actions"`, `"desc"`, `"argsDesc"`, `"supportVersion"`, `"dataType"`} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("output leaked %q: %s", forbidden, output)
+		}
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	result := response["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	supported := data[semantic.FieldSupportedV2].([]any)
+	row := supported[0].(map[string]any)
+	conditions := row[semantic.FieldConditions].([]any)
+	condition := conditions[0].(map[string]any)
+	if row[semantic.FieldCapabilityPID] != float64(8784640) || condition[semantic.FieldName] != "按键事件" || condition[semantic.FieldConditionKind] != "event" {
+		t.Fatalf("response = %#v", response)
 	}
 }
 
@@ -525,7 +757,7 @@ func TestInvokeKnobGetReturnsPartialWhenOneAdapterFails(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
 		case "/apis/iot/v1/knobs/device-1/detail":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":1,"did":"device-1","configType":"single","localToken":"not-allowed"}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":1,"did":"device-1","configType":"single","localToken":"not-allowed","sequence":"9","connectType":"1","valid":1}}`))
 		case "/apis/iot/v1/multi-knob/device-1/detail":
 			_, _ = writer.Write([]byte(`{"success":false,"code":"404","msg":"not found"}`))
 		default:
@@ -555,6 +787,69 @@ func TestInvokeKnobGetReturnsPartialWhenOneAdapterFails(t *testing.T) {
 	}
 	if response["status"] != "partial" {
 		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	data := result["data"].(map[string]any)
+	single := data[semantic.FieldSingle].(map[string]any)
+	for _, leaked := range []string{semantic.FieldSequence, semantic.FieldConnectType, semantic.FieldValid} {
+		if _, ok := single[leaked]; ok {
+			t.Fatalf("knob detail leaked raw %s field: %#v", leaked, single)
+		}
+	}
+	if single[semantic.FieldAvailable] == nil {
+		t.Fatalf("knob detail missing semantic availability: %#v", single)
+	}
+}
+
+func TestInvokeKnobGetResolvesNaturalKnobName(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"deviceId":"knob-device-1","name":"knob_switch-Yeelight Pro M20 旋钮开关","roomId":"room-knob"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v1/knobs/knob-device-1/detail":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":1,"did":"knob-device-1","configType":"single","localToken":"not-allowed"}}`))
+		case "/apis/iot/v1/multi-knob/knob-device-1/detail":
+			_, _ = writer.Write([]byte(`{"success":false,"code":"404","msg":"not found"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-knob-name-secret", "client-knob-name-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-knob-get-name","locale":"zh-CN","utterance":"看看 M20 旋扭绑定了什么","intent":"knob.get","parameters":{"houseId":"house-1","knobName":"M20 旋扭开关"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(strings.Join(gotCalls, "\n"), "GET /apis/iot/v1/knobs/knob-device-1/detail") {
+		t.Fatalf("knob.get should resolve knobName before readonly call: %#v", gotCalls)
+	}
+	if strings.Contains(stdout.String(), "not-allowed") {
+		t.Fatalf("sensitive knob data leaked: %s", stdout.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "partial" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["deviceId"] != "knob-device-1" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

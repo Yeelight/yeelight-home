@@ -7,6 +7,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) invokeDiagnoseDevice(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -29,24 +30,24 @@ func (app *app) invokeDiagnoseDevice(ctx context.Context, request contract.Reque
 	}
 
 	evidence := map[string]any{
-		"entity": entitySummaryMap(match),
+		semantic.FieldEntity: entitySummaryMap(match),
 	}
 	if match.Online != nil {
-		evidence["online"] = *match.Online
+		evidence[semantic.FieldOnline] = *match.Online
 	}
 	if match.Status != "" {
-		evidence["status"] = match.Status
+		evidence[semantic.FieldStatus] = match.Status
 	}
 	if capabilityOK {
-		evidence["capabilitySource"] = capability.CapabilitySource
-		evidence["schemaStatus"] = capability.SchemaStatus
-		evidence["propertyIds"] = stateQueryPropertySet(capability.Device)
+		evidence[semantic.FieldCapabilitySource] = capability.CapabilitySource
+		evidence[semantic.FieldSchemaStatus] = capability.SchemaStatus
+		evidence[semantic.FieldSupportedProperties] = stateQuerySupportedProperties(capability.Device)
 	}
 	if stateOK {
-		evidence["stateSource"] = state.Source
-		evidence["stateShape"] = state.RawShape
+		evidence[semantic.FieldStateSource] = state.Source
+		evidence[semantic.FieldStateShape] = state.RawShape
 		if len(state.Properties) > 0 {
-			evidence["properties"] = state.Properties
+			evidence[semantic.FieldProperties] = stateQueryPublicProperties(state.Properties)
 		}
 	}
 
@@ -86,7 +87,7 @@ func (app *app) invokeDiagnoseGateway(ctx context.Context, request contract.Requ
 			warnings = append(warnings, "gateway_entity_projection_unavailable")
 			warnings = append(warnings, gatewayResult.Warnings...)
 			evidence := map[string]any{
-				"gateway": gatewayDiagnosisEvidence(gatewayResult),
+				semantic.FieldGateway: gatewayDiagnosisEvidence(gatewayResult),
 			}
 			return diagnosticResponse(request, "partial", "已通过网关详情接口读取网关基础信息，但实体聚合中缺少该网关投影，专项诊断证据仍不完整。", "diagnose-gateway-readonly", entities, evidence, unknowns, warnings, entityListAPICalls(entities)+gatewayResult.APICalls), nil
 		}
@@ -103,13 +104,13 @@ func (app *app) invokeDiagnoseGateway(ctx context.Context, request contract.Requ
 		unknowns = append(unknowns, "gateway_entity_type_projection_unavailable")
 	}
 	evidence := map[string]any{
-		"entity": entitySummaryMap(match),
+		semantic.FieldEntity: entitySummaryMap(match),
 	}
 	if match.Online != nil {
-		evidence["online"] = *match.Online
+		evidence[semantic.FieldOnline] = *match.Online
 	}
 	if match.Status != "" {
-		evidence["status"] = match.Status
+		evidence[semantic.FieldStatus] = match.Status
 	}
 	return diagnosticResponse(request, "partial", fmt.Sprintf("已读取 %s 的网关相关基础信息，但缺少网关专项诊断证据。", match.Name), "diagnose-gateway-readonly", entities, evidence, unknowns, warnings, entityListAPICalls(entities)), nil
 }
@@ -122,7 +123,7 @@ func readGatewayDetailForDiagnosis(ctx context.Context, endpoint api.Endpoint, h
 		HouseID:  houseID,
 		DeviceID: target.id,
 		Parameters: map[string]any{
-			"gatewayId": target.id,
+			semantic.FieldGatewayID: target.id,
 		},
 		Credentials: api.MetadataReadonlyCredentials{
 			Authorization: authorization,
@@ -140,13 +141,13 @@ func readGatewayDetailForDiagnosis(ctx context.Context, endpoint api.Endpoint, h
 
 func gatewayDiagnosisEvidence(result api.MetadataReadonlyResult) map[string]any {
 	evidence := map[string]any{
-		"source":      result.Capability,
-		"deviceId":    result.DeviceID,
-		"cloudWrites": false,
+		semantic.FieldSource:      result.Capability,
+		semantic.FieldDeviceID:    result.DeviceID,
+		semantic.FieldCloudWrites: false,
 	}
 	if data, ok := result.Data.(map[string]any); ok {
-		if detail, ok := data["detail"].(map[string]any); ok {
-			evidence["detail"] = detail
+		if detail, ok := data[semantic.FieldDetail].(map[string]any); ok {
+			evidence[semantic.FieldDetail] = detail
 		}
 	}
 	return evidence
@@ -159,9 +160,9 @@ func (app *app) invokeDiagnoseScene(ctx context.Context, request contract.Reques
 	}
 	unknowns := []string{"scene_action_detail_unavailable", "scene_execution_history_unavailable"}
 	evidence := map[string]any{
-		"entity":             entitySummaryMap(match),
-		"executionIntent":    "scene.execute",
-		"executionReadiness": "entity_resolved",
+		semantic.FieldEntity:             entitySummaryMap(match),
+		semantic.FieldExecutionIntent:    "scene.execute",
+		semantic.FieldExecutionReadiness: "entity_resolved",
 	}
 	return diagnosticResponse(request, "partial", fmt.Sprintf("已确认情景 %s 存在，但缺少动作明细和执行历史证据。", match.Name), "diagnose-scene-readonly", entities, evidence, unknowns, entities.Warnings, entityListAPICalls(entities)), nil
 }
@@ -181,19 +182,61 @@ func (app *app) invokeAutomationExplainWithMode(ctx context.Context, request con
 	}
 	unknowns := []string{"automation_trigger_detail_unavailable", "automation_condition_detail_unavailable", "automation_action_detail_unavailable", "automation_history_unavailable"}
 	evidence := map[string]any{
-		"entity": entitySummaryMap(match),
+		semantic.FieldEntity: entitySummaryMap(match),
 	}
 	if match.Status != "" {
-		evidence["status"] = match.Status
+		evidence[semantic.FieldStatus] = match.Status
 	}
 	traceID := "diagnose-automation-readonly"
 	message := fmt.Sprintf("已读取自动化 %s 的基础状态，但缺少规则明细和历史证据。", match.Name)
+	apiCalls := entityListAPICalls(entities)
+	warnings := append([]string{}, entities.Warnings...)
 	if mode == "explain" {
 		traceID = "automation-explain-readonly"
-		message = fmt.Sprintf("已根据当前可读信息解释自动化 %s，但规则明细仍需后续只读 adapter。", match.Name)
-		evidence["explanationScope"] = "entity_projection_only"
+		message = fmt.Sprintf("已根据当前可读信息解释自动化 %s，但规则明细仍需后续只读能力支持。", match.Name)
+		evidence[semantic.FieldExplanationScope] = "entity_projection_only"
 	}
-	return diagnosticResponse(request, "partial", message, traceID, entities, evidence, unknowns, entities.Warnings, entityListAPICalls(entities)), nil
+	detail, detailOK, err := readAutomationDetailForDiagnosis(ctx, endpoint, houseID, match.ID, authorization, clientID)
+	if err != nil {
+		return contract.Response{}, err
+	}
+	if detail.APICalls > 0 {
+		apiCalls += detail.APICalls
+		warnings = append(warnings, detail.Warnings...)
+	}
+	if detailOK {
+		evidence[semantic.FieldDetail] = detail.Data
+		evidence[semantic.FieldExplanationScope] = "automation_detail"
+		successMessage := fmt.Sprintf("已读取自动化 %s 的规则详情。", match.Name)
+		if mode == "explain" {
+			successMessage = fmt.Sprintf("已根据规则详情解释自动化 %s。", match.Name)
+		}
+		return diagnosticResponse(request, "success", successMessage, traceID, entities, evidence, []string{"automation_history_unavailable"}, warnings, apiCalls), nil
+	}
+	return diagnosticResponse(request, "partial", message, traceID, entities, evidence, unknowns, warnings, apiCalls), nil
+}
+
+func readAutomationDetailForDiagnosis(ctx context.Context, endpoint api.Endpoint, houseID string, automationID string, authorization string, clientID string) (api.MetadataReadonlyResult, bool, error) {
+	if houseID == "" || automationID == "" {
+		return api.MetadataReadonlyResult{}, false, nil
+	}
+	result, err := api.NewMetadataReadonlyClient(endpoint, nil).RunAutomationDetailGet(ctx, api.MetadataReadonlyRequest{
+		HouseID: houseID,
+		Parameters: map[string]any{
+			semantic.FieldAutomationID: automationID,
+		},
+		Credentials: api.MetadataReadonlyCredentials{
+			Authorization: authorization,
+			ClientID:      clientID,
+		},
+	})
+	if err != nil {
+		return api.MetadataReadonlyResult{}, false, err
+	}
+	if result.Partial || result.Data == nil {
+		return result, false, nil
+	}
+	return result, true, nil
 }
 
 func resolveDiagnosticTarget(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, expectedType string, supportedTypes []string) (api.EntityListResult, api.EntitySummary, *contract.Response, error) {
@@ -272,17 +315,17 @@ func diagnosticResponse(request contract.Request, status string, message string,
 		Status:          status,
 		UserMessage:     message,
 		Result: map[string]any{
-			"region":          entities.Region,
-			"houseId":         entities.HouseID,
-			"diagnosticType":  strings.TrimPrefix(traceID, "diagnose-"),
-			"evidence":        evidence,
-			"unknownEvidence": unknowns,
+			semantic.FieldRegion:          entities.Region,
+			semantic.FieldHouseID:         entities.HouseID,
+			semantic.FieldDiagnosticType:  strings.TrimPrefix(traceID, "diagnose-"),
+			semantic.FieldEvidence:        evidence,
+			semantic.FieldUnknownEvidence: unknowns,
 		},
 		Warnings: warnings,
 		TraceID:  traceID,
 		Metrics: map[string]any{
-			"apiCalls":  apiCalls,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  apiCalls,
+			semantic.FieldCacheHits: 0,
 		},
 	}
 }
@@ -301,16 +344,16 @@ func diagnosticClarificationResponse(request contract.Request, reason string, ta
 		Status:          "clarification_required",
 		UserMessage:     "请明确要诊断或解释的家庭实体。",
 		Clarification: map[string]any{
-			"reason":               reason,
-			"target":               target.toMap(),
-			"candidates":           preview,
-			"supportedEntityTypes": supportedTypes,
+			semantic.FieldReason:               reason,
+			semantic.FieldTarget:               target.toMap(),
+			semantic.FieldCandidates:           preview,
+			semantic.FieldSupportedEntityTypes: supportedTypes,
 		},
 		Warnings: []string{},
 		TraceID:  "diagnostic-clarification",
 		Metrics: map[string]any{
-			"apiCalls":  apiCalls,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  apiCalls,
+			semantic.FieldCacheHits: 0,
 		},
 	}
 }

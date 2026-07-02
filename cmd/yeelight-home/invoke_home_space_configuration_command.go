@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareHomeSpaceConfiguration(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,7 +17,7 @@ func (app *app) prepareHomeSpaceConfiguration(ctx context.Context, request contr
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	payload, preconditions, summary, err := buildHomeSpaceConfigurationPayload(request, houseID)
 	if err != nil {
@@ -32,6 +33,9 @@ func (app *app) prepareHomeSpaceConfiguration(ctx context.Context, request contr
 	if err != nil {
 		return contract.Response{}, err
 	}
+	if reason := resolveHomeSpaceConfigurationReferences(request.Intent, payload, entities); reason != "" {
+		return homeSpaceConfigurationClarificationResponse(request, reason), nil
+	}
 	if reason := validateHomeSpaceConfigurationPayload(request.Intent, payload, entities); reason != "" {
 		return homeSpaceConfigurationClarificationResponse(request, reason), nil
 	}
@@ -46,8 +50,18 @@ func (app *app) prepareHomeSpaceConfiguration(ctx context.Context, request contr
 func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string) (map[string]any, []string, string, error) {
 	switch request.Intent {
 	case "home.update":
-		payload := map[string]any{"houseId": requestNumberOrString(houseID)}
-		if !copyOptionalSpaceFields(payload, request.Parameters, []string{"name", "desc", "icon", "areaId", "areaCode", "areaName", "buildingName", "buildingAddr", "floorName"}) {
+		payload := map[string]any{semantic.FieldHouseID: requestNumberOrString(houseID)}
+		if !copyOptionalSpaceFields(payload, request.Parameters, []string{
+			semantic.FieldName,
+			semantic.FieldDescription,
+			semantic.FieldIcon,
+			semantic.FieldAreaID,
+			semantic.FieldAreaCode,
+			semantic.FieldAreaName,
+			semantic.FieldBuildingName,
+			semantic.FieldBuildingAddress,
+			semantic.FieldFloorName,
+		}) {
 			return nil, nil, "", fmt.Errorf("invalid_home_update_payload")
 		}
 		return payload, []string{
@@ -57,13 +71,13 @@ func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string
 			"提交后通过家庭详情回读验证；名称字段可做精确验证，其余字段按云端写入确认加详情可读性验证",
 		}, "更新家庭资料", nil
 	case "room.batch_create":
-		rooms, ok := normalizeHomeSpaceRoomItems(firstNonNil(request.Parameters["rooms"], request.Parameters["items"]), false)
+		rooms, ok := normalizeHomeSpaceRoomItems(firstNonNil(request.Parameters[semantic.FieldRooms], request.Parameters[semantic.FieldItems]), false)
 		if !ok {
 			return nil, nil, "", fmt.Errorf("invalid_room_batch_create_payload")
 		}
 		return map[string]any{
-				"houseId": requestNumberOrString(houseID),
-				"rooms":   rooms,
+				semantic.FieldHouseID: requestNumberOrString(houseID),
+				semantic.FieldRooms:   rooms,
 			}, []string{
 				"提交前重新读取家庭实体列表",
 				"所有新房间名称必须非空且当前家庭内不存在",
@@ -71,13 +85,13 @@ func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string
 				"提交后通过 entity.list 按房间名称逐项验证",
 			}, fmt.Sprintf("批量创建%d个房间", len(rooms)), nil
 	case "room.batch_update":
-		rooms, ok := normalizeHomeSpaceRoomItems(firstNonNil(request.Parameters["rooms"], request.Parameters["items"]), true)
+		rooms, ok := normalizeHomeSpaceRoomItems(firstNonNil(request.Parameters[semantic.FieldRooms], request.Parameters[semantic.FieldItems]), true)
 		if !ok {
 			return nil, nil, "", fmt.Errorf("invalid_room_batch_update_payload")
 		}
 		return map[string]any{
-				"houseId": requestNumberOrString(houseID),
-				"rooms":   rooms,
+				semantic.FieldHouseID: requestNumberOrString(houseID),
+				semantic.FieldRooms:   rooms,
 			}, []string{
 				"提交前重新读取家庭实体列表",
 				"每个目标房间必须属于当前家庭",
@@ -86,23 +100,36 @@ func buildHomeSpaceConfigurationPayload(request contract.Request, houseID string
 				"提交后通过 entity.list 按房间 id/name 逐项验证",
 			}, fmt.Sprintf("批量更新%d个房间", len(rooms)), nil
 	case "room.area.configure":
-		roomID := firstRequestString(request.Parameters, "roomId", "id", "entityId")
-		addAreaList := requestStringList(request.Parameters["addAreaList"], request.Parameters["addAreaIds"], request.Parameters["addAreaId"])
-		removeAreaList := requestStringList(request.Parameters["removeAreaList"], request.Parameters["removeAreaIds"], request.Parameters["removeAreaId"])
-		if roomID == "" || (len(addAreaList) == 0 && len(removeAreaList) == 0) {
+		roomID := firstRequestString(request.Parameters, semantic.FieldRoomID, semantic.FieldID, semantic.FieldEntityID)
+		roomName := firstRequestString(request.Parameters, semantic.FieldCurrentName, semantic.FieldRoomName, semantic.FieldEntityName, semantic.FieldTargetName)
+		addAreaIDs := requestStringList(request.Parameters[semantic.FieldAddAreaIDs])
+		removeAreaIDs := requestStringList(request.Parameters[semantic.FieldRemoveAreaIDs])
+		addAreaNames := requestStringList(request.Parameters[semantic.FieldAddAreaNames])
+		removeAreaNames := requestStringList(request.Parameters[semantic.FieldRemoveAreaNames])
+		if (roomID == "" && roomName == "") || (len(addAreaIDs) == 0 && len(removeAreaIDs) == 0 && len(addAreaNames) == 0 && len(removeAreaNames) == 0) {
 			return nil, nil, "", fmt.Errorf("invalid_room_area_configure_payload")
 		}
-		return map[string]any{
-				"houseId":        requestNumberOrString(houseID),
-				"roomId":         roomID,
-				"addAreaList":    stringListAsRequestIDs(addAreaList),
-				"removeAreaList": stringListAsRequestIDs(removeAreaList),
-			}, []string{
-				"提交前重新读取家庭实体列表",
-				"目标房间和所有区域必须属于当前家庭",
-				"Runtime 根据当前请求构建受控区域 payload",
-				"提交后通过 entity.list 确认房间和区域仍可访问；区域归属字段以云端写入确认作为证据",
-			}, "调整房间区域归属", nil
+		payload := map[string]any{
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.FieldRoomID:  roomID,
+			semantic.InternalField(semantic.DomainCommon, semantic.FieldAddAreaIDs):    stringListAsRequestIDs(addAreaIDs),
+			semantic.InternalField(semantic.DomainCommon, semantic.FieldRemoveAreaIDs): stringListAsRequestIDs(removeAreaIDs),
+		}
+		if roomName != "" {
+			payload[semantic.FieldCurrentName] = roomName
+		}
+		if len(addAreaNames) > 0 {
+			payload[semantic.FieldAddAreaNames] = stringListAsRequestIDs(addAreaNames)
+		}
+		if len(removeAreaNames) > 0 {
+			payload[semantic.FieldRemoveAreaNames] = stringListAsRequestIDs(removeAreaNames)
+		}
+		return payload, []string{
+			"提交前重新读取家庭实体列表",
+			"目标房间和所有区域必须属于当前家庭",
+			"Runtime 根据当前请求构建受控区域 payload",
+			"提交后通过 entity.list 确认房间和区域仍可访问；区域归属字段以云端写入确认作为证据",
+		}, "调整房间区域归属", nil
 	default:
 		return nil, nil, "", fmt.Errorf("unsupported_home_space_configuration_intent")
 	}
@@ -116,23 +143,36 @@ func normalizeHomeSpaceRoomItems(value any, requireID bool) ([]any, bool) {
 	result := make([]any, 0, len(items))
 	for _, item := range items {
 		room := map[string]any{}
-		for _, key := range []string{"roomId", "id", "name", "desc", "icon", "img", "gatewayDeviceId", "gatewayIds", "gatewayDeviceIds", "defaultGatewayIds", "seq", "rank", "capability"} {
+		for _, key := range []string{
+			semantic.FieldRoomID,
+			semantic.FieldID,
+			semantic.FieldName,
+			semantic.FieldDescription,
+			semantic.FieldIcon,
+			semantic.FieldImage,
+			semantic.FieldGatewayDeviceID,
+			semantic.FieldGatewayIDs,
+			semantic.FieldDefaultGatewayIDs,
+			semantic.FieldSequence,
+			semantic.FieldRank,
+			semantic.FieldCapability,
+		} {
 			if value, ok := item[key]; ok {
-				room[key] = value
+				room[semantic.InternalField(semantic.DomainCommon, key)] = value
 			}
 		}
 		if requireID {
-			roomID := firstRequestString(room, "roomId", "id")
+			roomID := firstRequestString(room, semantic.FieldRoomID, semantic.FieldID)
 			if roomID == "" {
-				roomID = firstValueIDString(room, "roomId", "id")
+				roomID = firstValueIDString(room, semantic.FieldRoomID, semantic.FieldID)
 			}
 			if roomID == "" {
 				return nil, false
 			}
-			room["id"] = roomID
-			room["roomId"] = roomID
+			room[semantic.FieldID] = roomID
+			room[semantic.FieldRoomID] = roomID
 		}
-		if !requireID && strings.TrimSpace(requestString(room["name"])) == "" {
+		if !requireID && strings.TrimSpace(requestString(room[semantic.FieldName])) == "" {
 			return nil, false
 		}
 		result = append(result, room)
@@ -140,12 +180,61 @@ func normalizeHomeSpaceRoomItems(value any, requireID bool) ([]any, bool) {
 	return result, true
 }
 
+func resolveHomeSpaceConfigurationReferences(intent string, payload map[string]any, entities api.EntityListResult) string {
+	if intent != "room.area.configure" {
+		return ""
+	}
+	if valueIDString(payload[semantic.FieldRoomID]) == "" {
+		roomName := strings.TrimSpace(requestString(payload[semantic.FieldCurrentName]))
+		if roomName == "" {
+			return "invalid_room_reference"
+		}
+		match, ambiguous := findUniqueEntityByName(entities, "room", roomName)
+		if ambiguous {
+			return "ambiguous_room_reference"
+		}
+		if match.ID == "" {
+			return "invalid_room_reference"
+		}
+		payload[semantic.FieldRoomID] = match.ID
+	}
+	if reason := resolveAreaNameList(payload, semantic.FieldAddAreaNames, semantic.FieldAddAreaIDs, entities); reason != "" {
+		return reason
+	}
+	if reason := resolveAreaNameList(payload, semantic.FieldRemoveAreaNames, semantic.FieldRemoveAreaIDs, entities); reason != "" {
+		return reason
+	}
+	return ""
+}
+
+func resolveAreaNameList(payload map[string]any, namesKey string, idsKey string, entities api.EntityListResult) string {
+	areaNames := requestStringList(payload[namesKey])
+	if len(areaNames) == 0 {
+		return ""
+	}
+	internalIDsKey := semantic.InternalField(semantic.DomainCommon, idsKey)
+	areaIDs := valueIDList(payload[internalIDsKey])
+	for _, areaName := range areaNames {
+		match, ambiguous := findUniqueEntityByName(entities, "area", areaName)
+		if ambiguous {
+			return "ambiguous_area_reference"
+		}
+		if match.ID == "" {
+			return "invalid_area_reference"
+		}
+		areaIDs = append(areaIDs, match.ID)
+	}
+	payload[internalIDsKey] = stringListAsRequestIDs(areaIDs)
+	delete(payload, namesKey)
+	return ""
+}
+
 func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any, entities api.EntityListResult) string {
 	switch intent {
 	case "home.update":
 		return ""
 	case "room.batch_create":
-		rooms, ok := payload["rooms"].([]any)
+		rooms, ok := payload[semantic.FieldRooms].([]any)
 		if !ok || len(rooms) == 0 || len(rooms) > 20 {
 			return "invalid_room_batch_create_payload"
 		}
@@ -155,7 +244,7 @@ func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any
 			if !ok {
 				return "invalid_room_batch_create_payload"
 			}
-			name := strings.TrimSpace(requestString(room["name"]))
+			name := strings.TrimSpace(requestString(room[semantic.FieldName]))
 			if name == "" {
 				return "invalid_room_batch_create_payload"
 			}
@@ -173,7 +262,7 @@ func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any
 			}
 		}
 	case "room.batch_update":
-		rooms, ok := payload["rooms"].([]any)
+		rooms, ok := payload[semantic.FieldRooms].([]any)
 		if !ok || len(rooms) == 0 || len(rooms) > 20 {
 			return "invalid_room_batch_update_payload"
 		}
@@ -183,7 +272,7 @@ func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any
 			if !ok {
 				return "invalid_room_batch_update_payload"
 			}
-			roomID := valueIDString(firstNonNil(room["roomId"], room["id"]))
+			roomID := valueIDString(firstNonNil(room[semantic.FieldRoomID], room[semantic.FieldID]))
 			current, exists := findEntitySummary(entities, "room", roomID)
 			if !exists {
 				return "invalid_room_reference"
@@ -192,10 +281,10 @@ func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any
 				return "duplicate_room_target"
 			}
 			seenIDs[roomID] = true
-			if strings.TrimSpace(requestString(room["name"])) == "" {
-				room["name"] = current.Name
+			if strings.TrimSpace(requestString(room[semantic.FieldName])) == "" {
+				room[semantic.FieldName] = current.Name
 			}
-			if name := strings.TrimSpace(requestString(room["name"])); name != "" {
+			if name := strings.TrimSpace(requestString(room[semantic.FieldName])); name != "" {
 				for _, entity := range entities.Entities {
 					if entity.Type == "room" && entity.ID != roomID && entity.Name == name {
 						return "room_name_already_exists"
@@ -207,11 +296,14 @@ func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any
 			}
 		}
 	case "room.area.configure":
-		roomID := valueIDString(payload["roomId"])
+		roomID := valueIDString(payload[semantic.FieldRoomID])
 		if !entityExists(entities, "room", roomID) {
 			return "invalid_room_reference"
 		}
-		areaIDs := append(valueIDList(payload["addAreaList"]), valueIDList(payload["removeAreaList"])...)
+		areaIDs := append(
+			valueIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldAddAreaIDs)]),
+			valueIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldRemoveAreaIDs)])...,
+		)
 		if len(areaIDs) == 0 {
 			return "invalid_room_area_configure_payload"
 		}
@@ -232,24 +324,34 @@ func validateHomeSpaceConfigurationPayload(intent string, payload map[string]any
 }
 
 func homeSpaceConfigurationPreview(intent string, payload map[string]any, entities api.EntityListResult) map[string]any {
-	preview := map[string]any{"planned": executionPayloadPreview(operation.Prepared{HouseID: requestString(payload["houseId"]), Payload: payload})}
+	preview := map[string]any{semantic.FieldPlanned: executionPayloadPreview(operation.Prepared{HouseID: requestString(payload[semantic.FieldHouseID]), Payload: payload})}
 	switch intent {
 	case "room.batch_update":
-		rooms, _ := payload["rooms"].([]any)
+		rooms, _ := payload[semantic.FieldRooms].([]any)
 		current := make([]any, 0, len(rooms))
 		for _, raw := range rooms {
 			room, ok := raw.(map[string]any)
 			if !ok {
 				continue
 			}
-			if entity, ok := findEntitySummary(entities, "room", valueIDString(firstNonNil(room["roomId"], room["id"]))); ok {
-				current = append(current, map[string]any{"id": entity.ID, "name": entity.Name})
+			if entity, ok := findEntitySummary(entities, "room", valueIDString(firstNonNil(room[semantic.FieldRoomID], room[semantic.FieldID]))); ok {
+				current = append(current, map[string]any{semantic.FieldID: entity.ID, semantic.FieldName: entity.Name})
 			}
 		}
-		preview["current"] = current
+		preview[semantic.FieldCurrent] = current
 	case "room.area.configure":
-		if entity, ok := findEntitySummary(entities, "room", valueIDString(payload["roomId"])); ok {
-			preview["current"] = map[string]any{"id": entity.ID, "name": entity.Name}
+		if entity, ok := findEntitySummary(entities, "room", valueIDString(payload[semantic.FieldRoomID])); ok {
+			preview[semantic.FieldCurrent] = map[string]any{semantic.FieldID: entity.ID, semantic.FieldName: entity.Name}
+		}
+		planned := map[string]any{}
+		if addAreaIDs := valueIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldAddAreaIDs)]); len(addAreaIDs) > 0 {
+			planned[semantic.FieldAddAreaIDs] = addAreaIDs
+		}
+		if removeAreaIDs := valueIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldRemoveAreaIDs)]); len(removeAreaIDs) > 0 {
+			planned[semantic.FieldRemoveAreaIDs] = removeAreaIDs
+		}
+		if len(planned) > 0 {
+			preview[semantic.FieldPlanned] = planned
 		}
 	}
 	return preview
@@ -258,15 +360,29 @@ func homeSpaceConfigurationPreview(intent string, payload map[string]any, entiti
 func homeSpaceConfigurationAcceptedFields(intent string) []string {
 	switch intent {
 	case "home.update":
-		return []string{"parameters.houseId", "parameters.name", "parameters.desc", "parameters.icon", "parameters.areaId", "parameters.areaCode", "parameters.areaName", "parameters.buildingName", "parameters.buildingAddr", "parameters.floorName"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldAreaID, semantic.FieldAreaCode, semantic.FieldAreaName, semantic.FieldBuildingName, semantic.FieldBuildingAddress, semantic.FieldFloorName)
 	case "room.batch_create":
-		return []string{"parameters.houseId", "parameters.rooms[].name", "parameters.rooms[].desc", "parameters.rooms[].icon", "parameters.rooms[].gatewayDeviceId"}
+		return []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldName),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldDescription),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldIcon),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldGatewayDeviceID),
+		}
 	case "room.batch_update":
-		return []string{"parameters.houseId", "parameters.rooms[].roomId", "parameters.rooms[].name", "parameters.rooms[].img", "parameters.rooms[].gatewayDeviceId", "parameters.rooms[].seq", "parameters.rooms[].capability"}
+		return []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldRoomID),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldName),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldImage),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldGatewayDeviceID),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldSequence),
+			semanticParameterArrayPath(semantic.FieldRooms, semantic.FieldCapability),
+		}
 	case "room.area.configure":
-		return []string{"parameters.houseId", "parameters.roomId", "parameters.addAreaList", "parameters.removeAreaList"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldRoomID, semantic.FieldCurrentName, semantic.FieldRoomName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldAddAreaIDs, semantic.FieldRemoveAreaIDs, semantic.FieldAddAreaNames, semantic.FieldRemoveAreaNames)
 	default:
-		return []string{"parameters.houseId"}
+		return semanticParameterPaths(semantic.FieldHouseID)
 	}
 }
 

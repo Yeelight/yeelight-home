@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestInvokeSceneUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
@@ -20,7 +22,7 @@ func TestInvokeSceneUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-scene-update-plan","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-plan","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","actions":[{"targetType":"device","targetId":"50018330","targetName":"主灯","set":{"power":true}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
@@ -46,6 +48,98 @@ func TestInvokeSceneUpdateDryRunPreviewsWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestInvokeSceneUpdateAcceptsSemanticActionAliases(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writeSceneUpdateSeedList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-semantic","locale":"zh-CN","utterance":"把回家灯光情景改暖一点","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","actions":[{"targetType":"device","targetId":"50018330","targetName":"主灯","set":{"power":true,"brightness":55,"colorTemperature":3000}}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	if _, ok := preview["details"]; ok {
+		t.Fatalf("public preview must use actions, not details: %#v", preview)
+	}
+	actions := preview["actions"].([]any)
+	detail := actions[0].(map[string]any)
+	if detail["targetType"] != "device" || detail["targetId"] != "50018330" || detail["targetName"] != "主灯" {
+		t.Fatalf("detail identity = %#v", detail)
+	}
+	set := detail["set"].(map[string]any)
+	if set["power"] != true || set["brightness"] != float64(55) || set["colorTemperature"] != float64(3000) {
+		t.Fatalf("detail set = %#v", set)
+	}
+}
+
+func TestInvokeSceneUpdateResolvesSceneByCurrentName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writeSceneUpdateSeedList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-current-name","locale":"zh-CN","utterance":"把回家灯光情景改成打开主灯，名字改成回家灯光更新","intent":"scene.update","parameters":{"houseId":"200171","currentName":"回家灯光","newName":"回家灯光更新","actions":[{"targetType":"device","targetName":"主灯","set":{"power":true}}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	if preview["sceneId"] != "scene-1" || preview["name"] != "回家灯光更新" {
+		t.Fatalf("preview = %#v", preview)
+	}
+	actions := preview["actions"].([]any)
+	detail := actions[0].(map[string]any)
+	if detail["targetType"] != "device" || detail["targetId"] != "50018330" || detail["targetName"] != "主灯" {
+		t.Fatalf("detail identity = %#v", detail)
+	}
+}
+
+func TestInvokeSceneUpdatePreservesNameWhenOmitted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writeSceneUpdateSeedList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-preserve-name","locale":"zh-CN","utterance":"把回家灯光情景改成打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneName":"回家灯光","actions":[{"targetType":"device","targetName":"主灯","set":{"power":true}}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	if preview["sceneId"] != "scene-1" || preview["name"] != "回家灯光" {
+		t.Fatalf("preview = %#v", preview)
+	}
+}
+
 func TestInvokeSceneUpdateRequiresKnownScene(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -55,7 +149,7 @@ func TestInvokeSceneUpdateRequiresKnownScene(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-scene-update-missing","locale":"zh-CN","utterance":"更新不存在的情景","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-missing","name":"不存在","details":[{"typeId":2,"resId":"50018330","rank":0,"params":{"set":{"p":true}}}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-missing","locale":"zh-CN","utterance":"更新不存在的情景","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-missing","name":"不存在","actions":[{"targetType":"device","targetId":"50018330","targetName":"主灯","rank":0,"set":{"power":true}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -70,7 +164,8 @@ func TestInvokeSceneUpdateRequiresKnownScene(t *testing.T) {
 	if clarification["reason"] != "invalid_scene_reference" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	if clarification["payloadShape"] == nil || clarification["examples"] == nil || !strings.Contains(requestString(clarification["nextStep"]), "scene.detail.get") {
+	nextStep := requestString(clarification[semantic.FieldNextStep])
+	if clarification[semantic.FieldPayloadShape] == nil || clarification[semantic.FieldExamples] == nil || !strings.Contains(nextStep, "sceneName/currentName") {
 		t.Fatalf("clarification missing payload guide = %#v", clarification)
 	}
 }
@@ -84,7 +179,7 @@ func TestInvokeSceneUpdateInvalidPayloadReturnsPayloadGuide(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-scene-update-bad-shape","locale":"zh-CN","utterance":"把孩子屋开灯改暖一点","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"孩子屋开灯","params":{"set":{"ct":3000}}}}`
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-bad-shape","locale":"zh-CN","utterance":"把孩子屋开灯改暖一点","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"孩子屋开灯","set":{"colorTemperature":3000}}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -96,11 +191,11 @@ func TestInvokeSceneUpdateInvalidPayloadReturnsPayloadGuide(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 	clarification := response["clarification"].(map[string]any)
-	if clarification["reason"] != "invalid_scene_update_payload" || clarification["payloadShape"] == nil || clarification["examples"] == nil {
+	if clarification["reason"] != "invalid_scene_update_payload" || clarification[semantic.FieldPayloadShape] == nil || clarification[semantic.FieldExamples] == nil {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	if !strings.Contains(requestString(clarification["nextStep"]), "complete updated list") {
-		t.Fatalf("clarification nextStep = %#v", clarification["nextStep"])
+	if !strings.Contains(requestString(clarification[semantic.FieldNextStep]), "complete updated list") {
+		t.Fatalf("clarification nextStep = %#v", clarification[semantic.FieldNextStep])
 	}
 }
 
@@ -132,7 +227,7 @@ func TestInvokeSceneUpdateExecutesDirectly(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-scene-update-execute","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","details":[{"typeId":2,"resId":"50018330","params":{"set":{"p":true}}}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-execute","locale":"zh-CN","utterance":"把回家灯光情景改为打开主灯","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光更新","actions":[{"targetType":"device","targetId":"50018330","targetName":"主灯","set":{"power":true}}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)

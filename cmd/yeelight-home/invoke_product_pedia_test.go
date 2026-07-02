@@ -127,7 +127,7 @@ func TestModuleCommandProductSearchMapsModelMaterialAndLimit(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"product", "pedia", "--material-code", "1-000003268", "--product-model", "YP-0117", "--limit", "1", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	code := app.run([]string{"product", "pedia", "--sku-code", "1-000003268", "--product-model", "YP-0117", "--limit", "1", "--json"}, strings.NewReader(""), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}

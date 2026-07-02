@@ -25,9 +25,9 @@ func TestInvokeDiagnoseDeviceAggregatesReadonlyEvidence(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-1","name":"主灯","roomId":"room-1","online":true,"status":"ok"}]}}`))
 		case "/apis/iot/v2/thing/schema/house/house-1/device/r/info/1/100":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"id":"device-1","name":"主灯","properties":[{"propId":"power"},{"propId":"brightness"}]}]}}`))
-		case "/apis/iot/v1/controll/device/device-1/r/properties/power":
+		case "/apis/iot/v1/controll/device/device-1/r/properties/p":
 			_, _ = writer.Write([]byte(`{"success":true,"data":true}`))
-		case "/apis/iot/v1/controll/device/device-1/r/properties/brightness":
+		case "/apis/iot/v1/controll/device/device-1/r/properties/l":
 			_, _ = writer.Write([]byte(`{"success":true,"data":60}`))
 		default:
 			http.NotFound(writer, request)
@@ -61,6 +61,13 @@ func TestInvokeDiagnoseDeviceAggregatesReadonlyEvidence(t *testing.T) {
 	evidence := result["evidence"].(map[string]any)
 	if evidence["capabilitySource"] != "device_schema_endpoint" || evidence["stateSource"] != "device_properties_endpoint" {
 		t.Fatalf("evidence = %#v", evidence)
+	}
+	if _, ok := evidence["propertyIds"]; ok {
+		t.Fatalf("public evidence must not expose internal propertyIds: %#v", evidence)
+	}
+	supported := evidence["supportedProperties"].([]any)
+	if len(supported) != 2 || supported[0] != "power" || supported[1] != "brightness" {
+		t.Fatalf("supportedProperties = %#v", supported)
 	}
 	properties := evidence["properties"].(map[string]any)
 	if properties["power"] != true || properties["brightness"] != float64(60) {
@@ -201,7 +208,7 @@ func TestInvokeDiagnoseGatewayFallsBackToGatewayDetailWhenEntityProjectionMissin
 	}
 }
 
-func TestInvokeAutomationExplainUsesReadonlyProjection(t *testing.T) {
+func TestInvokeAutomationExplainUsesReadonlyDetail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
@@ -213,6 +220,8 @@ func TestInvokeAutomationExplainUsesReadonlyProjection(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
 		case "/apis/iot/v1/automations/r/list":
 			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"auto-1","name":"回家开灯","status":"enabled"}]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/automation/auto-1/r/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"auto-1","name":"回家开灯","actions":[{"targetType":"scene","targetId":"scene-1","targetName":"回家模式"}]}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -232,12 +241,12 @@ func TestInvokeAutomationExplainUsesReadonlyProjection(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["status"] != "partial" || response["traceId"] != "automation-explain-readonly" {
+	if response["status"] != "success" || response["traceId"] != "automation-explain-readonly" {
 		t.Fatalf("response = %#v", response)
 	}
 	result := response["result"].(map[string]any)
 	evidence := result["evidence"].(map[string]any)
-	if evidence["explanationScope"] != "entity_projection_only" {
+	if evidence["explanationScope"] != "automation_detail" || evidence["detail"] == nil {
 		t.Fatalf("evidence = %#v", evidence)
 	}
 }
@@ -254,6 +263,8 @@ func TestInvokeAutomationExplainAcceptsAutomationIDParameter(t *testing.T) {
 			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
 		case "/apis/iot/v1/automations/r/list":
 			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":"auto-1","name":"回家开灯","status":"enabled"}]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/automation/auto-1/r/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"auto-1","name":"回家开灯","actions":[{"targetType":"scene","targetId":"scene-1","targetName":"回家模式"}]}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -273,7 +284,7 @@ func TestInvokeAutomationExplainAcceptsAutomationIDParameter(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["status"] != "partial" || response["traceId"] != "automation-explain-readonly" {
+	if response["status"] != "success" || response["traceId"] != "automation-explain-readonly" {
 		t.Fatalf("response = %#v", response)
 	}
 }

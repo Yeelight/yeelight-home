@@ -55,6 +55,53 @@ func TestInvokeHomeMemberConfigureExecutesDirectly(t *testing.T) {
 	}
 }
 
+func TestInvokeHomeMemberConfigureResolvesUniqueMemberName(t *testing.T) {
+	var writeBody map[string]any
+	roleUpdated := false
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/account/user/info":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"uid":9000,"nickname":"业主"}}`))
+		case "/apis/iot/v1/house/r/memberlistV2":
+			if roleUpdated {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"memberList":[{"uid":1001,"nickname":"张三","userRole":2},{"uid":1002,"nickname":"李四","userRole":0}]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"memberList":[{"uid":1001,"nickname":"张三","userRole":0},{"uid":1002,"nickname":"李四","userRole":0}]}}`))
+		case "/apis/iot/v1/house/w/updateUserRole":
+			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
+				t.Fatalf("decode role body: %v", err)
+			}
+			roleUpdated = true
+			_, _ = writer.Write([]byte(`{"success":true}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-member-name-secret", "client-member-name-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-member-configure-name","locale":"zh-CN","utterance":"把张三设为管理员","intent":"home.member.configure","parameters":{"houseId":"200171","memberName":"张三","userRole":"admin"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "home-member-execute" {
+		t.Fatalf("response = %#v", response)
+	}
+	if writeBody["memberId"] != float64(1001) || writeBody["userRole"] != float64(2) {
+		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	if strings.Contains(stdout.String(), "1001") {
+		t.Fatalf("public response leaked raw member id: %s", stdout.String())
+	}
+}
+
 func TestInvokeHomeMemberAcceptShareUsesCurrentUserAndCommits(t *testing.T) {
 	var gotCalls []string
 	var acceptBody map[string]any
@@ -131,7 +178,7 @@ func TestInvokeHomeMemberRemoveExecutesDirectlyAfterCallerConfirmation(t *testin
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-member-remove-secret", "client-member-remove-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-member-remove","locale":"zh-CN","utterance":"移除成员","intent":"home.member.remove","parameters":{"houseId":"200171","memberId":"1001"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-member-remove","locale":"zh-CN","utterance":"移除成员","intent":"home.member.remove","parameters":{"houseId":"200171","memberId":"1001","confirmed":true}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const entityBatchRenameLimit = 20
@@ -97,7 +99,7 @@ type entityBatchRenameItem struct {
 }
 
 func entityBatchRenameItems(payload map[string]any) ([]entityBatchRenameItem, error) {
-	rawItems, ok := payload["items"].([]any)
+	rawItems, ok := payload[semantic.FieldItems].([]any)
 	if !ok || len(rawItems) == 0 {
 		return nil, fmt.Errorf("entity rename batch items are required")
 	}
@@ -110,7 +112,7 @@ func entityBatchRenameItems(payload map[string]any) ([]entityBatchRenameItem, er
 		if !ok {
 			return nil, fmt.Errorf("invalid entity rename batch item")
 		}
-		typeID, ok := renameIntFromAny(item["typeId"])
+		typeID, ok := renameIntFromAny(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)])
 		if !ok {
 			return nil, fmt.Errorf("invalid entity rename resource type")
 		}
@@ -118,13 +120,13 @@ func entityBatchRenameItems(payload map[string]any) ([]entityBatchRenameItem, er
 		if !ok {
 			return nil, fmt.Errorf("invalid entity rename resource type")
 		}
-		id := strings.TrimSpace(firstNonEmpty(stringFromAny(item["id"]), stringFromAny(item["entityId"]), stringFromAny(item["resId"])))
-		name := strings.TrimSpace(firstNonEmpty(stringFromAny(item["name"]), stringFromAny(item["newName"])))
+		id := strings.TrimSpace(firstNonEmpty(stringFromAny(item[semantic.FieldID]), stringFromAny(item[semantic.FieldEntityID])))
+		name := strings.TrimSpace(firstNonEmpty(stringFromAny(item[semantic.FieldName]), stringFromAny(item[semantic.FieldNewName])))
 		if id == "" || name == "" {
 			return nil, fmt.Errorf("invalid entity rename batch item")
 		}
 		renameItem := entityBatchRenameItem{ID: id, TypeID: typeID, EntityType: entityType, Name: name}
-		if index, ok := renameIntFromAny(item["index"]); ok {
+		if index, ok := renameIntFromAny(item[semantic.FieldIndex]); ok {
 			renameItem.Index = &index
 		}
 		items = append(items, renameItem)
@@ -195,12 +197,12 @@ func (client EntityBatchRenameClient) write(ctx context.Context, houseID string,
 	body := make([]any, 0, len(items))
 	for _, item := range items {
 		row := map[string]any{
-			"id":     requestNumberOrStringForAPI(item.ID),
-			"typeId": item.TypeID,
-			"name":   item.Name,
+			semantic.FieldID: requestNumberOrStringForAPI(item.ID),
+			semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType): item.TypeID,
+			semantic.FieldName: item.Name,
 		}
 		if item.Index != nil {
-			row["index"] = *item.Index
+			row[semantic.FieldIndex] = *item.Index
 		}
 		body = append(body, row)
 	}

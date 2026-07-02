@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareHomeCreate(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, authorization string, clientID string) (contract.Response, error) {
@@ -17,7 +18,7 @@ func (app *app) prepareHomeCreate(ctx context.Context, request contract.Request,
 		return configureClarificationResponse(request, err.Error(), homeCreateAcceptedFields()), nil
 	}
 	credentials := api.HomeCreateCredentials{Authorization: authorization, ClientID: clientID}
-	homeName := requestString(payload["name"])
+	homeName := requestString(payload[semantic.FieldName])
 	client := api.NewHomeCreateClient(endpoint, nil)
 	existing, apiCalls, err := client.FindHouseByNameForPlan(ctx, homeName, credentials)
 	if err != nil {
@@ -25,7 +26,7 @@ func (app *app) prepareHomeCreate(ctx context.Context, request contract.Request,
 	}
 	if existing.ID != "" {
 		response := homeCreateAlreadyExistsResponse(request, existing, apiCalls)
-		response.Result["region"] = endpoint.Region
+		response.Result[semantic.FieldRegion] = endpoint.Region
 		return response, nil
 	}
 	record, err := operation.NewAccountPrepared(profile, region, request.Intent, request.RequestID, fmt.Sprintf("创建家庭 %s", homeName), payload, []string{
@@ -39,25 +40,25 @@ func (app *app) prepareHomeCreate(ctx context.Context, request contract.Request,
 	}
 	app.preparedOperation = &record
 	return executionPreviewResponseWithDetails(request, record, api.EntityListResult{Region: endpoint.Region, APICalls: apiCalls}, map[string]any{
-		"scope": "account",
-		"planned": map[string]any{
-			"name":     homeName,
-			"areaCode": requestString(payload["areaCode"]),
-			"areaName": requestString(payload["areaName"]),
+		semantic.FieldScope: "account",
+		semantic.FieldPlanned: map[string]any{
+			semantic.FieldName:     homeName,
+			semantic.FieldAreaCode: requestString(payload[semantic.FieldAreaCode]),
+			semantic.FieldAreaName: requestString(payload[semantic.FieldAreaName]),
 		},
 	}, 0), nil
 }
 
 func buildHomeCreatePayload(request contract.Request) (map[string]any, error) {
-	name := firstRequestString(request.Parameters, "name", "homeName", "houseName")
+	name := firstRequestString(request.Parameters, semantic.FieldName, semantic.FieldHomeName, semantic.FieldHouseName)
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("invalid_home_create_payload")
 	}
-	payload := map[string]any{"name": strings.TrimSpace(name)}
-	if value := strings.TrimSpace(firstRequestString(request.Parameters, "description", "desc")); value != "" {
-		payload["desc"] = value
+	payload := map[string]any{semantic.FieldName: strings.TrimSpace(name)}
+	if value := strings.TrimSpace(firstRequestString(request.Parameters, semantic.FieldDescription)); value != "" {
+		payload[semantic.FieldDescription] = value
 	}
-	for _, key := range []string{"icon", "areaCode", "areaName"} {
+	for _, key := range []string{semantic.FieldIcon, semantic.FieldAreaCode, semantic.FieldAreaName} {
 		if value := strings.TrimSpace(requestString(request.Parameters[key])); value != "" {
 			payload[key] = value
 		}
@@ -66,16 +67,16 @@ func buildHomeCreatePayload(request contract.Request) (map[string]any, error) {
 }
 
 func homeCreateAcceptedFields() []string {
-	return []string{"parameters.name", "parameters.description", "parameters.desc", "parameters.icon", "parameters.areaCode", "parameters.areaName"}
+	return semanticParameterPaths(semantic.FieldName, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldAreaCode, semantic.FieldAreaName)
 }
 
 func (app *app) executeHomeCreate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
 	result, err := api.NewHomeCreateClient(endpoint, nil).Run(ctx, api.HomeCreateRequest{
-		Name:           executionPayloadString(record.Payload, "name"),
-		Description:    executionPayloadString(record.Payload, "desc"),
-		Icon:           executionPayloadString(record.Payload, "icon"),
-		AreaCode:       executionPayloadString(record.Payload, "areaCode"),
-		AreaName:       executionPayloadString(record.Payload, "areaName"),
+		Name:           executionPayloadString(record.Payload, semantic.FieldName),
+		Description:    executionPayloadString(record.Payload, semantic.FieldDescription),
+		Icon:           executionPayloadString(record.Payload, semantic.FieldIcon),
+		AreaCode:       executionPayloadString(record.Payload, semantic.FieldAreaCode),
+		AreaName:       executionPayloadString(record.Payload, semantic.FieldAreaName),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.HomeCreateCredentials{

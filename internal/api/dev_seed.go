@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type DevSeedCredentials struct {
@@ -204,15 +206,15 @@ func (client DevSeedClient) verifyHouseScopedEntityList(ctx context.Context, hou
 }
 
 func (client DevSeedClient) createHouse(ctx context.Context, request DevSeedHouseRequest, credentials requestCredentials) (writeProbeResult, error) {
-	body := map[string]any{"name": strings.TrimSpace(request.Name)}
+	body := map[string]any{semantic.FieldName: strings.TrimSpace(request.Name)}
 	if value := strings.TrimSpace(request.Description); value != "" {
-		body["desc"] = value
+		body[semantic.InternalField(semantic.DomainCommon, semantic.FieldDescription)] = value
 	}
 	if value := strings.TrimSpace(request.AreaCode); value != "" {
-		body["areaCode"] = value
+		body[semantic.FieldAreaCode] = value
 	}
 	if value := strings.TrimSpace(request.AreaName); value != "" {
-		body["areaName"] = value
+		body[semantic.FieldAreaName] = value
 	}
 	response, err := callJSON(ctx, client.client, http.MethodPut, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/w/create", body, credentials)
 	if err != nil {
@@ -236,7 +238,7 @@ func responseID(response map[string]any) string {
 	case float64:
 		return fmt.Sprintf("%.0f", value)
 	case map[string]any:
-		return firstAnyString(value, "id", "houseId", "roomId", "sceneId")
+		return firstAnyString(value, semantic.ResponseIDFields()...)
 	}
 	return ""
 }

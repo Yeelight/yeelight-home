@@ -7,6 +7,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func lightPowerSetResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.DevicePropertySetResult, verification api.StateQueryResult) contract.Response {
@@ -19,17 +20,17 @@ func lightNumericSetResponse(request contract.Request, entities api.EntityListRe
 
 func lightPropertySetResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.DevicePropertySetResult, verification api.StateQueryResult, expected any, messageTemplate string, traceID string) contract.Response {
 	result := map[string]any{
-		"region":        entities.Region,
-		"houseId":       entities.HouseID,
-		"entity":        entitySummaryMap(entity),
-		"propertyName":  execution.PropertyName,
-		"command":       execution.Command,
-		"source":        execution.Source,
-		"rawShape":      execution.RawShape,
-		"verified":      verification.Value == expected,
-		"verifiedValue": verification.Value,
+		semantic.FieldRegion:        entities.Region,
+		semantic.FieldHouseID:       entities.HouseID,
+		semantic.FieldEntity:        entitySummaryMap(entity),
+		semantic.FieldProperty:      semantic.LightPropertyName(execution.PropertyName),
+		semantic.FieldCommand:       execution.Command,
+		semantic.FieldSource:        execution.Source,
+		semantic.FieldExpectedValue: expected,
+		semantic.FieldVerified:      lightStateValueMatches(verification.Value, expected),
+		semantic.FieldVerifiedValue: verification.Value,
 	}
-	if verification.Value != expected {
+	if !lightStateValueMatches(verification.Value, expected) {
 		return contract.Response{
 			ContractVersion: contract.Version,
 			RequestID:       request.RequestID,
@@ -39,8 +40,8 @@ func lightPropertySetResponse(request contract.Request, entities api.EntityListR
 			Warnings:        append(entities.Warnings, "write_verification_mismatch"),
 			TraceID:         strings.TrimSuffix(traceID, "-command") + "-verification-mismatch",
 			Metrics: map[string]any{
-				"apiCalls":  entityListAPICalls(entities) + devicePropertySetAPICalls(execution) + stateQueryAPICalls(verification),
-				"cacheHits": topologyCacheHits(entities),
+				semantic.FieldAPICalls:  entityListAPICalls(entities) + devicePropertySetAPICalls(execution) + stateQueryAPICalls(verification),
+				semantic.FieldCacheHits: topologyCacheHits(entities),
 			},
 			Error: &contract.Error{
 				Code:    "write_verification_mismatch",
@@ -57,28 +58,27 @@ func lightPropertySetResponse(request contract.Request, entities api.EntityListR
 		Warnings:        entities.Warnings,
 		TraceID:         traceID,
 		Metrics: map[string]any{
-			"apiCalls":  entityListAPICalls(entities) + devicePropertySetAPICalls(execution) + stateQueryAPICalls(verification),
-			"cacheHits": topologyCacheHits(entities),
+			semantic.FieldAPICalls:  entityListAPICalls(entities) + devicePropertySetAPICalls(execution) + stateQueryAPICalls(verification),
+			semantic.FieldCacheHits: topologyCacheHits(entities),
 		},
 	}
 }
 
 func lightAdjustResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, before api.StateQueryResult, execution api.DevicePropertyAdjustResult, verification api.StateQueryResult, delta int, expected int, messageTemplate string, traceID string) contract.Response {
 	result := map[string]any{
-		"region":        entities.Region,
-		"houseId":       entities.HouseID,
-		"entity":        entitySummaryMap(entity),
-		"propertyName":  execution.PropertyName,
-		"command":       execution.Command,
-		"source":        execution.Source,
-		"beforeValue":   before.Value,
-		"delta":         delta,
-		"expectedValue": float64(expected),
-		"verified":      verification.Value == float64(expected),
-		"verifiedValue": verification.Value,
-		"rawShape":      execution.RawShape,
+		semantic.FieldRegion:        entities.Region,
+		semantic.FieldHouseID:       entities.HouseID,
+		semantic.FieldEntity:        entitySummaryMap(entity),
+		semantic.FieldProperty:      semantic.LightPropertyName(execution.PropertyName),
+		semantic.FieldCommand:       execution.Command,
+		semantic.FieldSource:        execution.Source,
+		semantic.FieldBeforeValue:   before.Value,
+		semantic.FieldDelta:         delta,
+		semantic.FieldExpectedValue: float64(expected),
+		semantic.FieldVerified:      lightStateValueMatches(verification.Value, float64(expected)),
+		semantic.FieldVerifiedValue: verification.Value,
 	}
-	if verification.Value != float64(expected) {
+	if !lightStateValueMatches(verification.Value, float64(expected)) {
 		return contract.Response{
 			ContractVersion: contract.Version,
 			RequestID:       request.RequestID,
@@ -88,8 +88,8 @@ func lightAdjustResponse(request contract.Request, entities api.EntityListResult
 			Warnings:        append(entities.Warnings, "write_verification_mismatch"),
 			TraceID:         strings.TrimSuffix(traceID, "-command") + "-verification-mismatch",
 			Metrics: map[string]any{
-				"apiCalls":  entityListAPICalls(entities) + stateQueryAPICalls(before) + devicePropertyAdjustAPICalls(execution) + stateQueryAPICalls(verification),
-				"cacheHits": topologyCacheHits(entities),
+				semantic.FieldAPICalls:  entityListAPICalls(entities) + stateQueryAPICalls(before) + devicePropertyAdjustAPICalls(execution) + stateQueryAPICalls(verification),
+				semantic.FieldCacheHits: topologyCacheHits(entities),
 			},
 			Error: &contract.Error{
 				Code:    "write_verification_mismatch",
@@ -106,8 +106,8 @@ func lightAdjustResponse(request contract.Request, entities api.EntityListResult
 		Warnings:        entities.Warnings,
 		TraceID:         traceID,
 		Metrics: map[string]any{
-			"apiCalls":  entityListAPICalls(entities) + stateQueryAPICalls(before) + devicePropertyAdjustAPICalls(execution) + stateQueryAPICalls(verification),
-			"cacheHits": topologyCacheHits(entities),
+			semantic.FieldAPICalls:  entityListAPICalls(entities) + stateQueryAPICalls(before) + devicePropertyAdjustAPICalls(execution) + stateQueryAPICalls(verification),
+			semantic.FieldCacheHits: topologyCacheHits(entities),
 		},
 	}
 }
@@ -119,18 +119,18 @@ func lightAdjustUnsupportedStateResponse(request contract.Request, entities api.
 		Status:          "not_supported",
 		UserMessage:     fmt.Sprintf("%s 当前属性值不是可验证的数值，已取消调节。", entity.Name),
 		Result: map[string]any{
-			"region":       entities.Region,
-			"houseId":      entities.HouseID,
-			"entity":       entitySummaryMap(entity),
-			"propertyName": before.PropertyName,
-			"value":        before.Value,
-			"source":       before.Source,
+			semantic.FieldRegion:   entities.Region,
+			semantic.FieldHouseID:  entities.HouseID,
+			semantic.FieldEntity:   entitySummaryMap(entity),
+			semantic.FieldProperty: semantic.LightPropertyName(before.PropertyName),
+			semantic.FieldValue:    before.Value,
+			semantic.FieldSource:   before.Source,
 		},
 		Warnings: append(entities.Warnings, "non_numeric_state"),
 		TraceID:  strings.TrimSuffix(traceID, "-command") + "-unsupported-state",
 		Metrics: map[string]any{
-			"apiCalls":  entityListAPICalls(entities) + stateQueryAPICalls(before),
-			"cacheHits": topologyCacheHits(entities),
+			semantic.FieldAPICalls:  entityListAPICalls(entities) + stateQueryAPICalls(before),
+			semantic.FieldCacheHits: topologyCacheHits(entities),
 		},
 		Error: &contract.Error{
 			Code:    "non_numeric_state",
@@ -153,17 +153,17 @@ func lightControlClarificationResponse(request contract.Request, reason string, 
 		Status:          "clarification_required",
 		UserMessage:     "请明确要控制的灯光设备和目标状态。",
 		Clarification: map[string]any{
-			"reason":               reason,
-			"target":               target.toMap(),
-			"candidates":           preview,
-			"supportedEntityTypes": []string{"device"},
-			"acceptedValueFields":  lightAcceptedValueFields(reason),
+			semantic.FieldReason:               reason,
+			semantic.FieldTarget:               target.toMap(),
+			semantic.FieldCandidates:           preview,
+			semantic.FieldSupportedEntityTypes: []string{"device"},
+			semantic.FieldAcceptedValueFields:  lightAcceptedValueFields(reason),
 		},
 		Warnings: []string{},
 		TraceID:  "light-control-clarification",
 		Metrics: map[string]any{
-			"apiCalls":  apiCalls,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  apiCalls,
+			semantic.FieldCacheHits: 0,
 		},
 	}
 }
@@ -171,22 +171,22 @@ func lightControlClarificationResponse(request contract.Request, reason string, 
 func lightAcceptedValueFields(reason string) []string {
 	switch reason {
 	case "missing_brightness_value":
-		return []string{"parameters.brightness", "parameters.level", "parameters.value"}
+		return []string{semantic.ParameterPath(semantic.FieldBrightness), semantic.ParameterPath(semantic.FieldValue)}
 	case "missing_brightness_delta":
-		return []string{"parameters.delta", "parameters.brightnessDelta", "parameters.brightness_delta", "parameters.step", "parameters.value"}
+		return []string{semantic.ParameterPath(semantic.FieldDelta), semantic.ParameterPath(semantic.FieldStep), semantic.ParameterPath(semantic.FieldValue)}
 	case "missing_color_temperature_value":
-		return []string{"parameters.colorTemperature", "parameters.color_temperature", "parameters.ct", "parameters.value"}
+		return []string{semantic.ParameterPath(semantic.FieldColorTemperature), semantic.ParameterPath(semantic.FieldValue)}
 	case "missing_color_temperature_delta":
-		return []string{"parameters.delta", "parameters.colorTemperatureDelta", "parameters.color_temperature_delta", "parameters.ctDelta", "parameters.step", "parameters.value"}
+		return []string{semantic.ParameterPath(semantic.FieldDelta), semantic.ParameterPath(semantic.FieldStep), semantic.ParameterPath(semantic.FieldValue)}
 	case "missing_color_value":
-		return []string{"parameters.color", "parameters.rgb", "parameters.value", "parameters.hex", "parameters.colorHex"}
+		return []string{semantic.ParameterPath(semantic.FieldColor), semantic.ParameterPath(semantic.FieldValue), semantic.ParameterPath(semantic.FieldHex)}
 	default:
-		return []string{"parameters.on", "parameters.power", "parameters.value"}
+		return []string{semantic.ParameterPath(semantic.FieldPower), semantic.ParameterPath(semantic.FieldValue)}
 	}
 }
 
 func lightPowerValue(request contract.Request) (bool, bool) {
-	for _, key := range []string{"on", "power", "value"} {
+	for _, key := range []string{semantic.FieldPower, semantic.FieldValue} {
 		value, ok := request.Parameters[key]
 		if !ok {
 			continue
@@ -222,18 +222,18 @@ func lightIntegerValue(request contract.Request, min int, max int, keys ...strin
 }
 
 func lightColorValue(request contract.Request) (int, bool) {
-	for _, key := range []string{"color", "rgb", "value"} {
+	for _, key := range []string{semantic.FieldColor, semantic.FieldValue} {
 		value, ok := request.Parameters[key]
 		if !ok {
 			continue
 		}
-		parsed, ok := requestStrictInteger(value)
-		if !ok || parsed < 0 || parsed > 16777215 {
+		parsed, ok := requestRGBColorValue(value)
+		if !ok {
 			return 0, false
 		}
 		return parsed, true
 	}
-	for _, key := range []string{"hex", "colorHex"} {
+	for _, key := range []string{semantic.FieldHex} {
 		value, ok := request.Parameters[key].(string)
 		if !ok {
 			continue
@@ -245,6 +245,51 @@ func lightColorValue(request contract.Request) (int, bool) {
 		return parsed, true
 	}
 	return 0, false
+}
+
+func requestRGBColorValue(value any) (int, bool) {
+	if parsed, ok := requestStrictInteger(value); ok && parsed >= 0 && parsed <= 16777215 {
+		return parsed, true
+	}
+	if text, ok := value.(string); ok {
+		if parsed, ok := parseRGBHex(text); ok {
+			return parsed, true
+		}
+		parsed, err := strconv.Atoi(strings.TrimSpace(text))
+		if err == nil && parsed >= 0 && parsed <= 16777215 {
+			return parsed, true
+		}
+		return 0, false
+	}
+	components, ok := value.(map[string]any)
+	if !ok {
+		return 0, false
+	}
+	red, ok := rgbComponent(components, semantic.FieldRed)
+	if !ok {
+		return 0, false
+	}
+	green, ok := rgbComponent(components, semantic.FieldGreen)
+	if !ok {
+		return 0, false
+	}
+	blue, ok := rgbComponent(components, semantic.FieldBlue)
+	if !ok {
+		return 0, false
+	}
+	return red<<16 | green<<8 | blue, true
+}
+
+func rgbComponent(values map[string]any, key string) (int, bool) {
+	value, ok := values[key]
+	if !ok {
+		return 0, false
+	}
+	parsed, ok := requestInteger(value)
+	if !ok || parsed < 0 || parsed > 255 {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func requestStrictInteger(value any) (int, bool) {
@@ -311,6 +356,29 @@ func stateNumericValue(value any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func lightStateValueMatches(actual any, expected any) bool {
+	if actual == expected {
+		return true
+	}
+	switch typed := expected.(type) {
+	case float64:
+		if current, ok := stateNumericValue(actual); ok {
+			return float64(current) == typed
+		}
+	case int:
+		if current, ok := stateNumericValue(actual); ok {
+			return current == typed
+		}
+	case bool:
+		if current, ok := actual.(bool); ok {
+			return current == typed
+		}
+	case string:
+		return strings.TrimSpace(requestString(actual)) == strings.TrimSpace(typed)
+	}
+	return false
 }
 
 func clampInt(value int, min int, max int) int {

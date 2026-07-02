@@ -76,6 +76,57 @@ func TestSceneUpdateClientWritesAndVerifiesByDetail(t *testing.T) {
 	}
 }
 
+func TestSceneUpdateClientVerifiesPublicDetailRows(t *testing.T) {
+	detailCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/200171/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/device/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/group/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"4771","name":"测试RGBW组0702","houseId":"200171"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/scene/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"1006157","name":"测试RGBW开灯0702","houseId":"200171"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/scene/1006157/w/modify":
+			_, _ = writer.Write([]byte(`{"success":true,"data":true}`))
+		case "/apis/iot/v1/scene/1006157/r/detail":
+			detailCalls++
+			if detailCalls == 1 {
+				_, _ = writer.Write([]byte(`{"success":true,"data":{"sceneId":"1006157","name":"测试RGBW开灯0702","details":[]}}`))
+				return
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"sceneId":"1006157","name":"测试RGBW开灯0702","details":[{"targetType":"meshGroup","targetId":"4771","targetName":"测试RGBW组0702","rank":0,"action":0,"set":{"power":true,"brightness":55,"colorTemperature":3200}}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	result, err := NewSceneUpdateClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client()).Run(context.Background(), SceneUpdateRequest{
+		HouseID: "200171",
+		SceneID: "1006157",
+		Payload: map[string]any{
+			"sceneId": "1006157",
+			"id":      "1006157",
+			"houseId": float64(200171),
+			"name":    "测试RGBW开灯0702",
+			"details": []any{
+				map[string]any{"typeId": 4, "resId": float64(4771), "rank": 0, "action": 0, "params": `{"set":{"p":true,"l":55,"ct":3200}}`},
+			},
+		},
+		Credentials: SceneUpdateCredentials{Authorization: "Bearer secret", ClientID: "client-1"},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if !result.Verified || result.SceneID != "1006157" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestSceneUpdateClientRequiresDetailVerification(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareHomeMember(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -47,29 +48,29 @@ func (app *app) prepareHomeMember(ctx context.Context, request contract.Request,
 func buildHomeMemberPayload(request contract.Request, houseID string, currentUID string, members []map[string]any) (map[string]any, []string, string, string, error) {
 	switch request.Intent {
 	case "home.member.invite":
-		expiredTime, ok := valueInt(firstNonNil(request.Parameters["expiredTime"], request.Parameters["expiresAt"]))
-		if !ok || expiredTime <= 0 {
+		expiresAt, ok := valueInt(request.Parameters[semantic.FieldExpiresAt])
+		if !ok || expiresAt <= 0 {
 			return nil, nil, "", "", fmt.Errorf("invalid_home_member_invite_payload")
 		}
-		userRole, ok := normalizedHomeMemberRole(firstNonNil(request.Parameters["userRole"], request.Parameters["role"]))
+		userRole, ok := normalizedHomeMemberRole(firstNonNil(request.Parameters[semantic.FieldUserRole], request.Parameters[semantic.FieldRole]))
 		if !ok {
 			userRole = 0
 		}
-		reuseBarcode := requestBoolDefault(request.Parameters["reuseBarcode"], true)
+		reuseBarcode := requestBoolDefault(request.Parameters[semantic.FieldReuseBarcode], true)
 		return map[string]any{
-				"houseId":      requestNumberOrString(houseID),
-				"expiredTime":  expiredTime,
-				"userRole":     userRole,
-				"reuseBarcode": reuseBarcode,
+				semantic.FieldHouseID: requestNumberOrString(houseID),
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldExpiresAt):    expiresAt,
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldUserRole):     userRole,
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldReuseBarcode): reuseBarcode,
 			}, []string{
 				"提交前重新读取家庭成员列表",
 				"只有当前账号具备家庭分享权限时云端才会生成分享码",
 				"生成结果只返回脱敏后的分享证据，不暴露 Token 或原始接口信息",
 			}, "生成家庭分享邀请码", operation.RiskR2, nil
 	case "home.member.accept_share":
-		shareID := firstValueIDString(request.Parameters, "shareId", "id")
-		createTime, ok := valueInt(request.Parameters["createTime"])
-		acceptedHouseID := firstValueIDString(request.Parameters, "houseId", "resId")
+		shareID := firstValueIDString(request.Parameters, semantic.FieldShareID, semantic.FieldID)
+		createTime, ok := valueInt(request.Parameters[semantic.FieldCreateTime])
+		acceptedHouseID := firstValueIDString(request.Parameters, semantic.FieldHouseID)
 		if acceptedHouseID == "" {
 			acceptedHouseID = houseID
 		}
@@ -77,10 +78,10 @@ func buildHomeMemberPayload(request contract.Request, houseID string, currentUID
 			return nil, nil, "", "", fmt.Errorf("invalid_home_member_accept_share_payload")
 		}
 		return map[string]any{
-				"houseId":    requestNumberOrString(acceptedHouseID),
-				"shareId":    requestNumberOrString(shareID),
-				"createTime": createTime,
-				"toUid":      requestNumberOrString(currentUID),
+				semantic.FieldHouseID: requestNumberOrString(acceptedHouseID),
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldShareID):    requestNumberOrString(shareID),
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldCreateTime): createTime,
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldToUID):      requestNumberOrString(currentUID),
 			}, []string{
 				"Runtime 使用当前本地登录账号作为接受人，不接受模型传入 toUid",
 				"分享码必须提供结构化 shareId 与 createTime",
@@ -88,42 +89,42 @@ func buildHomeMemberPayload(request contract.Request, houseID string, currentUID
 				"提交后通过 home.summary 验证新家庭在当前账号下可见",
 			}, "接受家庭分享", operation.RiskR2, nil
 	case "home.member.configure":
-		memberID := firstValueIDString(request.Parameters, "memberId", "uid", "userId", "id")
-		userRole, ok := normalizedHomeMemberRole(firstNonNil(request.Parameters["userRole"], request.Parameters["role"]))
+		memberID := homeMemberTargetID(request.Parameters, members)
+		userRole, ok := normalizedHomeMemberRole(firstNonNil(request.Parameters[semantic.FieldUserRole], request.Parameters[semantic.FieldRole]))
 		if memberID == "" || !ok || userRole == 1 || !homeMemberExists(members, memberID) {
 			return nil, nil, "", "", fmt.Errorf("invalid_home_member_configure_payload")
 		}
 		return map[string]any{
-				"houseId":  requestNumberOrString(houseID),
-				"uid":      requestNumberOrString(currentUID),
-				"memberId": requestNumberOrString(memberID),
-				"userRole": userRole,
+				semantic.FieldHouseID: requestNumberOrString(houseID),
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldUID):      requestNumberOrString(currentUID),
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldMemberID): requestNumberOrString(memberID),
+				semantic.InternalField(semantic.DomainHomeMember, semantic.FieldUserRole): userRole,
 			}, []string{
 				"提交前重新读取家庭成员列表",
-				"仅允许在普通成员与管理员之间切换角色",
+				"仅允许在普通成员与管理员之间切换角色；可用唯一成员名解析目标成员",
 				"Runtime 根据当前请求构建受控成员角色 payload",
 				"提交后通过 home.member.list 验证目标成员角色",
 			}, "更新家庭成员角色", operation.RiskR2, nil
 	case "home.member.remove":
-		memberID := firstValueIDString(request.Parameters, "memberId", "uid", "userId", "id")
+		memberID := homeMemberTargetID(request.Parameters, members)
 		if memberID == "" || !homeMemberExists(members, memberID) || homeMemberIsMaster(members, memberID) {
 			return nil, nil, "", "", fmt.Errorf("invalid_home_member_remove_payload")
 		}
 		return map[string]any{
-			"houseId":  requestNumberOrString(houseID),
-			"memberId": requestNumberOrString(memberID),
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.InternalField(semantic.DomainHomeMember, semantic.FieldMemberID): requestNumberOrString(memberID),
 		}, homeMemberR3Preconditions("移除家庭成员"), "移除家庭成员", operation.RiskR3, nil
 	case "home.member.transfer":
-		memberID := firstValueIDString(request.Parameters, "memberId", "uid", "userId", "id")
+		memberID := homeMemberTargetID(request.Parameters, members)
 		if memberID == "" || !homeMemberExists(members, memberID) || homeMemberIsMaster(members, memberID) {
 			return nil, nil, "", "", fmt.Errorf("invalid_home_member_transfer_payload")
 		}
 		return map[string]any{
-			"houseId":  requestNumberOrString(houseID),
-			"memberId": requestNumberOrString(memberID),
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.InternalField(semantic.DomainHomeMember, semantic.FieldMemberID): requestNumberOrString(memberID),
 		}, homeMemberR3Preconditions("转移家庭管理员权限"), "转移家庭管理员权限", operation.RiskR3, nil
 	case "home.member.quit":
-		uid := firstValueIDString(request.Parameters, "uid", "memberId", "userId", "id")
+		uid := firstValueIDString(request.Parameters, semantic.FieldMemberID, semantic.FieldUserID, semantic.FieldID)
 		if uid == "" {
 			uid = currentUID
 		}
@@ -131,8 +132,8 @@ func buildHomeMemberPayload(request contract.Request, houseID string, currentUID
 			return nil, nil, "", "", fmt.Errorf("invalid_home_member_quit_payload")
 		}
 		return map[string]any{
-			"houseId": requestNumberOrString(houseID),
-			"uid":     requestNumberOrString(uid),
+			semantic.FieldHouseID: requestNumberOrString(houseID),
+			semantic.InternalField(semantic.DomainHomeMember, semantic.FieldUID): requestNumberOrString(uid),
 		}, homeMemberR3Preconditions("退出分享家庭"), "退出分享家庭", operation.RiskR3, nil
 	default:
 		return nil, nil, "", "", fmt.Errorf("unsupported_home_member_intent")
@@ -178,22 +179,25 @@ func requestBoolDefault(value any, fallback bool) bool {
 }
 
 func homeMemberPreview(intent string, payload map[string]any, members []map[string]any) map[string]any {
-	preview := map[string]any{"planned": executionPayloadPreview(operation.Prepared{HouseID: requestString(payload["houseId"]), Payload: payload})}
-	memberID := firstNonEmptyString(valueIDString(payload["memberId"]), valueIDString(payload["uid"]))
+	preview := map[string]any{semantic.FieldPlanned: executionPayloadPreview(operation.Prepared{HouseID: requestString(payload[semantic.FieldHouseID]), Payload: payload})}
+	memberID := firstNonEmptyString(
+		valueIDString(payload[semantic.InternalField(semantic.DomainHomeMember, semantic.FieldMemberID)]),
+		valueIDString(payload[semantic.InternalField(semantic.DomainHomeMember, semantic.FieldUID)]),
+	)
 	if memberID != "" {
 		if member, ok := findHomeMember(members, memberID); ok {
-			preview["targetMember"] = map[string]any{
-				"memberIdMasked": maskLocalIdentifier(memberID),
-				"displayName":    firstAnyMemberString(member, "nickname", "nickName", "name", "displayName", "remark"),
-				"role":           firstAnyMemberString(member, "role", "userRole", "memberRole"),
+			preview[semantic.FieldTargetMember] = map[string]any{
+				semantic.FieldMemberIDMasked: maskLocalIdentifier(memberID),
+				semantic.FieldDisplayName:    firstAnyMemberString(member, "nickname", "nickName", semantic.FieldName, semantic.FieldDisplayName, "remark"),
+				semantic.FieldRole:           firstAnyMemberString(member, semantic.FieldRole, semantic.FieldUserRole, "memberRole"),
 			}
 		}
 	}
 	if intent == "home.member.transfer" || intent == "home.member.remove" || intent == "home.member.quit" {
-		preview["impact"] = map[string]any{
-			"mode":                       "r3_home_member_mutation",
-			"callerShouldConfirm":        true,
-			"runtimeApprovalStateStored": false,
+		preview[semantic.FieldImpact] = map[string]any{
+			semantic.FieldMode:                       "r3_home_member_mutation",
+			semantic.FieldCallerShouldConfirm:        true,
+			semantic.FieldRuntimeApprovalStateStored: false,
 		}
 	}
 	return preview
@@ -202,17 +206,17 @@ func homeMemberPreview(intent string, payload map[string]any, members []map[stri
 func homeMemberAcceptedFields(intent string) []string {
 	switch intent {
 	case "home.member.invite":
-		return []string{"parameters.houseId", "parameters.expiredTime", "parameters.userRole", "parameters.reuseBarcode"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldExpiresAt, semantic.FieldUserRole, semantic.FieldReuseBarcode)
 	case "home.member.accept_share":
-		return []string{"parameters.houseId", "parameters.shareId", "parameters.createTime"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldShareID, semantic.FieldCreateTime)
 	case "home.member.configure":
-		return []string{"parameters.houseId", "parameters.memberId", "parameters.userRole"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldMemberID, semantic.FieldMemberName, semantic.FieldUserRole)
 	case "home.member.remove", "home.member.transfer":
-		return []string{"parameters.houseId", "parameters.memberId"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldMemberID, semantic.FieldMemberName, semantic.FieldConfirmed)
 	case "home.member.quit":
-		return []string{"parameters.houseId", "parameters.uid"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldMemberID, semantic.FieldConfirmed)
 	default:
-		return []string{"parameters.houseId"}
+		return semanticParameterPaths(semantic.FieldHouseID)
 	}
 }
 
@@ -239,6 +243,33 @@ func homeMemberExists(members []map[string]any, uid string) bool {
 	return ok
 }
 
+func homeMemberTargetID(parameters map[string]any, members []map[string]any) string {
+	if memberID := firstValueIDString(parameters, semantic.FieldMemberID, semantic.FieldUserID, semantic.FieldID); memberID != "" {
+		return memberID
+	}
+	name := firstRequestString(parameters,
+		semantic.FieldMemberName,
+		semantic.FieldDisplayName,
+		semantic.FieldName,
+		semantic.FieldTargetName,
+	)
+	if strings.TrimSpace(name) == "" {
+		return ""
+	}
+	ranked := semantic.RankNameMatches(name, members, homeMemberDisplayName)
+	if len(ranked) == 0 {
+		return ""
+	}
+	second := semantic.NameMatch{}
+	if len(ranked) > 1 {
+		second = ranked[1].Match
+	}
+	if !semantic.NameMatchAutoAccept(ranked[0].Match, second) {
+		return ""
+	}
+	return firstAnyMemberString(ranked[0].Value, "uid", semantic.FieldUserID, semantic.FieldMemberID, semantic.FieldID)
+}
+
 func homeMemberIsMaster(members []map[string]any, uid string) bool {
 	member, ok := findHomeMember(members, uid)
 	if !ok {
@@ -263,6 +294,10 @@ func firstAnyMemberString(values map[string]any, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func homeMemberDisplayName(member map[string]any) string {
+	return firstAnyMemberString(member, "nickname", "nickName", semantic.FieldName, semantic.FieldDisplayName, "remark")
 }
 
 func maskLocalIdentifier(value string) string {

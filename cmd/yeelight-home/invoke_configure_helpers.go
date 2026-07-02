@@ -7,6 +7,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type configureCreateSpec struct {
@@ -20,10 +21,15 @@ type configureCreateSpec struct {
 
 func areaCreateSpec() configureCreateSpec {
 	return configureCreateSpec{
-		entityType:     "area",
-		entityLabel:    "区域",
-		invalidReason:  "invalid_area_create_payload",
-		acceptedFields: []string{"parameters.houseId", "parameters.name", "parameters.roomIds", "parameters.parentId"},
+		entityType:    "area",
+		entityLabel:   "区域",
+		invalidReason: "invalid_area_create_payload",
+		acceptedFields: semanticParameterPaths(
+			semantic.FieldHouseID,
+			semantic.FieldName,
+			semantic.FieldRoomIDs,
+			semantic.FieldParentID,
+		),
 		preconditions: []string{
 			"提交前重新读取家庭实体列表",
 			"区域名不存在时才创建",
@@ -33,10 +39,10 @@ func areaCreateSpec() configureCreateSpec {
 			return api.BuildAreaCreatePayload(
 				houseID,
 				configureName(request),
-				firstRequestString(request.Parameters, "description", "desc"),
-				firstRequestString(request.Parameters, "icon"),
-				firstRequestString(request.Parameters, "parentId", "parent_id"),
-				requestStringList(request.Parameters["roomIds"], request.Parameters["roomId"]),
+				firstRequestString(request.Parameters, semantic.FieldDescription),
+				firstRequestString(request.Parameters, semantic.FieldIcon),
+				firstRequestString(request.Parameters, semantic.FieldParentID),
+				requestStringList(request.Parameters[semantic.FieldRoomIDs], request.Parameters[semantic.FieldRoomID]),
 			)
 		},
 	}
@@ -44,10 +50,19 @@ func areaCreateSpec() configureCreateSpec {
 
 func groupCreateSpec() configureCreateSpec {
 	return configureCreateSpec{
-		entityType:     "group",
-		entityLabel:    "设备组",
-		invalidReason:  "invalid_group_create_payload",
-		acceptedFields: []string{"parameters.houseId", "parameters.name", "parameters.roomId", "parameters.cid", "parameters.deviceIds"},
+		entityType:    "group",
+		entityLabel:   "设备组",
+		invalidReason: "invalid_group_create_payload",
+		acceptedFields: semanticParameterPaths(
+			semantic.FieldHouseID,
+			semantic.FieldName,
+			semantic.FieldRoomID,
+			semantic.FieldRoomName,
+			semantic.FieldGroupCategory,
+			semantic.FieldGroupCapability,
+			semantic.FieldDeviceIDs,
+			semantic.FieldDeviceNames,
+		),
 		preconditions: []string{
 			"提交前重新读取家庭实体列表",
 			"设备组名不存在时才创建",
@@ -55,25 +70,47 @@ func groupCreateSpec() configureCreateSpec {
 			"创建后通过设备组列表按名称验证",
 		},
 		buildPayload: func(request contract.Request, houseID string) (map[string]any, error) {
-			return api.BuildGroupCreatePayload(
+			componentID, _ := semantic.GroupCapabilityComponentID(request.Parameters)
+			payload, err := api.BuildGroupCreatePayload(
 				houseID,
 				configureName(request),
-				firstRequestString(request.Parameters, "roomId", "room_id"),
-				firstRequestString(request.Parameters, "cid", "componentId", "component_id"),
-				requestStringList(request.Parameters["deviceIds"], request.Parameters["deviceId"]),
-				firstRequestString(request.Parameters, "description", "desc"),
-				firstRequestString(request.Parameters, "icon"),
+				firstRequestString(request.Parameters, semantic.FieldRoomID),
+				requestString(componentID),
+				requestStringList(request.Parameters[semantic.FieldDeviceIDs], request.Parameters[semantic.FieldDeviceID]),
+				firstRequestString(request.Parameters, semantic.FieldDescription),
+				firstRequestString(request.Parameters, semantic.FieldIcon),
 			)
+			if err != nil {
+				return nil, err
+			}
+			if roomName := firstRequestString(request.Parameters, semantic.FieldRoomName, semantic.FieldTargetRoomName); roomName != "" {
+				payload[semantic.FieldRoomName] = roomName
+			}
+			if names := requestStringList(request.Parameters[semantic.FieldDeviceNames]); len(names) > 0 {
+				payload[semantic.FieldDeviceNames] = names
+			}
+			return payload, nil
 		},
 	}
 }
 
 func sceneCreateSpec() configureCreateSpec {
 	return configureCreateSpec{
-		entityType:     "scene",
-		entityLabel:    "情景",
-		invalidReason:  "invalid_scene_create_payload",
-		acceptedFields: []string{"parameters.houseId", "parameters.name", "parameters.details"},
+		entityType:    "scene",
+		entityLabel:   "情景",
+		invalidReason: "invalid_scene_create_payload",
+		acceptedFields: append(semanticParameterPaths(
+			semantic.FieldHouseID,
+			semantic.FieldName,
+			semantic.FieldDescription,
+			semantic.FieldIcon,
+			semantic.FieldActions,
+		),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetType),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetID),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetName),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldSet),
+		),
 		preconditions: []string{
 			"提交前重新读取家庭实体列表",
 			"情景名不存在时才创建",
@@ -81,19 +118,15 @@ func sceneCreateSpec() configureCreateSpec {
 			"创建后通过情景列表按名称验证",
 		},
 		buildPayload: func(request contract.Request, houseID string) (map[string]any, error) {
-			details, ok := requestMapList(request.Parameters["details"])
+			details, ok := normalizeSceneActionRows(request.Parameters[semantic.FieldActions])
 			if !ok {
-				detail, ok := sceneSingleDetail(request)
-				if !ok {
-					return nil, fmt.Errorf("scene details are required")
-				}
-				details = []map[string]any{detail}
+				return nil, fmt.Errorf("scene actions are required")
 			}
 			return api.BuildSceneCreatePayload(
 				houseID,
 				configureName(request),
-				firstRequestString(request.Parameters, "description", "desc"),
-				firstRequestString(request.Parameters, "icon"),
+				firstRequestString(request.Parameters, semantic.FieldDescription),
+				firstRequestString(request.Parameters, semantic.FieldIcon),
 				details,
 			)
 		},
@@ -102,10 +135,23 @@ func sceneCreateSpec() configureCreateSpec {
 
 func automationCreateSpec() configureCreateSpec {
 	return configureCreateSpec{
-		entityType:     "automation",
-		entityLabel:    "自动化",
-		invalidReason:  "invalid_automation_create_payload",
-		acceptedFields: []string{"parameters.houseId", "parameters.name", "parameters.startTime", "parameters.endTime", "parameters.repeatType", "parameters.params", "parameters.actions"},
+		entityType:    "automation",
+		entityLabel:   "自动化",
+		invalidReason: "invalid_automation_create_payload",
+		acceptedFields: append(semanticParameterPaths(
+			semantic.FieldHouseID,
+			semantic.FieldName,
+			semantic.FieldActiveWindow,
+			semantic.FieldRepeat,
+			semantic.FieldTrigger,
+			semantic.FieldConditions,
+			semantic.FieldActions,
+		),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetType),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetID),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetName),
+			semanticParameterArrayPath(semantic.FieldActions, semantic.FieldSet),
+		),
 		preconditions: []string{
 			"提交前重新读取家庭实体列表",
 			"自动化名不存在时才创建",
@@ -113,27 +159,27 @@ func automationCreateSpec() configureCreateSpec {
 			"创建后通过自动化列表按名称验证",
 		},
 		buildPayload: func(request contract.Request, houseID string) (map[string]any, error) {
-			repeatType, ok := requestInt(request.Parameters["repeatType"])
+			schedule, ok := semantic.AutomationScheduleFromRequest(request.Parameters)
 			if !ok {
-				return nil, fmt.Errorf("repeatType is required")
+				return nil, fmt.Errorf("repeat is required")
 			}
-			version, _ := requestInt(request.Parameters["version"])
+			version, _ := requestInt(request.Parameters[semantic.FieldVersion])
 			var statusPtr *int
-			if status, ok := requestInt(request.Parameters["status"]); ok {
+			if status, ok := requestInt(request.Parameters[semantic.FieldStatus]); ok {
 				statusPtr = &status
 			}
-			actions, ok := requestMapList(request.Parameters["actions"])
+			actions, ok := normalizeAutomationActionRows(request.Parameters[semantic.FieldActions])
 			if !ok {
 				return nil, fmt.Errorf("actions are required")
 			}
 			return api.BuildAutomationCreatePayload(
 				houseID,
 				configureName(request),
-				firstRequestString(request.Parameters, "startTime", "start_time"),
-				firstRequestString(request.Parameters, "endTime", "end_time"),
-				repeatType,
-				firstRequestString(request.Parameters, "repeatValue", "repeat_value"),
-				request.Parameters["params"],
+				schedule.StartTime,
+				schedule.EndTime,
+				schedule.RepeatType,
+				schedule.RepeatValue,
+				normalizeAutomationParamsFromRequest(request.Parameters),
 				actions,
 				version,
 				statusPtr,
@@ -143,7 +189,7 @@ func automationCreateSpec() configureCreateSpec {
 }
 
 func configureName(request contract.Request) string {
-	return firstRequestString(request.Parameters, "name", "areaName", "groupName", "sceneName", "automationName")
+	return firstRequestString(request.Parameters, semantic.FieldName)
 }
 
 func requestStringList(values ...any) []string {
@@ -195,22 +241,29 @@ func requestMap(value any) map[string]any {
 }
 
 func sceneSingleDetail(request contract.Request) (map[string]any, bool) {
-	resID := firstRequestString(request.Parameters, "resId", "deviceId", "entityId")
-	params := request.Parameters["params"]
+	resID := firstRequestString(request.Parameters, semantic.FieldTargetID, semantic.FieldDeviceID)
+	params, _ := firstPresent(request.Parameters, semantic.FieldSet)
 	if resID == "" || params == nil {
 		return nil, false
 	}
+	params = normalizeLightActionParams(params)
 	compact, err := compactJSONForRuntime(params)
 	if err != nil {
 		return nil, false
 	}
+	typeID := requestNumberOrDefault(request.Parameters[semantic.FieldTargetTypeID], semantic.ResourceDevice)
+	if targetType := firstRequestString(request.Parameters, semantic.FieldTargetType, semantic.FieldEntityType); targetType != "" {
+		if parsed, ok := semanticTargetTypeID(targetType, groupTypeMesh); ok {
+			typeID = parsed
+		}
+	}
 	detail := map[string]any{
-		"typeId":  requestNumberOrDefault(request.Parameters["typeId"], 2),
-		"resId":   requestNumberOrString(resID),
-		"resName": firstNonEmptyString(firstRequestString(request.Parameters, "resName", "deviceName", "entityName"), resID),
-		"action":  requestNumberOrDefault(request.Parameters["action"], 0),
-		"rank":    requestNumberOrDefault(request.Parameters["rank"], 0),
-		"params":  compact,
+		semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType): typeID,
+		semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID):   requestNumberOrString(resID),
+		semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName): firstNonEmptyString(firstRequestString(request.Parameters, semantic.FieldTargetName), resID),
+		semantic.FieldAction:                 requestNumberOrDefault(request.Parameters[semantic.FieldAction], 0),
+		semantic.FieldRank:                   requestNumberOrDefault(request.Parameters[semantic.FieldRank], 0),
+		semantic.InternalActionParamsField(): compact,
 	}
 	return detail, true
 }

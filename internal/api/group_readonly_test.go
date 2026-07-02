@@ -15,6 +15,8 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
+		case "/apis/iot/v1/group/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"userGroupId":22,"houseId":1001,"name":"二楼","roomIds":[12],"img":"group.png","secret":"not-allowed"}]}}`))
 		case "/apis/iot/v2/thing/manage/house/1001/group/r/info/2/5":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":21,"houseId":1001,"name":"一楼","roomId":10,"componentId":2,"secret":"not-allowed"},{"id":22,"houseId":1001,"name":"二楼","roomId":12,"componentId":2,"secret":"not-allowed"}]}}`))
 		case "/apis/iot/v2/thing/manage/house/1001/group/22/r/info":
@@ -28,7 +30,7 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
 	request := MetadataReadonlyRequest{
 		HouseID:    "1001",
-		Parameters: map[string]any{"name": "二", "pageNo": 2, "pageSize": 5},
+		Parameters: map[string]any{"groupName": "二楼", "pageNo": 2, "pageSize": 5},
 		Credentials: MetadataReadonlyCredentials{
 			Authorization: "Bearer token-group-secret",
 			ClientID:      "client-1",
@@ -37,6 +39,10 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 	list, err := client.RunGroupList(context.Background(), request)
 	if err != nil {
 		t.Fatalf("RunGroupList error: %v", err)
+	}
+	structure, err := client.RunGroupStructureList(context.Background(), request)
+	if err != nil {
+		t.Fatalf("RunGroupStructureList error: %v", err)
 	}
 	search, err := client.RunGroupSearch(context.Background(), request)
 	if err != nil {
@@ -50,15 +56,15 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunGroupDetailGet error: %v", err)
 	}
-	if strings.Join(gotCalls, "\n") != "GET /apis/iot/v2/thing/manage/house/1001/group/r/info/2/5\nGET /apis/iot/v2/thing/manage/house/1001/group/r/info/2/5\nGET /apis/iot/v2/thing/manage/house/1001/group/22/r/info" {
+	if strings.Join(gotCalls, "\n") != "GET /apis/iot/v2/thing/manage/house/1001/group/r/info/2/5\nPOST /apis/iot/v1/group/r/all\nGET /apis/iot/v2/thing/manage/house/1001/group/r/info/2/5\nGET /apis/iot/v2/thing/manage/house/1001/group/22/r/info" {
 		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
-	for _, result := range []MetadataReadonlyResult{list, search, detail} {
+	for _, result := range []MetadataReadonlyResult{list, structure, search, detail} {
 		if result.Partial || result.APICalls != 1 {
 			t.Fatalf("result = %#v", result)
 		}
 		data, _ := json.Marshal(result.Data)
-		for _, forbidden := range []string{"token-group-secret", "not-allowed"} {
+		for _, forbidden := range []string{"token-group-secret", "not-allowed", "userGroupId", "img"} {
 			if strings.Contains(string(data), forbidden) {
 				t.Fatalf("result leaked %q: %s", forbidden, string(data))
 			}

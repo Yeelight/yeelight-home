@@ -2,15 +2,15 @@
 
 默认文档语言是英文：[README.md](README.md)。本文是中文使用说明。
 
-`yeelight-home` 是 Yeelight 智能家居 Skill 和自动化脚本使用的本地 Runtime CLI。它运行在用户自己的电脑或服务器上，本地保存凭据，解析语义化智能家居请求，直接调用 Yeelight 云端 API，并返回经过脱敏的结构化结果。
+`yeelight-home` 是 Yeelight 智能家居 Skill 和自动化脚本使用的本地 Runtime CLI。它运行在用户自己的电脑或服务器上，本地保存凭据，解析智能家居请求，执行受支持的 Yeelight 家庭能力，并返回经过脱敏的结构化结果。
 
 Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH` 找到公开安装的 `yeelight-home`，然后向 `yeelight-home invoke --stdin` 发送一个 JSON 请求。
 
 ## 主要特性
 
-- 直连 Yeelight 云端能力，覆盖家庭、房间、区域、设备、灯组、网关、面板、旋钮、情景、自动化、诊断、灯光设计、产品知识、本地记忆和推荐。
+- Yeelight 家庭能力，覆盖家庭、房间、区域、设备、灯组、网关、面板、旋钮、情景、自动化、诊断、灯光设计、产品知识、本地记忆和推荐。
 - 产品百科搜索：支持按产品名、型号、SKU/SPU、物料编码、条码或模糊关键词查询产品资料、附件、说明书候选地址和 FAQ 候选地址。
-- 薄执行模型：持久化写入、删除和高风险操作通过语义 Runtime adapter 校验后直接执行；调用方负责用户确认，需要预览时使用 dry-run。
+- 薄执行模型：持久化写入、删除和高风险操作通过 Runtime 校验后直接执行；调用方负责用户确认，需要预览时使用 dry-run。
 - 凭据本地化：token 优先进入系统凭据存储；普通 profile 配置只保存 region、houseId、qrDevice 等非密钥元数据。
 - 多 profile：可为不同账号、区域、家庭或测试环境维护独立配置。
 - 默认区域是 `cn`，也支持 `sg`、`us`、`eu`，开发场景可显式使用 `dev`。
@@ -31,7 +31,7 @@ Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH
 | 诊断维护 | 网关/设备诊断、升级文件、进度查询、安装和凭据诊断 |
 | 本地智能 | 本地偏好记忆、推荐列表、推荐反馈、冷却和拒绝 |
 
-只读能力会立即执行。持久化写入和删除也通过语义 Runtime adapter 校验后直接执行；调用方需要先让用户确认时，可使用 `--dry-run`、`--preview-only` 或 `options.dryRun=true` 获取无写入预览。
+只读能力会立即执行。持久化写入和删除也通过 Runtime 校验后直接执行；调用方需要先让用户确认时，可使用 `--dry-run`、`--preview-only` 或 `options.dryRun=true` 获取无写入预览。
 
 ## 安装
 
@@ -151,7 +151,7 @@ yeelight-home light brightness --device-id <device-id> --brightness 60 --json
 yeelight-home automation enable --automation-id <automation-id> --json
 ```
 
-资源命令和 `invoke` 共用同一套 Runtime adapter、校验、脱敏、直接执行、dry-run 预览和写后验证规则。
+资源命令和 `invoke` 共用同一套校验、脱敏、直接执行、dry-run 预览和写后验证规则。
 
 查看帮助：
 
@@ -170,13 +170,13 @@ yeelight-home intent schema --intent lighting.design.import --json
 yeelight-home explain lighting.design.import --json
 ```
 
-这些命令离线运行，不需要 token。它们会输出 SkillRequest 外层结构、可接受参数、复杂嵌套 payload shape、examples 和 nextStep，方便 Skill 或传统程序直接生成 HouseMeta、情景 `details`、自动化 `params`、面板事件、批量操作等大 JSON 字段。
+这些命令离线运行，不需要 token。它们会输出 SkillRequest 外层结构、可接受参数、复杂嵌套 payload shape、examples 和 nextStep，方便 Skill 或传统程序直接生成照明设计模型、情景 `actions[]`、自动化 `trigger` / `conditions` / `actions[]`、面板事件、批量操作等大 JSON 字段。
 
 传递不常用参数时，不需要手写完整 SkillRequest，可以用 `--set` 或 `--params-json`：
 
 ```sh
 yeelight-home room search --name 客厅 --json
-yeelight-home favorite add --set typeId=2,resId=50018330,rank=1 --json
+yeelight-home favorite add --set targetType=device,targetId=50018330,rank=1 --json
 yeelight-home product search --multi-field 青空灯 --json
 yeelight-home product search --product-model YP-0117 --json
 yeelight-home thing schema-get --schema-id <schema-id> --json
@@ -187,11 +187,11 @@ yeelight-home panel button-configure --device-id <panel-id> --params-json '<json
 
 ```sh
 yeelight-home product search --multi-field 青空灯 --json
-yeelight-home product search --material-code 1-000003268 --json
+yeelight-home product search --product-code 1-000003268 --json
 yeelight-home product search --product-model YP-0117 --json
 ```
 
-`product search` 调用产品百科搜索能力。返回结果会保留经过脱敏的产品字段，例如产品名、品牌、型号、SKU/SPU、品类/分类、物料编码、支持标记、状态、附件，以及可安全推导的说明书或 FAQ 候选资源地址。
+`product search` 调用产品百科搜索能力。返回结果会保留经过脱敏的产品字段，例如产品名、品牌、型号、SKU/SPU、品类/分类、产品编码、支持标记、状态、附件，以及可安全推导的说明书或 FAQ 候选资源地址。
 
 产品知识用于解释“这个产品是什么、有什么资料、可能有什么说明书或 FAQ”。它不能证明用户家里已经安装了这个设备，也不能证明该设备当前可控。判断已安装设备能力时，应使用 `entity capabilities`、`device detail` 或 `state query` 等家庭内证据。
 
@@ -240,7 +240,7 @@ yeelight-home home list --json
 printf '%s' "$YEELIGHT_TOKEN" | yeelight-home auth token set --stdin --region cn
 ```
 
-Skill 不应调用 raw URL、raw header、curl、兼容服务或带 token 的命令。
+Skill 应使用 `yeelight-home` 命令，不应调用 URL、header、curl、第三方服务或带 token 的命令。
 
 ## 发布和分发
 
@@ -250,7 +250,7 @@ Skill 不应调用 raw URL、raw header、curl、兼容服务或带 token 的命
 
 - macOS、Linux、Windows 的 `amd64`、`arm64`，以及 Linux `armv7` 归档。
 - checksums、SBOM 和 release metadata。
-- Homebrew tap Formula 兼容路径和 Cask。
+- Homebrew tap Formula 和 Cask。
 - Scoop bucket manifest。
 - Linux `.deb`、`.rpm`、`.apk` 和 Arch 包。
 - GHCR 和 Docker Hub 多架构镜像。
@@ -264,4 +264,4 @@ Skill 不应调用 raw URL、raw header、curl、兼容服务或带 token 的命
 - `auth status`、`doctor` 和 `invoke` 输出会脱敏。
 - profile 元数据只保存 profile 名称、region、默认 home、QR device 等非密钥信息。
 - token 保存在本地凭据存储或受保护的本地 fallback 中。
-- 持久化写入使用语义 Runtime adapter；模型不能执行任意 raw API payload。高影响操作的用户确认由调用方负责。
+- 持久化写入使用受支持的 Runtime intent；模型不能执行任意底层 payload。高影响操作的用户确认由调用方负责。

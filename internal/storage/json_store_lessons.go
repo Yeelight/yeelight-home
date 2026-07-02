@@ -52,57 +52,56 @@ func (store JSONStore) UpsertOperationLesson(record OperationLessonRecord) (Oper
 		record.HitCount = 1
 	}
 	scopeHouseID := lessonStorageHouseID(record.HouseID)
-	document, err := store.loadScope(record.Profile, record.Region, scopeHouseID)
+	var result OperationLessonUpsertResult
+	err := store.mutateScope(record.Profile, record.Region, scopeHouseID, func(document *jsonDocument) error {
+		for index, existing := range document.Lessons {
+			if !operationLessonEquivalent(existing, record) {
+				continue
+			}
+			if strings.TrimSpace(record.ID) == "" {
+				record.ID = existing.ID
+			}
+			if existing.CreatedAt > 0 && existing.CreatedAt < record.CreatedAt {
+				record.CreatedAt = existing.CreatedAt
+			}
+			record.HitCount += existing.HitCount
+			record.Evidence = mergeEvidence(existing.Evidence, record.Evidence)
+			if record.Cause == "" {
+				record.Cause = existing.Cause
+			}
+			if record.Avoid == "" {
+				record.Avoid = existing.Avoid
+			}
+			if record.ParametersHint == "" {
+				record.ParametersHint = existing.ParametersHint
+			}
+			if record.FallbackIntent == "" {
+				record.FallbackIntent = existing.FallbackIntent
+			}
+			if record.Source == "" {
+				record.Source = existing.Source
+			}
+			if record.Confidence == "" {
+				record.Confidence = existing.Confidence
+			}
+			if record.LastValidatedAt <= 0 {
+				record.LastValidatedAt = existing.LastValidatedAt
+			}
+			document.Lessons[index] = record
+			result = OperationLessonUpsertResult{Record: record, Created: false, Merged: true}
+			return nil
+		}
+		if strings.TrimSpace(record.ID) == "" {
+			record.ID = operationLessonStableID(record)
+		}
+		document.Lessons = append(document.Lessons, record)
+		result = OperationLessonUpsertResult{Record: record, Created: true}
+		return nil
+	})
 	if err != nil {
 		return OperationLessonUpsertResult{}, err
 	}
-	for index, existing := range document.Lessons {
-		if !operationLessonEquivalent(existing, record) {
-			continue
-		}
-		if strings.TrimSpace(record.ID) == "" {
-			record.ID = existing.ID
-		}
-		if existing.CreatedAt > 0 && existing.CreatedAt < record.CreatedAt {
-			record.CreatedAt = existing.CreatedAt
-		}
-		record.HitCount += existing.HitCount
-		record.Evidence = mergeEvidence(existing.Evidence, record.Evidence)
-		if record.Cause == "" {
-			record.Cause = existing.Cause
-		}
-		if record.Avoid == "" {
-			record.Avoid = existing.Avoid
-		}
-		if record.ParametersHint == "" {
-			record.ParametersHint = existing.ParametersHint
-		}
-		if record.FallbackIntent == "" {
-			record.FallbackIntent = existing.FallbackIntent
-		}
-		if record.Source == "" {
-			record.Source = existing.Source
-		}
-		if record.Confidence == "" {
-			record.Confidence = existing.Confidence
-		}
-		if record.LastValidatedAt <= 0 {
-			record.LastValidatedAt = existing.LastValidatedAt
-		}
-		document.Lessons[index] = record
-		if err := store.saveScope(record.Profile, record.Region, scopeHouseID, document); err != nil {
-			return OperationLessonUpsertResult{}, err
-		}
-		return OperationLessonUpsertResult{Record: record, Created: false, Merged: true}, nil
-	}
-	if strings.TrimSpace(record.ID) == "" {
-		record.ID = operationLessonStableID(record)
-	}
-	document.Lessons = append(document.Lessons, record)
-	if err := store.saveScope(record.Profile, record.Region, scopeHouseID, document); err != nil {
-		return OperationLessonUpsertResult{}, err
-	}
-	return OperationLessonUpsertResult{Record: record, Created: true}, nil
+	return result, nil
 }
 
 func (store JSONStore) ListOperationLessons(filter OperationLessonFilter) ([]OperationLessonRecord, error) {

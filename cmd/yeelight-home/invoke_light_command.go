@@ -2,13 +2,20 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
+)
+
+const (
+	lightWriteVerificationAttempts = 5
+	lightWriteVerificationInterval = 300 * time.Millisecond
 )
 
 type lightPropertySpec struct {
-	propertyName    string
+	propertyID      string
 	missingReason   string
 	messageTemplate string
 	traceID         string
@@ -16,7 +23,7 @@ type lightPropertySpec struct {
 }
 
 type lightAdjustSpec struct {
-	propertyName    string
+	propertyID      string
 	missingReason   string
 	messageTemplate string
 	traceID         string
@@ -37,11 +44,13 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
-	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
+	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	match, candidates, _ := findEntity(target, entities.Entities)
+	entities := resolved.Entities
+	match := resolved.Match
+	candidates := resolved.Candidates
 	if match.ID == "" {
 		return lightControlClarificationResponse(request, "entity_not_found", target, candidates, entityListAPICalls(entities)), nil
 	}
@@ -54,7 +63,7 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 	execution, err := api.NewDevicePropertySetClient(endpoint, nil).Run(ctx, api.DevicePropertySetRequest{
 		HouseID:      houseID,
 		DeviceID:     match.ID,
-		PropertyName: spec.propertyName,
+		PropertyName: spec.propertyID,
 		Value:        writeValue,
 		Command:      "set",
 		Credentials: api.DevicePropertySetCredentials{
@@ -65,14 +74,7 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 	if err != nil {
 		return contract.Response{}, err
 	}
-	verification, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
-		DeviceID:     match.ID,
-		PropertyName: spec.propertyName,
-		Credentials: api.StateQueryCredentials{
-			Authorization: authorization,
-			ClientID:      clientID,
-		},
-	})
+	verification, err := queryLightStateUntilExpected(ctx, endpoint, match.ID, spec.propertyID, authorization, clientID, expectedValue)
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -91,11 +93,13 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
-	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
+	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	match, candidates, _ := findEntity(target, entities.Entities)
+	entities := resolved.Entities
+	match := resolved.Match
+	candidates := resolved.Candidates
 	if match.ID == "" {
 		return lightControlClarificationResponse(request, "entity_not_found", target, candidates, entityListAPICalls(entities)), nil
 	}
@@ -107,7 +111,7 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 	}
 	before, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
 		DeviceID:     match.ID,
-		PropertyName: spec.propertyName,
+		PropertyName: spec.propertyID,
 		Credentials: api.StateQueryCredentials{
 			Authorization: authorization,
 			ClientID:      clientID,
@@ -123,7 +127,7 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 	expected := clampInt(current+delta, spec.min, spec.max)
 	execution, err := api.NewDevicePropertyAdjustClient(endpoint, nil).Run(ctx, api.DevicePropertyAdjustRequest{
 		DeviceID:     match.ID,
-		PropertyName: spec.propertyName,
+		PropertyName: spec.propertyID,
 		Value:        delta,
 		Credentials: api.DevicePropertyAdjustCredentials{
 			Authorization: authorization,
@@ -133,23 +137,45 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 	if err != nil {
 		return contract.Response{}, err
 	}
-	verification, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
-		DeviceID:     match.ID,
-		PropertyName: spec.propertyName,
-		Credentials: api.StateQueryCredentials{
-			Authorization: authorization,
-			ClientID:      clientID,
-		},
-	})
+	verification, err := queryLightStateUntilExpected(ctx, endpoint, match.ID, spec.propertyID, authorization, clientID, float64(expected))
 	if err != nil {
 		return contract.Response{}, err
 	}
 	return lightAdjustResponse(request, entities, match, before, execution, verification, delta, expected, spec.messageTemplate, spec.traceID), nil
 }
 
+func queryLightStateUntilExpected(ctx context.Context, endpoint api.Endpoint, deviceID string, propertyID string, authorization string, clientID string, expected any) (api.StateQueryResult, error) {
+	var last api.StateQueryResult
+	for attempt := 0; attempt < lightWriteVerificationAttempts; attempt++ {
+		verification, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
+			DeviceID:     deviceID,
+			PropertyName: propertyID,
+			Credentials: api.StateQueryCredentials{
+				Authorization: authorization,
+				ClientID:      clientID,
+			},
+		})
+		if err != nil {
+			return api.StateQueryResult{}, err
+		}
+		last = verification
+		if lightStateValueMatches(verification.Value, expected) || attempt == lightWriteVerificationAttempts-1 {
+			return verification, nil
+		}
+		timer := time.NewTimer(lightWriteVerificationInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return last, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return last, nil
+}
+
 func lightPowerSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyName:    "p",
+		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldPower),
 		missingReason:   "missing_power_value",
 		messageTemplate: "已设置 %s 的开关状态。",
 		traceID:         "light-power-set-command",
@@ -162,12 +188,12 @@ func lightPowerSpec() lightPropertySpec {
 
 func lightBrightnessSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyName:    "l",
+		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness),
 		missingReason:   "missing_brightness_value",
 		messageTemplate: "已设置 %s 的亮度。",
 		traceID:         "light-brightness-set-command",
 		resolveValue: func(request contract.Request) (any, any, bool) {
-			value, ok := lightIntegerValue(request, 1, 100, "brightness", "level", "value")
+			value, ok := lightIntegerValue(request, 1, 100, semantic.FieldBrightness, semantic.FieldValue)
 			return value, float64(value), ok
 		},
 	}
@@ -175,26 +201,26 @@ func lightBrightnessSpec() lightPropertySpec {
 
 func lightBrightnessAdjustSpec() lightAdjustSpec {
 	return lightAdjustSpec{
-		propertyName:    "l",
+		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness),
 		missingReason:   "missing_brightness_delta",
 		messageTemplate: "已调整 %s 的亮度。",
 		traceID:         "light-brightness-adjust-command",
 		min:             1,
 		max:             100,
 		resolveDelta: func(request contract.Request) (int, bool) {
-			return lightIntegerValue(request, -100, 100, "delta", "brightnessDelta", "brightness_delta", "step", "value")
+			return lightIntegerValue(request, -100, 100, semantic.FieldDelta, semantic.FieldStep, semantic.FieldValue)
 		},
 	}
 }
 
 func lightColorTemperatureSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyName:    "ct",
+		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature),
 		missingReason:   "missing_color_temperature_value",
 		messageTemplate: "已设置 %s 的色温。",
 		traceID:         "light-color-temperature-set-command",
 		resolveValue: func(request contract.Request) (any, any, bool) {
-			value, ok := lightIntegerValue(request, 2700, 6500, "colorTemperature", "color_temperature", "ct", "value")
+			value, ok := lightIntegerValue(request, 2700, 6500, semantic.FieldColorTemperature, semantic.FieldValue)
 			return value, float64(value), ok
 		},
 	}
@@ -202,7 +228,7 @@ func lightColorTemperatureSpec() lightPropertySpec {
 
 func lightColorSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyName:    "c",
+		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldColor),
 		missingReason:   "missing_color_value",
 		messageTemplate: "已设置 %s 的颜色。",
 		traceID:         "light-color-set-command",
@@ -215,14 +241,14 @@ func lightColorSpec() lightPropertySpec {
 
 func lightColorTemperatureAdjustSpec() lightAdjustSpec {
 	return lightAdjustSpec{
-		propertyName:    "ct",
+		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature),
 		missingReason:   "missing_color_temperature_delta",
 		messageTemplate: "已调整 %s 的色温。",
 		traceID:         "light-color-temperature-adjust-command",
 		min:             2700,
 		max:             6500,
 		resolveDelta: func(request contract.Request) (int, bool) {
-			return lightIntegerValue(request, -3800, 3800, "delta", "colorTemperatureDelta", "color_temperature_delta", "ctDelta", "step", "value")
+			return lightIntegerValue(request, -3800, 3800, semantic.FieldDelta, semantic.FieldStep, semantic.FieldValue)
 		},
 	}
 }

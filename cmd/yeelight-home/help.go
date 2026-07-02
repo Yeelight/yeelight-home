@@ -34,8 +34,8 @@ Global flags:
 Command model:
   Human-friendly operations use: yeelight-home <resource> <action> [flags]
   Skill and automation integrations use: yeelight-home invoke --stdin
-  Resource commands and invoke share the same Runtime adapters, validation, redaction, and write verification.
-  Reads and semantic writes execute directly by default. Use --dry-run, --preview-only, or request options.dryRun=true when the caller wants a no-write preview before asking its own user confirmation.
+  Resource commands and invoke share the same validation, redaction, execution, and write verification.
+  Reads and supported writes execute directly by default. Use --dry-run, --preview-only, or request options.dryRun=true when the caller wants a no-write preview before asking its own user confirmation.
 
 Configuration precedence:
   command flags > environment variables > active profile metadata/credential store > defaults
@@ -74,7 +74,7 @@ var moduleCommandDescriptions = map[string]string{
 	"group":          "List, search, create, update, or delete device groups",
 	"home":           "List, select, inspect, sort, invite, update, or delete homes",
 	"knob":           "Inspect, configure, or reset knobs",
-	"light":          "Human-friendly light controls such as on, off, brightness, ct, color",
+	"light":          "Human-friendly light controls such as on, off, brightness, color-temperature, color",
 	"lighting":       "Plan, import, and apply lighting designs, slots, and experiences",
 	"memory":         "Manage local preference memory",
 	"meshgroup":      "Inspect mesh group details",
@@ -99,22 +99,22 @@ var moduleCommandExamples = map[string][]string{
 	"ai-voice":       {"yeelight-home ai-voice products --json", "yeelight-home ai-voice list --json"},
 	"area":           {"yeelight-home area detail --area-id <id> --json", "yeelight-home area search --name <keyword> --json"},
 	"automation":     {"yeelight-home automation list --json", "yeelight-home automation detail --automation-id <id> --json", "yeelight-home automation enable --automation-id <id> --json"},
-	"device":         {"yeelight-home device list --json", "yeelight-home device detail --device-id <id> --json", "yeelight-home device slot-create --house-id <id> --params-json '{\"name\":\"灯位设计\",\"gateway\":{\"tempId\":\"gw1\",\"name\":\"默认网关\",\"roomList\":[{\"tempId\":\"rm1\",\"name\":\"客厅\",\"deviceList\":[{\"tempId\":\"dv1\",\"name\":\"黑色格栅灯1\",\"pid\":198666,\"materialCode\":\"1-000002044\"}]}]}}' --json"},
+	"device":         {"yeelight-home device list --json", "yeelight-home device detail --device-id <id> --json", "yeelight-home device slot-create --house-id <id> --params-json '{\"name\":\"灯位设计\",\"rooms\":[{\"key\":\"living\",\"name\":\"客厅\",\"deviceSlots\":[{\"key\":\"living-grille-1\",\"name\":\"黑色格栅灯1\",\"product\":{\"skuCode\":\"1-000002044\",\"capabilityPid\":198666,\"productComponentId\":4}}]}]}' --json"},
 	"entity":         {"yeelight-home entity list --json", "yeelight-home entity get --entity-id <id> --json"},
-	"favorite":       {"yeelight-home favorite list --json", "yeelight-home favorite add --set typeId=2,resId=<id>,rank=1 --json"},
+	"favorite":       {"yeelight-home favorite list --json", "yeelight-home favorite add --set targetType=device,targetId=<id>,rank=1 --json"},
 	"gateway":        {"yeelight-home gateway list --json", "yeelight-home gateway detail --gateway-id <id> --json", "yeelight-home gateway diagnose --gateway-id <id> --json"},
 	"group":          {"yeelight-home group list --json", "yeelight-home group detail --group-id <id> --json"},
 	"home":           {"yeelight-home home list --json", "yeelight-home home summary --house-id <id> --json", "yeelight-home home sort --house-id <id> --json"},
 	"knob":           {"yeelight-home knob detail --knob-id <id> --json", "yeelight-home knob configure --knob-id <id> --params-json '<json>' --json"},
-	"light":          {"yeelight-home light on --device-id <id> --json", "yeelight-home light brightness --device-id <id> --brightness 60 --json", "yeelight-home light ct --device-id <id> --ct 4000 --json"},
-	"lighting":       {"yeelight-home lighting plan --house-id <id> --params-json '<json>' --json", "yeelight-home lighting import --house-id <id> --params-json '{\"name\":\"全屋照明设计\",\"gateway\":{\"tempId\":\"gw1\",\"name\":\"默认网关\",\"roomList\":[{\"tempId\":\"rm1\",\"name\":\"客厅\",\"deviceList\":[{\"tempId\":\"dv1\",\"name\":\"黑色格栅灯1\",\"pid\":198666,\"materialCode\":\"1-000002044\"}],\"groupList\":[{\"tempId\":\"gp1\",\"name\":\"客厅格栅灯组\",\"componentId\":4,\"deviceTempIdList\":[\"dv1\"]}]}]}}' --json", "yeelight-home lighting apply --params-json '{\"actions\":[{\"deviceId\":\"<id>\",\"propertyName\":\"power\",\"value\":true}]}' --json"},
+	"light":          {"yeelight-home light on --device-id <id> --json", "yeelight-home light brightness --device-id <id> --brightness 60 --json", "yeelight-home light color-temperature --device-id <id> --color-temperature 4000 --json"},
+	"lighting":       {"yeelight-home lighting plan --house-id <id> --params-json '<json>' --json", "yeelight-home lighting import --params-json '{\"name\":\"新家照明设计\",\"rooms\":[{\"key\":\"living\",\"name\":\"客厅\",\"deviceSlots\":[{\"key\":\"living-grille-1\",\"name\":\"黑色格栅灯1\",\"product\":{\"skuCode\":\"1-000002044\",\"capabilityPid\":198666,\"productComponentId\":4}}],\"groups\":[{\"key\":\"living-grilles\",\"name\":\"客厅格栅灯组\",\"groupCategory\":\"lighting\",\"groupCapability\":\"light\",\"slotKeys\":[\"living-grille-1\"]}]}]}' --json", "yeelight-home lighting apply --params-json '{\"actions\":[{\"deviceId\":\"<id>\",\"property\":\"power\",\"value\":true}]}' --json"},
 	"memory":         {"yeelight-home memory list --json", "yeelight-home memory remember --set key=value --json"},
 	"meshgroup":      {"yeelight-home meshgroup detail --meshgroup-id <id> --json"},
 	"message":        {"yeelight-home message list --json"},
 	"node":           {"yeelight-home node sorted-devices --node-id <id> --json", "yeelight-home node property-config --node-id <id> --json"},
 	"operation":      {"yeelight-home operation batch-configure --params-json '<json>' --json", "yeelight-home operation lesson-list --set intent=scene.update --json", "yeelight-home operation lesson-record --params-json '<json>' --json"},
 	"panel":          {"yeelight-home panel list --json", "yeelight-home panel detail --panel-id <id> --json", "yeelight-home panel button-configure --panel-id <id> --params-json '<json>' --json"},
-	"product":        {"yeelight-home product search --keyword 青空灯 --json", "yeelight-home product search --product-model YP-0117 --json", "yeelight-home product pedia --material-code 1-000003268 --json"},
+	"product":        {"yeelight-home product search --keyword 青空灯 --json", "yeelight-home product search --product-model YP-0117 --json", "yeelight-home product pedia --sku-code 1-000003268 --json"},
 	"progress":       {"yeelight-home progress get --progress-id <id> --json"},
 	"recommendation": {"yeelight-home recommendation record --params-json '<json>' --json", "yeelight-home recommendation list --json", "yeelight-home recommendation feedback --params-json '<json>' --json"},
 	"room":           {"yeelight-home room list --json", "yeelight-home room detail --room-id <id> --json", "yeelight-home room rename --room-id <id> --name <new-name> --json"},
@@ -329,8 +329,8 @@ func moduleHelpText(resource string) string {
 	return fmt.Sprintf(`Usage:
   yeelight-home %s <%s> [--json] [--profile <name>] [--region <region>] [--house-id <id>] [resource flags]
 
-Human-friendly shortcut commands for Runtime intents. They use the same direct adapter model as invoke:
-reads call Yeelight cloud APIs directly, and semantic writes validate, execute, and verify immediately by default. Use --dry-run or --preview-only for a no-write preview when a caller wants to handle confirmation itself.
+Human-friendly shortcut commands for Runtime intents. They use the same execution model as invoke:
+reads and supported writes validate, execute, and verify immediately by default. Use --dry-run or --preview-only for a no-write preview when a caller wants to handle confirmation itself.
 
 Actions:
   %s

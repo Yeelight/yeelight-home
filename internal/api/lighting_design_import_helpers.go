@@ -3,10 +3,12 @@ package api
 import (
 	"strconv"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func looksLikeNaturalLightingDesign(payload map[string]any) bool {
-	for _, key := range []string{"rooms", "roomList", "items", "slots", "devices", "groups", "scenes", "automations"} {
+	for _, key := range semantic.NaturalLightingDesignFields() {
 		if _, ok := payload[key]; ok {
 			return true
 		}

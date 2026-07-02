@@ -4,12 +4,13 @@ import (
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const repeatTypeOnce = 1
 
 func validateAutomationConditionGroups(params map[string]any, repeatType int) string {
-	conditions, ok := params["conditions"].([]any)
+	conditions, ok := params[semantic.FieldConditions].([]any)
 	if !ok || len(conditions) == 0 {
 		return "invalid_automation_params"
 	}
@@ -20,8 +21,8 @@ func validateAutomationConditionGroups(params map[string]any, repeatType int) st
 		if !ok {
 			return "invalid_automation_params"
 		}
-		groupType := strings.TrimSpace(requestString(group["type"]))
-		children, ok := group["conditions"].([]any)
+		groupType := strings.TrimSpace(requestString(group[semantic.InternalField(semantic.DomainAutomation, semantic.FieldConditionType)]))
+		children, ok := group[semantic.FieldConditions].([]any)
 		if ok {
 			if groupType == "" || len(children) == 0 {
 				return "invalid_automation_params"
@@ -50,7 +51,7 @@ func validateAutomationConditionGroups(params map[string]any, repeatType int) st
 			}
 			continue
 		}
-		if strings.TrimSpace(requestString(group["type"])) == "" {
+		if strings.TrimSpace(requestString(group[semantic.InternalField(semantic.DomainAutomation, semantic.FieldConditionType)])) == "" {
 			return "invalid_automation_params"
 		}
 	}
@@ -63,13 +64,13 @@ func validateAutomationConditionReferences(conditions []any, entities api.Entity
 		if !ok {
 			return "invalid_automation_params"
 		}
-		if children, ok := typed["conditions"].([]any); ok {
+		if children, ok := typed[semantic.FieldConditions].([]any); ok {
 			if reason := validateAutomationConditionReferences(children, entities); reason != "" {
 				return reason
 			}
 		}
 		if hasResourceReference(typed) {
-			if reason := validateResourceReference(typed["typeId"], typed["resId"], entities, "invalid_automation_condition_resource_type", "invalid_automation_condition_reference"); reason != "" {
+			if reason := validateResourceReference(typed[semantic.InternalField(semantic.DomainAutomation, semantic.FieldTargetType)], typed[semantic.InternalField(semantic.DomainAutomation, semantic.FieldTargetID)], entities, "invalid_automation_condition_resource_type", "invalid_automation_condition_reference"); reason != "" {
 				return reason
 			}
 		}
@@ -84,7 +85,7 @@ func classifyAutomationConditionGroup(children []any) (string, string) {
 		if !ok {
 			return "", "invalid_automation_params"
 		}
-		childType := strings.TrimSpace(requestString(typed["type"]))
+		childType := strings.TrimSpace(requestString(typed[semantic.InternalField(semantic.DomainAutomation, semantic.FieldConditionType)]))
 		if childType == "" {
 			return "", "invalid_automation_params"
 		}
@@ -109,7 +110,7 @@ func groupContainsOneOf(children []any, expected ...string) bool {
 		if !ok {
 			continue
 		}
-		if wanted[strings.TrimSpace(requestString(typed["type"]))] {
+		if wanted[strings.TrimSpace(requestString(typed[semantic.InternalField(semantic.DomainAutomation, semantic.FieldConditionType)]))] {
 			return true
 		}
 	}

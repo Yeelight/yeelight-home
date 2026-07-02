@@ -55,8 +55,8 @@ func TestInvokeAdditionalReadonlyAdapters(t *testing.T) {
 		`{"contractVersion":"1.0","requestId":"req-faq-type-list","locale":"zh-CN","utterance":"查看 FAQ 类型","intent":"thing.product_faq.type.list","parameters":{}}`,
 		`{"contractVersion":"1.0","requestId":"req-faq-item-type-list","locale":"zh-CN","utterance":"查看 FAQ 项类型","intent":"thing.product_faq.item_type.list","parameters":{}}`,
 		`{"contractVersion":"1.0","requestId":"req-faq-locale-list","locale":"zh-CN","utterance":"查看 FAQ 支持语言","intent":"thing.product_faq.locale.list","parameters":{}}`,
-		`{"contractVersion":"1.0","requestId":"req-faq-page-list","locale":"zh-CN","utterance":"分页查看产品 FAQ","intent":"thing.product_faq.page.list","parameters":{"productId":"pid-1","pageNo":1,"pageSize":10}}`,
-		`{"contractVersion":"1.0","requestId":"req-faq-page-detail-list","locale":"zh-CN","utterance":"分页查看产品 FAQ 详情","intent":"thing.product_faq.page_detail.list","parameters":{"pid":"pid-1","pageNo":1,"pageSize":10}}`,
+		`{"contractVersion":"1.0","requestId":"req-faq-page-list","locale":"zh-CN","utterance":"分页查看产品 FAQ","intent":"thing.product_faq.page.list","parameters":{"capabilityPid":"pid-1","pageNo":1,"pageSize":10}}`,
+		`{"contractVersion":"1.0","requestId":"req-faq-page-detail-list","locale":"zh-CN","utterance":"分页查看产品 FAQ 详情","intent":"thing.product_faq.page_detail.list","parameters":{"capabilityPid":"pid-1","pageNo":1,"pageSize":10}}`,
 		`{"contractVersion":"1.0","requestId":"req-property-list","locale":"zh-CN","utterance":"查看物模型属性","intent":"thing.property.list","parameters":{}}`,
 	} {
 		var stdout bytes.Buffer
@@ -105,5 +105,47 @@ func TestInvokeAdditionalReadonlyAdapters(t *testing.T) {
 	}
 	if strings.Join(gotCalls, "\n") != strings.Join(wantCalls, "\n") {
 		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+}
+
+func TestInvokeSceneScopedListResolvesRoomName(t *testing.T) {
+	var gotSceneBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"灯光区"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v1/scene/r/list":
+			if err := json.NewDecoder(request.Body).Decode(&gotSceneBody); err != nil {
+				t.Fatalf("decode scene scoped body: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"sceneId":"scene-1","houseId":"house-1","roomId":"room-1","name":"灯光区回家"}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-scene-scoped-secret", "client-scene-scoped-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-scene-scoped-room-name","locale":"zh-CN","utterance":"灯光去有哪些情景","intent":"scene.scoped.list","parameters":{"houseId":"house-1","roomName":"灯光去"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if gotSceneBody["roomId"] != "room-1" {
+		t.Fatalf("gotSceneBody = %#v", gotSceneBody)
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "scene-scoped-list-readonly" {
+		t.Fatalf("response = %#v", response)
 	}
 }

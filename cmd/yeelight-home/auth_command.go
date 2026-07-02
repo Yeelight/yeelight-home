@@ -13,6 +13,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/credential"
 	localoutput "github.com/yeelight/yeelight-home/internal/output"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) runAuth(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
@@ -70,8 +71,8 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 		return exitInternalError
 	}
 	response := map[string]any{
-		"ok":     true,
-		"status": info.Status,
+		semantic.FieldOK:     true,
+		semantic.FieldStatus: info.Status,
 	}
 	if auth.IsQRLoginStatus(info.Status) {
 		credentials := auth.ExtractQRLoginCredentials(info)
@@ -103,9 +104,9 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 			_, _ = fmt.Fprintf(stderr, "auth qr-check: save profile metadata: %v\n", err)
 			return exitInternalError
 		}
-		response["credentials"] = map[string]any{
-			"accessTokenPresent": true,
-			"houseId":            credentials.HouseID,
+		response[semantic.FieldCredentials] = map[string]any{
+			semantic.FieldAccessTokenPresent: true,
+			semantic.FieldHouseID:            credentials.HouseID,
 		}
 	}
 	return writeJSON(stdout, stderr, response)
@@ -116,42 +117,42 @@ func (app *app) authStatus(flags cliFlags) map[string]any {
 	context, err := app.resolveRuntimeContext(flags)
 	if err != nil {
 		return map[string]any{
-			"authenticated": false,
-			"error":         err.Error(),
-			"profile":       flags.string("profile", status.Profile),
-			"tokenPresent":  false,
-			"tokenStore":    status.TokenStore,
+			semantic.FieldAuthenticated: false,
+			semantic.FieldError:         err.Error(),
+			semantic.FieldProfile:       flags.string("profile", status.Profile),
+			semantic.FieldTokenPresent:  false,
+			semantic.FieldTokenStore:    status.TokenStore,
 		}
 	}
 	response := map[string]any{
-		"authenticated": context.TokenPresent || status.Authenticated,
-		"profile":       context.Profile,
-		"region":        context.Region,
-		"houseId":       context.HouseID,
-		"tokenPresent":  context.TokenPresent,
-		"tokenSource":   context.TokenSource,
-		"tokenStore":    status.TokenStore,
+		semantic.FieldAuthenticated: context.TokenPresent || status.Authenticated,
+		semantic.FieldProfile:       context.Profile,
+		semantic.FieldRegion:        context.Region,
+		semantic.FieldHouseID:       context.HouseID,
+		semantic.FieldTokenPresent:  context.TokenPresent,
+		semantic.FieldTokenSource:   context.TokenSource,
+		semantic.FieldTokenStore:    status.TokenStore,
 	}
 	return response
 }
 
 func writeAuthStatusText(stdout io.Writer, response map[string]any) int {
 	_, _ = fmt.Fprintln(stdout, "Yeelight Home Auth")
-	_, _ = fmt.Fprintf(stdout, "Authenticated: %t\n", boolFromDiagnostic(response, "authenticated"))
-	_, _ = fmt.Fprintf(stdout, "Profile: %s\n", stringFromDiagnostic(response, "profile"))
-	_, _ = fmt.Fprintf(stdout, "Region: %s\n", stringFromDiagnostic(response, "region"))
-	houseID := stringFromDiagnostic(response, "houseId")
+	_, _ = fmt.Fprintf(stdout, "Authenticated: %t\n", boolFromDiagnostic(response, semantic.FieldAuthenticated))
+	_, _ = fmt.Fprintf(stdout, "Profile: %s\n", stringFromDiagnostic(response, semantic.FieldProfile))
+	_, _ = fmt.Fprintf(stdout, "Region: %s\n", stringFromDiagnostic(response, semantic.FieldRegion))
+	houseID := stringFromDiagnostic(response, semantic.FieldHouseID)
 	if houseID == "" {
 		houseID = "(not selected)"
 	}
 	_, _ = fmt.Fprintf(stdout, "House ID: %s\n", houseID)
-	_, _ = fmt.Fprintf(stdout, "Token present: %t\n", boolFromDiagnostic(response, "tokenPresent"))
-	tokenSource := stringFromDiagnostic(response, "tokenSource")
+	_, _ = fmt.Fprintf(stdout, "Token present: %t\n", boolFromDiagnostic(response, semantic.FieldTokenPresent))
+	tokenSource := stringFromDiagnostic(response, semantic.FieldTokenSource)
 	if tokenSource == "" {
 		tokenSource = "(none)"
 	}
 	_, _ = fmt.Fprintf(stdout, "Token source: %s\n", tokenSource)
-	if errText := stringFromDiagnostic(response, "error"); errText != "" {
+	if errText := stringFromDiagnostic(response, semantic.FieldError); errText != "" {
 		_, _ = fmt.Fprintf(stdout, "Error: %s\n", errText)
 	}
 	return exitOK
@@ -233,7 +234,7 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 			_, _ = fmt.Fprintf(stderr, "auth login: write QR png: %v\n", err)
 			return exitInternalError
 		}
-		response["qrPng"] = qrPNGPath
+		response[semantic.FieldQRPng] = qrPNGPath
 	}
 	if asJSON {
 		return writeJSON(stdout, stderr, response)
@@ -294,8 +295,8 @@ func (app *app) runAuthToken(args []string, stdin io.Reader, stdout io.Writer, s
 			return exitInternalError
 		}
 		metadata = mergeProfileMetadata(metadata, profile, map[string]string{
-			"region":  flags.string("region", ""),
-			"houseId": flags.string("house-id", ""),
+			semantic.FieldRegion:  flags.string("region", ""),
+			semantic.FieldHouseID: flags.string("house-id", ""),
 		})
 		if metadata.Region == "" {
 			metadata.Region = defaultRuntimeRegion
@@ -305,11 +306,11 @@ func (app *app) runAuthToken(args []string, stdin io.Reader, stdout io.Writer, s
 			return exitInternalError
 		}
 		result := map[string]any{
-			"ok":           true,
-			"profile":      profile,
-			"tokenPresent": true,
-			"region":       metadata.Region,
-			"houseId":      metadata.HouseID,
+			semantic.FieldOK:           true,
+			semantic.FieldProfile:      profile,
+			semantic.FieldTokenPresent: true,
+			semantic.FieldRegion:       metadata.Region,
+			semantic.FieldHouseID:      metadata.HouseID,
 		}
 		if flags.bool("json") {
 			return writeJSON(stdout, stderr, result)
@@ -332,7 +333,7 @@ func (app *app) runAuthToken(args []string, stdin io.Reader, stdout io.Writer, s
 			return exitInternalError
 		}
 		if flags.bool("json") {
-			return writeJSON(stdout, stderr, map[string]any{"ok": true, "profile": profile, "tokenPresent": false})
+			return writeJSON(stdout, stderr, map[string]any{semantic.FieldOK: true, semantic.FieldProfile: profile, semantic.FieldTokenPresent: false})
 		}
 		_, _ = fmt.Fprintf(stdout, "deleted token for profile=%s\n", profile)
 		return exitOK
@@ -399,24 +400,24 @@ func printQRLoginPrompt(stdout io.Writer, result auth.QRLoginResult) {
 
 func sanitizeQRLoginResult(profile string, region string, result auth.QRLoginResult) map[string]any {
 	response := map[string]any{
-		"ok":       result.OK,
-		"status":   result.Status,
-		"profile":  profile,
-		"region":   region,
-		"qrCodeId": result.QRCodeID,
-		"device":   result.Device,
-		"payload":  result.Payload,
+		semantic.FieldOK:       result.OK,
+		semantic.FieldStatus:   result.Status,
+		semantic.FieldProfile:  profile,
+		semantic.FieldRegion:   region,
+		semantic.FieldQRCodeID: result.QRCodeID,
+		semantic.FieldDevice:   result.Device,
+		semantic.FieldPayload:  result.Payload,
 	}
 	if result.ExpireAt != 0 {
-		response["expireAt"] = result.ExpireAt
+		response[semantic.FieldExpireAt] = result.ExpireAt
 	}
 	if result.Credentials == nil {
-		response["credentials"] = nil
+		response[semantic.FieldCredentials] = nil
 		return response
 	}
-	response["credentials"] = map[string]any{
-		"accessTokenPresent": true,
-		"houseId":            result.Credentials.HouseID,
+	response[semantic.FieldCredentials] = map[string]any{
+		semantic.FieldAccessTokenPresent: true,
+		semantic.FieldHouseID:            result.Credentials.HouseID,
 	}
 	return response
 }

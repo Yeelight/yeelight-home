@@ -55,6 +55,31 @@ func TestTopologyCacheStoresShardByProfileRegionAndHouse(t *testing.T) {
 	}
 }
 
+func TestTopologyCacheDoesNotExpireByWallClock(t *testing.T) {
+	root := t.TempDir()
+	cache := newTopologyCache(filepath.Join(root, "topology.json"))
+	now := time.Unix(1000, 0)
+	result := api.EntityListResult{
+		Region:   "cn",
+		HouseID:  "200171",
+		Total:    1,
+		Counts:   map[string]int{"device": 1},
+		Entities: []api.EntitySummary{{Type: "device", ID: "device-1", Name: "客厅主灯"}},
+		APICalls: 6,
+	}
+
+	if err := cache.Save("default", "cn", "200171", result, now); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	loaded, ok := cache.Load("default", "cn", "200171", now.AddDate(1, 0, 0))
+	if !ok {
+		t.Fatal("expected long-lived cache hit")
+	}
+	if loaded.Total != 1 || topologyCacheHits(loaded) != 1 || loaded.APICalls != 0 {
+		t.Fatalf("loaded = %#v", loaded)
+	}
+}
+
 func TestTopologyCacheMigratesLegacyEntry(t *testing.T) {
 	root := t.TempDir()
 	legacyPath := filepath.Join(root, "topology.json")

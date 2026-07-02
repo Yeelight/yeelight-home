@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type HomeOrganizationKind string
@@ -83,7 +85,16 @@ func (client HomeOrganizationClient) Run(ctx context.Context, request HomeOrgani
 		return HomeOrganizationResult{}, err
 	}
 	if !ok {
-		return HomeOrganizationResult{}, fmt.Errorf("%s write verification mismatch", request.Kind)
+		return HomeOrganizationResult{
+			Region:     client.endpoint.Region,
+			HouseID:    houseID,
+			Capability: string(request.Kind),
+			ItemCount:  homeOrganizationItemCount(request.Kind, request.Payload),
+			Verified:   false,
+			VerifiedBy: string(request.Kind) + "_read_after_write",
+			Warning:    "write_verification_mismatch",
+			APICalls:   apiCalls,
+		}, nil
 	}
 	return HomeOrganizationResult{
 		Region:     client.endpoint.Region,
@@ -117,14 +128,18 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 		if warning != "" {
 			return 0, fmt.Errorf("%s", warning)
 		}
-		sortType := strings.TrimSpace(stringFromAny(normalized["type"]))
-		target := strings.TrimSpace(stringFromAny(normalized["target"]))
+		sortType := strings.TrimSpace(stringFromAny(normalized[semantic.FieldType]))
+		target := strings.TrimSpace(stringFromAny(normalized[semantic.FieldTarget]))
 		if sortType == "" || target == "" {
 			return 0, fmt.Errorf("sort type and target are required")
 		}
-		body, ok := normalized["items"].([]any)
-		if !ok || len(body) == 0 {
+		items, ok := normalized[semantic.FieldItems].([]any)
+		if !ok || len(items) == 0 {
 			return 0, fmt.Errorf("sort items are required")
+		}
+		body, err := buildHomeSortAddBody(items)
+		if err != nil {
+			return 0, err
 		}
 		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/sort/"+houseID+"/w/"+sortType+"/"+target+"/add", body, credentials)
 		if err != nil {
@@ -135,7 +150,7 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 		}
 		return 1, nil
 	case HomeOrganizationFavoriteAdd:
-		body := mapWithoutKeys(payload, "favoriteId")
+		body := mapWithoutKeys(payload, semantic.FieldFavoriteID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/insert", body, credentials)
 		if err != nil {
 			return 1, err
@@ -145,9 +160,9 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 		}
 		return 1, nil
 	case HomeOrganizationFavoriteUpdate:
-		favoriteID := strings.TrimSpace(stringFromAny(payload["favoriteId"]))
+		favoriteID := strings.TrimSpace(stringFromAny(payload[semantic.FieldFavoriteID]))
 		if favoriteID != "" {
-			body := mapWithoutKeys(payload, "favoriteId")
+			body := mapWithoutKeys(payload, semantic.FieldFavoriteID)
 			response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/"+favoriteID+"/w/update", body, credentials)
 			if err != nil {
 				return 1, err
@@ -170,7 +185,7 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 		}
 		return calls + 1, nil
 	case HomeOrganizationFavoriteDelete:
-		favoriteID := strings.TrimSpace(stringFromAny(payload["favoriteId"]))
+		favoriteID := strings.TrimSpace(stringFromAny(payload[semantic.FieldFavoriteID]))
 		if favoriteID != "" {
 			response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/"+favoriteID+"/w/delete", nil, credentials)
 			if err != nil {
@@ -181,7 +196,7 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 			}
 			return 1, nil
 		}
-		body := []any{mapWithoutKeys(payload, "deleteTarget", "id")}
+		body := []any{mapWithoutKeys(payload, semantic.FieldDeleteTarget, semantic.FieldID)}
 		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/batchdelete", body, credentials)
 		if err != nil {
 			return 1, err
@@ -197,7 +212,7 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 		}
 		body := make([]any, 0, len(items))
 		for _, item := range items {
-			body = append(body, mapWithoutKeys(item, "favoriteId"))
+			body = append(body, mapWithoutKeys(item, semantic.FieldFavoriteID))
 		}
 		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/batchinsert", body, credentials)
 		if err != nil {
@@ -231,7 +246,7 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 		}
 		body := make([]any, 0, len(items))
 		for _, item := range items {
-			body = append(body, mapWithoutKeys(item, "deleteTarget"))
+			body = append(body, mapWithoutKeys(item, semantic.FieldDeleteTarget))
 		}
 		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/w/batchdelete", body, credentials)
 		if err != nil {
@@ -244,6 +259,40 @@ func (client HomeOrganizationClient) write(ctx context.Context, kind HomeOrganiz
 	default:
 		return 0, fmt.Errorf("unsupported home organization kind %q", kind)
 	}
+}
+
+func buildHomeSortAddBody(items []any) ([]any, error) {
+	body := make([]any, 0, len(items))
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("sort items are required")
+		}
+		targetType := firstNonNil(item[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType)], item[semantic.FieldTargetTypeID], item[semantic.FieldResourceTypeID])
+		if strings.TrimSpace(stringFromAny(targetType)) == "" {
+			if typeID, ok := homeSortResourceType(item, true); ok {
+				targetType = typeID
+			}
+		}
+		targetID := firstNonNil(item[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)], item[semantic.FieldTargetID], item[semantic.FieldEntityID])
+		if strings.TrimSpace(stringFromAny(targetID)) == "" {
+			targetID = item[semantic.FieldID]
+		}
+		rank := item[semantic.FieldRank]
+		if strings.TrimSpace(stringFromAny(targetType)) == "" || strings.TrimSpace(stringFromAny(targetID)) == "" || strings.TrimSpace(stringFromAny(rank)) == "" {
+			return nil, fmt.Errorf("sort item target type, target id, and rank are required")
+		}
+		row := map[string]any{
+			semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType): targetType,
+			semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID):   targetID,
+			semantic.FieldRank: rank,
+		}
+		if subIndex, ok := item[semantic.FieldSubIndex]; ok {
+			row["subIndex"] = subIndex
+		}
+		body = append(body, row)
+	}
+	return body, nil
 }
 
 func (client HomeOrganizationClient) verifyAfterWrite(ctx context.Context, kind HomeOrganizationKind, houseID string, payload map[string]any, credentials requestCredentials, attempts int, interval time.Duration) (bool, int, error) {
@@ -299,7 +348,7 @@ func (client HomeOrganizationClient) readSort(ctx context.Context, houseID strin
 			return ok, apiCalls, nil
 		}
 	}
-	delete(body, "items")
+	delete(body, semantic.FieldItems)
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/sort/r/getSort", body, credentials)
 	if err != nil {
 		return false, apiCalls + 1, err
@@ -307,12 +356,12 @@ func (client HomeOrganizationClient) readSort(ctx context.Context, houseID strin
 	if !isBusinessOK(response) {
 		return false, apiCalls + 1, fmt.Errorf("home sort list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 	}
-	return sortItemsPresent(response["data"], payload["items"]), apiCalls + 1, nil
+	return sortItemsPresent(response["data"], payload[semantic.FieldItems]), apiCalls + 1, nil
 }
 
 func (client HomeOrganizationClient) readSortBySpecificEndpoint(ctx context.Context, houseID string, normalized map[string]any, payload map[string]any, credentials requestCredentials) (bool, int, bool, error) {
-	sortType := strings.TrimSpace(stringFromAny(normalized["type"]))
-	target := strings.TrimSpace(stringFromAny(normalized["target"]))
+	sortType := strings.TrimSpace(stringFromAny(normalized[semantic.FieldType]))
+	target := strings.TrimSpace(stringFromAny(normalized[semantic.FieldTarget]))
 	if sortType == "" || target == "" {
 		return false, 0, false, nil
 	}
@@ -333,10 +382,10 @@ func (client HomeOrganizationClient) readSortBySpecificEndpoint(ctx context.Cont
 		}); err == nil {
 			data = enriched
 		}
-		return nodeSortItemsPresent(data, payload["items"]), 1, true, nil
+		return nodeSortItemsPresent(data, payload[semantic.FieldItems]), 1, true, nil
 	case "2":
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/sort/r/room/scene", map[string]any{
-			"ids": []any{requestNumberOrStringForAPI(target)},
+			semantic.FieldIDs: []any{requestNumberOrStringForAPI(target)},
 		}, credentials)
 		if err != nil {
 			return false, 1, true, err
@@ -344,14 +393,14 @@ func (client HomeOrganizationClient) readSortBySpecificEndpoint(ctx context.Cont
 		if !isBusinessOK(response) {
 			return false, 1, true, fmt.Errorf("room scene sort list returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
 		}
-		return sceneSortItemsPresent(response["data"], target, payload["items"]), 1, true, nil
+		return sceneSortItemsPresent(response["data"], target, payload[semantic.FieldItems]), 1, true, nil
 	default:
 		return false, 0, false, nil
 	}
 }
 
 func (client HomeOrganizationClient) readFavorites(ctx context.Context, houseID string, credentials requestCredentials) (any, int, error) {
-	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/r/all", map[string]any{"houseId": houseID}, credentials)
+	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/favourite/r/all", map[string]any{semantic.FieldHouseID: houseID}, credentials)
 	if err != nil {
 		return nil, 1, err
 	}
@@ -373,11 +422,11 @@ func (client HomeOrganizationClient) favoriteExists(ctx context.Context, houseID
 func homeOrganizationItemCount(kind HomeOrganizationKind, payload map[string]any) int {
 	switch kind {
 	case HomeOrganizationSortConfigure:
-		if items, ok := payload["items"].([]any); ok {
+		if items, ok := payload[semantic.FieldItems].([]any); ok {
 			return len(items)
 		}
 	case HomeOrganizationFavoriteBatchAdd, HomeOrganizationFavoriteBatchUpdate, HomeOrganizationFavoriteBatchDelete:
-		if items, ok := payload["items"].([]any); ok {
+		if items, ok := payload[semantic.FieldItems].([]any); ok {
 			return len(items)
 		}
 	case HomeOrganizationFavoriteAdd, HomeOrganizationFavoriteUpdate, HomeOrganizationFavoriteDelete:
@@ -432,8 +481,8 @@ func sceneSortItemsPresent(data any, target string, expected any) bool {
 		if !ok {
 			return false
 		}
-		resID := strings.TrimSpace(stringFromAny(expectedMap["resId"]))
-		rank := strings.TrimSpace(stringFromAny(expectedMap["rank"]))
+		resID := strings.TrimSpace(stringFromAny(expectedMap[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)]))
+		rank := strings.TrimSpace(stringFromAny(expectedMap[semantic.FieldRank]))
 		if resID == "" || rank == "" {
 			return false
 		}
@@ -443,7 +492,7 @@ func sceneSortItemsPresent(data any, target string, expected any) bool {
 			if !ok {
 				continue
 			}
-			if roomID := strings.TrimSpace(firstAnyString(item, "roomId")); roomID != "" && roomID != target {
+			if roomID := strings.TrimSpace(firstAnyString(item, semantic.FieldRoomID)); roomID != "" && roomID != target {
 				continue
 			}
 			sceneOrder, ok := item["sceneOrder"].(map[string]any)
@@ -476,8 +525,8 @@ func nodeSortItemsPresent(data any, expected any) bool {
 		if !ok {
 			return false
 		}
-		resID := strings.TrimSpace(stringFromAny(expectedMap["resId"]))
-		rank := strings.TrimSpace(stringFromAny(expectedMap["rank"]))
+		resID := strings.TrimSpace(stringFromAny(expectedMap[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)]))
+		rank := strings.TrimSpace(stringFromAny(expectedMap[semantic.FieldRank]))
 		if resID == "" || rank == "" {
 			return false
 		}
@@ -487,7 +536,7 @@ func nodeSortItemsPresent(data any, expected any) bool {
 			if !ok {
 				continue
 			}
-			if nodeSortRowID(item) == resID && strings.TrimSpace(firstAnyString(item, "rank")) == rank {
+			if nodeSortRowID(item) == resID && strings.TrimSpace(firstAnyString(item, semantic.FieldRank)) == rank {
 				matched = true
 				break
 			}
@@ -500,11 +549,11 @@ func nodeSortItemsPresent(data any, expected any) bool {
 }
 
 func nodeSortRowID(item map[string]any) string {
-	return firstAnyString(item, "resId", "deviceId", "meshGroupId", "meshgroupId", "groupId", "id")
+	return firstAnyString(item, semantic.FieldTargetID, semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID), semantic.FieldDeviceID, semantic.MeshGroupIDField(), semantic.FieldMeshGroupID, semantic.FieldGroupID, semantic.FieldID)
 }
 
 func sortItemMatches(item map[string]any, expected map[string]any) bool {
-	for _, key := range []string{"typeId", "resId", "rank", "subIndex"} {
+	for _, key := range []string{semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType), semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID), semantic.FieldRank, semantic.FieldSubIndex} {
 		expectedValue, ok := expected[key]
 		if !ok {
 			continue

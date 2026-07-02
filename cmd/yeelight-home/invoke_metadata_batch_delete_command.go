@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const metadataBatchDeleteLimit = 20
@@ -18,11 +19,11 @@ func (app *app) prepareMetadataBatchDelete(ctx context.Context, request contract
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	targetType, idKey, kind, ok := metadataBatchDeleteIntentSpec(request.Intent)
 	if !ok {
-		return configureClarificationResponse(request, "unsupported_metadata_batch_delete_intent", []string{"parameters.houseId"}), nil
+		return configureClarificationResponse(request, "unsupported_metadata_batch_delete_intent", semanticParameterPaths(semantic.FieldHouseID)), nil
 	}
 	requestedItems, ok := metadataBatchDeleteRequestedItems(request, idKey, targetType)
 	if !ok || len(requestedItems) == 0 || len(requestedItems) > metadataBatchDeleteLimit {
@@ -43,23 +44,23 @@ func (app *app) prepareMetadataBatchDelete(ctx context.Context, request contract
 		return metadataBatchDeleteClarificationResponse(request, reason), nil
 	}
 	payload := map[string]any{
-		"houseId":    requestNumberOrString(houseID),
-		"capability": string(kind),
-		"entityType": targetType,
-		"items":      items,
+		semantic.FieldHouseID:    requestNumberOrString(houseID),
+		semantic.FieldCapability: string(kind),
+		semantic.FieldEntityType: targetType,
+		semantic.FieldItems:      items,
 	}
 	preview := map[string]any{
-		"deleteTargets": previewItems,
-		"impact": map[string]any{
-			"mode":      "multi_target_delete",
-			"itemCount": len(items),
-			"fanOut":    "single_target_delete_adapter",
+		semantic.FieldDeleteTargets: previewItems,
+		semantic.FieldImpact: map[string]any{
+			semantic.FieldMode:      "multi_target_delete",
+			semantic.FieldItemCount: len(items),
+			semantic.FieldFanOut:    "single_target_delete_calls",
 		},
 	}
-	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("批量删除%d个%s", len(items), metadataDeleteLabel(targetType)), payload, []string{
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, fmt.Sprintf("批量删除%d个%s", len(items), metadataDeleteLabel(targetType)), operation.RiskR3, payload, []string{
 		"提交前重新读取家庭实体列表并确认全部目标仍存在",
 		"单次计划最多删除 20 个目标",
-		"执行时逐个调用已验证的单目标删除 adapter",
+		"执行时逐个调用已验证的单目标删除能力",
 		"Runtime 根据当前请求构建受控删除 payload",
 		"提交后通过 entity.list 逐项验证目标对象已不存在",
 	}, time.Now())
@@ -73,35 +74,41 @@ func (app *app) prepareMetadataBatchDelete(ctx context.Context, request contract
 func metadataBatchDeleteIntentSpec(intent string) (string, string, api.MetadataBatchDeleteKind, bool) {
 	switch intent {
 	case "room.batch_delete":
-		return "room", "roomId", api.MetadataBatchDeleteRoom, true
+		return "room", semantic.FieldRoomID, api.MetadataBatchDeleteRoom, true
 	case "area.batch_delete":
-		return "area", "areaId", api.MetadataBatchDeleteArea, true
+		return "area", semantic.FieldAreaID, api.MetadataBatchDeleteArea, true
 	case "group.batch_delete":
-		return "group", "groupId", api.MetadataBatchDeleteGroup, true
+		return "group", semantic.FieldGroupID, api.MetadataBatchDeleteGroup, true
 	case "scene.batch_delete":
-		return "scene", "sceneId", api.MetadataBatchDeleteScene, true
+		return "scene", semantic.FieldSceneID, api.MetadataBatchDeleteScene, true
 	case "automation.batch_delete":
-		return "automation", "automationId", api.MetadataBatchDeleteAutomation, true
+		return "automation", semantic.FieldAutomationID, api.MetadataBatchDeleteAutomation, true
 	default:
 		return "", "", "", false
 	}
 }
 
 func metadataBatchDeleteRequestedItems(request contract.Request, idKey string, targetType string) ([]map[string]any, bool) {
-	if rawItems, ok := requestMapList(request.Parameters["items"]); ok {
+	if rawItems, ok := requestMapList(request.Parameters[semantic.FieldItems]); ok {
 		return rawItems, true
 	}
-	ids := requestStringList(request.Parameters[idKey], request.Parameters["ids"], request.Parameters["entityIds"])
-	names := requestStringList(request.Parameters["names"], request.Parameters["entityNames"], request.Parameters[targetType+"Names"])
+	ids := requestStringList(request.Parameters[idKey], request.Parameters[semantic.FieldIDs], request.Parameters[semantic.FieldEntityIDs])
+	names := requestStringList(request.Parameters[semantic.FieldNames], request.Parameters[semantic.FieldEntityNames])
 	if len(ids) == 0 && len(names) == 0 {
 		return nil, false
 	}
 	items := make([]map[string]any, 0, len(ids)+len(names))
+	if len(ids) > 0 && len(ids) == len(names) {
+		for index, id := range ids {
+			items = append(items, map[string]any{idKey: id, semantic.FieldName: names[index]})
+		}
+		return items, true
+	}
 	for _, id := range ids {
 		items = append(items, map[string]any{idKey: id})
 	}
 	for _, name := range names {
-		items = append(items, map[string]any{"name": name})
+		items = append(items, map[string]any{semantic.FieldName: name})
 	}
 	return items, true
 }
@@ -111,34 +118,34 @@ func resolveMetadataBatchDeleteItems(targetType string, idKey string, requested 
 	preview := make([]any, 0, len(requested))
 	seen := map[string]bool{}
 	for _, raw := range requested {
-		targetID := firstRequestString(raw, idKey, "id", "entityId")
+		targetID := firstRequestString(raw, idKey, semantic.FieldID, semantic.FieldEntityID)
 		if targetID == "" {
-			targetID = firstValueIDString(raw, idKey, "id", "entityId")
+			targetID = firstValueIDString(raw, idKey, semantic.FieldID, semantic.FieldEntityID)
 		}
-		targetName := firstRequestString(raw, "name", "entityName", targetType+"Name")
+		targetName := firstRequestString(raw, metadataDeleteNameFields(targetType)...)
 		match, candidates, matchedBy := findEntity(entityGetTarget{id: targetID, name: targetName, entityType: targetType}, entities.Entities)
-		if match.ID == "" {
-			return nil, nil, "entity_not_found"
-		}
 		if len(candidates) > 1 && targetID == "" {
 			return nil, nil, "ambiguous_target"
+		}
+		if match.ID == "" {
+			return nil, nil, "entity_not_found"
 		}
 		if seen[match.ID] {
 			return nil, nil, "duplicate_delete_target"
 		}
 		seen[match.ID] = true
 		item := map[string]any{
-			"entityId": match.ID,
-			idKey:      match.ID,
-			"name":     match.Name,
+			semantic.FieldEntityID: match.ID,
+			idKey:                  match.ID,
+			semantic.FieldName:     match.Name,
 		}
 		items = append(items, item)
 		preview = append(preview, map[string]any{
-			"type":      match.Type,
-			"id":        match.ID,
-			"name":      match.Name,
-			"roomId":    match.RoomID,
-			"matchedBy": matchedBy,
+			semantic.FieldType:      match.Type,
+			semantic.FieldID:        match.ID,
+			semantic.FieldName:      match.Name,
+			semantic.FieldRoomID:    match.RoomID,
+			semantic.FieldMatchedBy: matchedBy,
 		})
 	}
 	return items, preview, ""
@@ -147,18 +154,35 @@ func resolveMetadataBatchDeleteItems(targetType string, idKey string, requested 
 func metadataBatchDeleteAcceptedFields(intent string) []string {
 	switch intent {
 	case "room.batch_delete":
-		return []string{"parameters.houseId", "parameters.items[].roomId", "parameters.items[].name", "parameters.ids", "parameters.names"}
+		return metadataBatchDeleteAcceptedFieldsForID(semantic.FieldRoomID, "room")
 	case "area.batch_delete":
-		return []string{"parameters.houseId", "parameters.items[].areaId", "parameters.items[].name", "parameters.ids", "parameters.names"}
+		return metadataBatchDeleteAcceptedFieldsForID(semantic.FieldAreaID, "area")
 	case "group.batch_delete":
-		return []string{"parameters.houseId", "parameters.items[].groupId", "parameters.items[].name", "parameters.ids", "parameters.names"}
+		return metadataBatchDeleteAcceptedFieldsForID(semantic.FieldGroupID, "group")
 	case "scene.batch_delete":
-		return []string{"parameters.houseId", "parameters.items[].sceneId", "parameters.items[].name", "parameters.ids", "parameters.names"}
+		return metadataBatchDeleteAcceptedFieldsForID(semantic.FieldSceneID, "scene")
 	case "automation.batch_delete":
-		return []string{"parameters.houseId", "parameters.items[].automationId", "parameters.items[].name", "parameters.ids", "parameters.names"}
+		return metadataBatchDeleteAcceptedFieldsForID(semantic.FieldAutomationID, "automation")
 	default:
-		return []string{"parameters.houseId", "parameters.items", "parameters.ids", "parameters.names"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldItems, semantic.FieldIDs, semantic.FieldNames)
 	}
+}
+
+func metadataBatchDeleteAcceptedFieldsForID(idField string, targetType string) []string {
+	fields := []string{
+		semantic.ParameterPath(semantic.FieldHouseID),
+		semanticParameterArrayPath(semantic.FieldItems, idField),
+		semantic.ParameterPath(semantic.FieldIDs),
+		semantic.ParameterPath(semantic.FieldNames),
+		semantic.ParameterPath(semantic.FieldEntityNames),
+	}
+	for _, nameField := range metadataDeleteNameFields(targetType) {
+		fields = append(fields, semanticParameterArrayPath(semantic.FieldItems, nameField))
+	}
+	fields = append(fields,
+		semantic.ParameterPath(semantic.FieldConfirmed),
+	)
+	return fields
 }
 
 func metadataBatchDeleteClarificationResponse(request contract.Request, reason string) contract.Response {
@@ -188,7 +212,7 @@ func (app *app) executeMetadataBatchDelete(ctx context.Context, request contract
 }
 
 func metadataBatchDeleteItemsFromPreparedPayload(payload map[string]any) ([]api.MetadataBatchDeleteItem, error) {
-	rawItems, ok := payload["items"].([]any)
+	rawItems, ok := payload[semantic.FieldItems].([]any)
 	if !ok || len(rawItems) == 0 {
 		return nil, fmt.Errorf("batch delete items are required")
 	}
@@ -198,11 +222,11 @@ func metadataBatchDeleteItemsFromPreparedPayload(payload map[string]any) ([]api.
 		if !ok {
 			return nil, fmt.Errorf("batch delete item must be an object")
 		}
-		entityID := valueIDString(firstNonNil(item["entityId"], item["roomId"], item["areaId"], item["groupId"], item["sceneId"], item["automationId"], item["id"]))
+		entityID := valueIDString(firstNonNil(item[semantic.FieldEntityID], item[semantic.FieldRoomID], item[semantic.FieldAreaID], item[semantic.FieldGroupID], item[semantic.FieldSceneID], item[semantic.FieldAutomationID], item[semantic.FieldID]))
 		if entityID == "" {
 			return nil, fmt.Errorf("batch delete item id is required")
 		}
-		items = append(items, api.MetadataBatchDeleteItem{EntityID: entityID, Name: requestString(item["name"])})
+		items = append(items, api.MetadataBatchDeleteItem{EntityID: entityID, Name: requestString(item[semantic.FieldName])})
 	}
 	return items, nil
 }

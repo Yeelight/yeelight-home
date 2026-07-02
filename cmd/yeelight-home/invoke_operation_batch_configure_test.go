@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestInvokeOperationBatchConfigureDryRunPreviewsWithoutWriting(t *testing.T) {
@@ -40,6 +42,51 @@ func TestInvokeOperationBatchConfigureDryRunPreviewsWithoutWriting(t *testing.T)
 	preview := result["preview"].(map[string]any)
 	if preview["intent"] != "operation.batch.configure" || result["dryRun"] != true {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeOperationBatchConfigureResolvesNestedNames(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		writeSeededHouseScopedListForConfigureTest(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-batch-resolve-secret", "client-batch-resolve-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-batch-resolve","locale":"zh-CN","utterance":"把客廷加入南去","intent":"operation.batch.configure","parameters":{"houseId":"200171","operations":[{"intent":"room.area.configure","parameters":{"roomName":"客廷","addAreaNames":["南去"]}}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	for _, call := range gotCalls {
+		if strings.Contains(call, "/w/") {
+			t.Fatalf("batch configure dry-run should not write: %#v", gotCalls)
+		}
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)
+	payloadPreview := preview[semantic.FieldPayloadPreview].(map[string]any)
+	semanticPreview := payloadPreview[semantic.FieldSemanticPreview].(map[string]any)
+	steps := semanticPreview[semantic.FieldSteps].([]any)
+	step := steps[0].(map[string]any)
+	stepPreview := step[semantic.FieldPreview].(map[string]any)
+	current := stepPreview[semantic.FieldCurrent].(map[string]any)
+	if current[semantic.FieldID] != "401398" {
+		t.Fatalf("stepPreview = %#v", stepPreview)
+	}
+	planned := stepPreview[semantic.FieldPlanned].(map[string]any)
+	addAreaIDs := planned[semantic.FieldAddAreaIDs].([]any)
+	if len(addAreaIDs) != 1 || addAreaIDs[0] != "300001" {
+		t.Fatalf("stepPreview = %#v", stepPreview)
 	}
 }
 
@@ -122,7 +169,7 @@ func TestInvokeOperationBatchConfigureRejectsStrictDeleteIntent(t *testing.T) {
 	if clarification["reason"] != "operation_batch_contains_strict_or_destructive_intent" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	if clarification["payloadShape"] == nil || clarification["examples"] == nil || !strings.Contains(requestString(clarification["nextStep"]), "multiple reversible") {
+	if clarification[semantic.FieldPayloadShape] == nil || clarification[semantic.FieldExamples] == nil || !strings.Contains(requestString(clarification[semantic.FieldNextStep]), "multiple reversible") {
 		t.Fatalf("clarification missing operation batch guide = %#v", clarification)
 	}
 	if app.preparedOperation != nil {
@@ -146,11 +193,11 @@ func TestInvokeOperationBatchConfigureInvalidPayloadReturnsPayloadGuide(t *testi
 		t.Fatalf("response = %#v", response)
 	}
 	clarification := response["clarification"].(map[string]any)
-	if clarification["reason"] != "invalid_operation_batch_payload" || clarification["payloadShape"] == nil || clarification["examples"] == nil {
+	if clarification["reason"] != "invalid_operation_batch_payload" || clarification[semantic.FieldPayloadShape] == nil || clarification[semantic.FieldExamples] == nil {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	if !strings.Contains(requestString(clarification["nextStep"]), "one batch for one user request") {
-		t.Fatalf("clarification nextStep = %#v", clarification["nextStep"])
+	if !strings.Contains(requestString(clarification[semantic.FieldNextStep]), "one batch for one user request") {
+		t.Fatalf("clarification nextStep = %#v", clarification[semantic.FieldNextStep])
 	}
 }
 

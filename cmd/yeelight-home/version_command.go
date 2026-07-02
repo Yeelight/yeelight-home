@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 var (
@@ -26,11 +28,11 @@ func printVersion(args []string, stdout io.Writer, stderr io.Writer) int {
 
 func versionInfo() map[string]any {
 	return map[string]any{
-		"cli":     "yeelight-home",
-		"version": version,
-		"commit":  commit,
-		"date":    date,
-		"os":      runtime.GOOS,
-		"arch":    runtime.GOARCH,
+		semantic.FieldCLI:     "yeelight-home",
+		semantic.FieldVersion: version,
+		semantic.FieldCommit:  commit,
+		semantic.FieldDate:    date,
+		semantic.FieldOS:      runtime.GOOS,
+		semantic.FieldArch:    runtime.GOARCH,
 	}
 }

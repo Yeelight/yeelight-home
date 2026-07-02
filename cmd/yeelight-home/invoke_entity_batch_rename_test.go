@@ -45,6 +45,42 @@ func TestInvokeEntityRenameBatchDryRunPreviewsWithoutWriting(t *testing.T) {
 	}
 }
 
+func TestInvokeEntityRenameBatchResolvesPhoneticCurrentName(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		writeSeededHouseScopedListForConfigureTest(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-rename-batch-secret", "client-rename-batch-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-rename-batch-phonetic","locale":"zh-CN","utterance":"把已有晴景改名为睡前晚安","intent":"entity.rename.batch","parameters":{"houseId":"200171","items":[{"entityType":"scene","currentName":"已有晴景","newName":"睡前晚安"}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	for _, call := range gotCalls {
+		if strings.Contains(call, "/name/w/modify") {
+			t.Fatalf("entity.rename.batch dry-run should not write: %#v", gotCalls)
+		}
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	preview := result["preview"].(map[string]any)
+	payloadPreview := preview["payloadPreview"].(map[string]any)
+	items := payloadPreview["items"].([]any)
+	if len(items) != 1 || items[0].(map[string]any)["id"] != "700001" {
+		t.Fatalf("items = %#v", items)
+	}
+}
+
 func TestInvokeEntityRenameBatchExecutesDirectly(t *testing.T) {
 	var writeBody []any
 	deviceListCalls := 0

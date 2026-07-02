@@ -24,7 +24,7 @@ func TestInvokeThingSchemaGetUsesCloudReadonlyAdapter(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-schema-secret", "client-schema-1", "house-1")
 
-	input := `{"contractVersion":"1.0","requestId":"req-thing-schema","locale":"zh-CN","utterance":"查看产品 1001 的物模型","intent":"thing.schema.get","parameters":{"houseId":"house-1","productId":"1001"}}`
+	input := `{"contractVersion":"1.0","requestId":"req-thing-schema","locale":"zh-CN","utterance":"查看产品 1001 的物模型","intent":"thing.schema.get","parameters":{"houseId":"house-1","capabilityPid":"1001"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -51,7 +51,7 @@ func TestInvokeThingSchemaGetUsesCloudReadonlyAdapter(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 	data := result["data"].(map[string]any)
-	if data["productId"] != "1001" || data["schema"] == nil {
+	if data["capabilityPid"] != "1001" || data["schema"] == nil {
 		t.Fatalf("data = %#v", data)
 	}
 }
@@ -107,8 +107,8 @@ func TestInvokeThingProductSchemaReadsUseCloudReadonlyAdapters(t *testing.T) {
 	app := newInvokeTestApp(t, "Bearer token-product-schema-secret", "client-schema-1", "house-1")
 
 	inputs := []string{
-		`{"contractVersion":"1.0","requestId":"req-product-v2","locale":"zh-CN","utterance":"查看产品 1001 的 v2 产品定义","intent":"thing.product.info.batch_get","parameters":{"productId":"1001"}}`,
-		`{"contractVersion":"1.0","requestId":"req-product-v3","locale":"zh-CN","utterance":"查看产品 1001 的第 2 版产品定义","intent":"thing.product.info.v3.batch_get","parameters":{"productId":"1001","version":2}}`,
+		`{"contractVersion":"1.0","requestId":"req-product-v2","locale":"zh-CN","utterance":"查看产品 1001 的 v2 产品定义","intent":"thing.product.info.batch_get","parameters":{"capabilityPid":"1001"}}`,
+		`{"contractVersion":"1.0","requestId":"req-product-v3","locale":"zh-CN","utterance":"查看产品 1001 的第 2 版产品定义","intent":"thing.product.info.v3.batch_get","parameters":{"capabilityPid":"1001","version":2}}`,
 		`{"contractVersion":"1.0","requestId":"req-product-list-v3","locale":"zh-CN","utterance":"查看版本化产品列表","intent":"thing.product.list.v3","parameters":{"houseId":"house-1"}}`,
 	}
 	for _, input := range inputs {

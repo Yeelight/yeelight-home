@@ -252,3 +252,35 @@ func TestHomeSummaryClientRunSearchUsesFuzzyName(t *testing.T) {
 		t.Fatalf("result = %#v", result)
 	}
 }
+
+func TestHomeSummaryClientRunSearchFallsBackToLocalSemanticMatch(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		calls = append(calls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/house/r/fuzzy":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v1/house/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"houseId":"home-1","name":"易来新家"},{"houseId":"home-2","name":"父母家"}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client := NewHomeSummaryClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunSearch(context.Background(), map[string]any{"name": "一来新家"}, HomeSummaryCredentials{Authorization: "secret-token"})
+	if err != nil {
+		t.Fatalf("RunSearch error: %v", err)
+	}
+	if strings.Join(calls, "\n") != "POST /apis/iot/v1/house/r/fuzzy\nPOST /apis/iot/v1/house/r/all" {
+		t.Fatalf("calls = %#v", calls)
+	}
+	if result.HouseCount != 1 || result.Houses[0].ID != "home-1" || result.Houses[0].Source != "alias_name" {
+		t.Fatalf("result = %#v", result)
+	}
+	if result.APICalls != 2 || result.Source != "/v1/house/r/fuzzy+local_name_match" {
+		t.Fatalf("result = %#v", result)
+	}
+}

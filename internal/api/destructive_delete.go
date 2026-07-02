@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type DestructiveDeleteKind string
@@ -137,7 +139,7 @@ func (client DestructiveDeleteClient) writeDelete(ctx context.Context, kind Dest
 	case DestructiveDeleteHome:
 		method = http.MethodPost
 		path = "/v1/house/" + pathSegment(entityID) + "/w/delete"
-		body = map[string]any{"id": requestNumberOrStringForAPI(entityID)}
+		body = map[string]any{semantic.FieldID: requestNumberOrStringForAPI(entityID)}
 	default:
 		return 0, fmt.Errorf("unsupported destructive delete kind %q", kind)
 	}
@@ -170,7 +172,7 @@ func (client DestructiveDeleteClient) verifyDeleted(ctx context.Context, kind De
 		case DestructiveDeleteGateway:
 			target, readCalls, err = client.findGatewayFromList(ctx, houseID, entityID, credentials)
 		case DestructiveDeleteHome:
-			target, readCalls, err = client.findHome(ctx, entityID, credentials)
+			target, entities, readCalls, err = client.findHomeFromAccountList(ctx, entityID, credentials)
 		default:
 			return false, EntityListResult{}, calls, fmt.Errorf("unsupported destructive delete kind %q", kind)
 		}
@@ -234,11 +236,11 @@ func (client DestructiveDeleteClient) findGateway(ctx context.Context, houseID s
 	row, _ := response["data"].(map[string]any)
 	return EntitySummary{
 		Type:    "gateway",
-		ID:      firstAnyString(row, "id", "gatewayId", "deviceId"),
-		Name:    firstAnyString(row, "name", "gatewayName", "deviceName"),
-		HouseID: firstNonEmpty(firstAnyString(row, "houseId"), houseID),
-		RoomID:  firstAnyString(row, "roomId"),
-		Status:  firstAnyString(row, "status"),
+		ID:      firstAnyString(row, semantic.EntitySummaryIDFieldsForType("gateway")...),
+		Name:    firstAnyString(row, semantic.EntitySummaryNameFields()...),
+		HouseID: firstNonEmpty(firstAnyString(row, semantic.EntitySummaryHouseIDFields()...), houseID),
+		RoomID:  firstAnyString(row, semantic.EntitySummaryRoomIDFields()...),
+		Status:  firstAnyString(row, semantic.EntitySummaryStatusFields()...),
 	}, 1, nil
 }
 
@@ -274,19 +276,12 @@ func (client DestructiveDeleteClient) findHome(ctx context.Context, houseID stri
 	if strings.TrimSpace(houseID) == "" {
 		return EntitySummary{}, 0, fmt.Errorf("house id is required")
 	}
-	result, err := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
-		Credentials: EntityListCredentials{
-			Authorization: credentials.Authorization,
-			ClientID:      credentials.ClientID,
-		},
-	})
+	home, result, calls, err := client.findHomeFromAccountList(ctx, houseID, credentials)
 	if err != nil {
-		return EntitySummary{}, result.APICalls, err
+		return EntitySummary{}, calls, err
 	}
-	for _, entity := range result.Entities {
-		if entity.Type == "home" && entity.ID == houseID {
-			return entity, result.APICalls, nil
-		}
+	if home.ID != "" {
+		return home, calls, nil
 	}
 	fallback, fallbackErr := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
 		HouseID: houseID,
@@ -299,6 +294,27 @@ func (client DestructiveDeleteClient) findHome(ctx context.Context, houseID stri
 		return EntitySummary{}, result.APICalls + fallback.APICalls, nil
 	}
 	return EntitySummary{Type: "home", ID: houseID, HouseID: houseID}, result.APICalls + fallback.APICalls, nil
+}
+
+func (client DestructiveDeleteClient) findHomeFromAccountList(ctx context.Context, houseID string, credentials requestCredentials) (EntitySummary, EntityListResult, int, error) {
+	if strings.TrimSpace(houseID) == "" {
+		return EntitySummary{}, EntityListResult{}, 0, fmt.Errorf("house id is required")
+	}
+	result, err := NewEntityListClient(client.endpoint, client.client).Run(ctx, EntityListRequest{
+		Credentials: EntityListCredentials{
+			Authorization: credentials.Authorization,
+			ClientID:      credentials.ClientID,
+		},
+	})
+	if err != nil {
+		return EntitySummary{}, result, result.APICalls, err
+	}
+	for _, entity := range result.Entities {
+		if entity.Type == "home" && entity.ID == houseID {
+			return entity, result, result.APICalls, nil
+		}
+	}
+	return EntitySummary{}, result, result.APICalls, nil
 }
 
 func destructiveEntityType(kind DestructiveDeleteKind) string {
@@ -319,7 +335,7 @@ func destructiveVerifyWith(kind DestructiveDeleteKind) string {
 	case DestructiveDeleteGateway:
 		return "gateway.list"
 	case DestructiveDeleteHome:
-		return "home.summary"
+		return "home.list"
 	default:
 		return "entity.list"
 	}

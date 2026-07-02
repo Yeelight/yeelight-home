@@ -6,117 +6,162 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (client MetadataReadonlyClient) RunUpgradeFileList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
 	body := readonlyBodyFromParameters(request.Parameters,
-		"pid", "productId", "deviceId", "did", "firmwareType", "firmwareVersion",
-		"currentVersion", "version", "languageCode", "pageNo", "pageSize", "sort", "order", "orderBy",
+		semantic.FieldCapabilityProductID, semantic.FieldDeviceID, semantic.FieldFirmwareType, semantic.FieldFirmwareVersion,
+		semantic.FieldCurrentVersion, semantic.FieldVersion, semantic.FieldLanguageCode, semantic.FieldPageNo, semantic.FieldPageSize, semantic.FieldSort, semantic.FieldOrder, semantic.FieldOrderBy,
 	)
-	deviceID := strings.TrimSpace(firstNonEmpty(request.DeviceID, stringFromAny(request.Parameters["deviceId"]), stringFromAny(request.Parameters["did"])))
+	deviceID := strings.TrimSpace(firstNonEmpty(request.DeviceID, stringFromAny(request.Parameters[semantic.FieldDeviceID])))
 	if deviceID != "" {
-		body["deviceId"] = deviceID
+		body[semantic.FieldDeviceID] = deviceID
 	}
-	if body["pid"] == nil {
-		if productID := stringFromAny(body["productId"]); productID != "" {
-			body["pid"] = productID
-		}
+	if productID, ok := body[semantic.FieldCapabilityProductID]; ok && productID != nil {
+		body[semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID)] = productID
 	}
-	delete(body, "productId")
-	delete(body, "did")
-	if !hasAnyKey(body, "pid", "productId", "deviceId", "did", "firmwareType", "firmwareVersion", "currentVersion", "version") {
+	delete(body, semantic.FieldCapabilityProductID)
+	if !hasAnyKey(body, semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID), semantic.FieldDeviceID, semantic.FieldFirmwareType, semantic.FieldFirmwareVersion, semantic.FieldCurrentVersion, semantic.FieldVersion) {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "upgrade.file.list", "upgrade_file_query_context_missing"), nil
 	}
-	result, err := client.readPath(ctx, request, "upgrade.file.list", "/v1/upgrade/r/listfile", http.MethodPost, body, map[string]any{"files": nil})
+	result, err := client.readPath(ctx, request, "upgrade.file.list", "/v1/upgrade/r/listfile", http.MethodPost, body, map[string]any{semantic.FieldFiles: nil})
 	result.DeviceID = deviceID
 	return result, err
 }
 
 func (client MetadataReadonlyClient) RunUpgradeProgressGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
-	deviceID := strings.TrimSpace(firstNonEmpty(request.DeviceID, stringFromAny(request.Parameters["deviceId"]), stringFromAny(request.Parameters["did"]), stringFromAny(request.Parameters["id"])))
+	deviceID := strings.TrimSpace(firstNonEmpty(request.DeviceID, stringFromAny(request.Parameters[semantic.FieldDeviceID]), stringFromAny(request.Parameters[semantic.FieldID])))
 	if deviceID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "upgrade.progress.get", "device_context_missing"), nil
 	}
-	body := readonlyBodyFromParameters(request.Parameters, "sort", "order", "orderBy", "pageNo", "pageSize")
-	body["deviceId"] = deviceID
-	result, err := client.readPath(ctx, request, "upgrade.progress.get", "/v1/upgrade/r/progress", http.MethodPost, body, map[string]any{"progress": nil})
+	body := readonlyBodyFromParameters(request.Parameters, semantic.FieldSort, semantic.FieldOrder, semantic.FieldOrderBy, semantic.FieldPageNo, semantic.FieldPageSize)
+	body[semantic.FieldDeviceID] = deviceID
+	result, err := client.readPath(ctx, request, "upgrade.progress.get", "/v1/upgrade/r/progress", http.MethodPost, body, map[string]any{semantic.FieldProgress: nil})
 	result.DeviceID = deviceID
 	return result, err
 }
 
 func (client MetadataReadonlyClient) RunUpgradeFileBatchList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
 	body := readonlyBodyFromParameters(request.Parameters,
-		"deviceIds", "devices", "queryList", "pids", "pid", "productIds", "languageCode", "firmwareType", "firmwareVersion", "currentVersion", "version",
+		semantic.FieldDeviceIDs, semantic.FieldDevices, semantic.FieldQueryList, semantic.FieldCapabilityProductIDs, semantic.FieldLanguageCode, semantic.FieldFirmwareType, semantic.FieldFirmwareVersion, semantic.FieldCurrentVersion, semantic.FieldVersion,
 	)
-	deviceID := strings.TrimSpace(firstNonEmpty(request.DeviceID, stringFromAny(request.Parameters["deviceId"]), stringFromAny(request.Parameters["did"])))
-	if deviceID != "" && body["deviceIds"] == nil && body["devices"] == nil && body["queryList"] == nil {
-		body["deviceIds"] = []string{deviceID}
+	deviceID := strings.TrimSpace(firstNonEmpty(request.DeviceID, stringFromAny(request.Parameters[semantic.FieldDeviceID])))
+	if deviceID != "" && body[semantic.FieldDeviceIDs] == nil && body[semantic.FieldDevices] == nil && body[semantic.FieldQueryList] == nil {
+		body[semantic.FieldDeviceIDs] = []string{deviceID}
 	}
-	if !hasAnyKey(body, "deviceIds", "devices", "queryList", "pids", "pid", "productIds") {
+	if productIDs := stringFromAny(body[semantic.FieldCapabilityProductIDs]); productIDs != "" {
+		body[semantic.InternalProductIDsField()] = productIDs
+		delete(body, semantic.FieldCapabilityProductIDs)
+	}
+	if !hasAnyKey(body, semantic.FieldDeviceIDs, semantic.FieldDevices, semantic.FieldQueryList, semantic.InternalProductIDsField()) {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "upgrade.file.batch_list", "upgrade_batch_query_context_missing"), nil
 	}
-	result, err := client.readPath(ctx, request, "upgrade.file.batch_list", "/v1/upgrade/r/batchlistfile", http.MethodPost, body, map[string]any{"files": nil})
+	result, err := client.readPath(ctx, request, "upgrade.file.batch_list", "/v1/upgrade/r/batchlistfile", http.MethodPost, body, map[string]any{semantic.FieldFiles: nil})
 	result.DeviceID = deviceID
 	return result, err
 }
 
 func (client MetadataReadonlyClient) RunProgressGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
-	key := strings.TrimSpace(firstNonEmpty(stringFromAny(request.Parameters["key"]), stringFromAny(request.Parameters["progressKey"]), stringFromAny(request.Parameters["id"])))
+	key := strings.TrimSpace(firstNonEmpty(stringFromAny(request.Parameters[semantic.FieldKey]), stringFromAny(request.Parameters[semantic.FieldProgressKey]), stringFromAny(request.Parameters[semantic.FieldID])))
 	if key == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "progress.get", "progress_key_missing"), nil
 	}
-	return client.readPath(ctx, request, "progress.get", "/v1/progress/r/"+pathSegment(key), http.MethodPost, nil, map[string]any{"progress": nil})
+	return client.readPath(ctx, request, "progress.get", "/v1/progress/r/"+pathSegment(key), http.MethodPost, nil, map[string]any{semantic.FieldProgress: nil})
 }
 
 func (client MetadataReadonlyClient) RunAppUpgradeLatestGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
-	body := readonlyBodyFromParameters(request.Parameters, "type", "appType", "osType", "languageCode")
-	if body["type"] == nil {
-		if appType := stringFromAny(body["appType"]); appType != "" {
-			body["type"] = appType
+	body := readonlyBodyFromParameters(request.Parameters, semantic.FieldType, semantic.FieldAppType, semantic.FieldOSType, semantic.FieldLanguageCode)
+	if body[semantic.FieldType] == nil {
+		if appType := stringFromAny(body[semantic.FieldAppType]); appType != "" {
+			body[semantic.FieldType] = appType
 		}
 	}
-	delete(body, "appType")
-	if !hasAnyKey(body, "type") || !hasAnyKey(body, "osType") {
+	delete(body, semantic.FieldAppType)
+	if appType := normalizeAppUpgradeAppType(stringFromAny(body[semantic.FieldType])); appType != "" {
+		body[semantic.FieldType] = appType
+	}
+	if osType := normalizeAppUpgradeOSType(stringFromAny(body[semantic.FieldOSType])); osType != "" {
+		body[semantic.FieldOSType] = osType
+	}
+	if !hasAnyKey(body, semantic.FieldType) || !hasAnyKey(body, semantic.FieldOSType) {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "app_upgrade.latest.get", "app_upgrade_query_context_missing"), nil
 	}
-	return client.readPath(ctx, request, "app_upgrade.latest.get", "/v1/appupgrade/r/latestfile", http.MethodPost, body, map[string]any{"latestFile": nil})
+	return client.readPath(ctx, request, "app_upgrade.latest.get", "/v1/appupgrade/r/latestfile", http.MethodPost, body, map[string]any{semantic.FieldLatestFile: nil})
+}
+
+func normalizeAppUpgradeAppType(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "1", "user", "yeelight", "yeelight app", "yeelight-app", "用户版", "用户端":
+		return "1"
+	case "2", "installer", "master", "师傅版", "师傅端":
+		return "2"
+	case "3", "tv", "电视版", "tv版":
+		return "3"
+	case "4", "commercial", "commercial-saas", "saas", "商照", "商照saas", "商照saas用户版":
+		return "4"
+	default:
+		return ""
+	}
+}
+
+func normalizeAppUpgradeOSType(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "1", "android", "安卓":
+		return "1"
+	case "2", "ios", "iphone", "苹果":
+		return "2"
+	default:
+		return ""
+	}
 }
 
 func (client MetadataReadonlyClient) RunOTAVersionFileBatchList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
-	body := readonlyBodyFromParameters(request.Parameters, "queryList", "firmwareType", "firmwareVersion", "version", "languageCode")
-	if body["queryList"] == nil && hasAnyKey(body, "firmwareType", "firmwareVersion", "version") {
+	body := readonlyBodyFromParameters(request.Parameters, semantic.FieldQueryList, semantic.FieldFirmwareType, semantic.FieldFirmwareVersion, semantic.FieldVersion, semantic.FieldLanguageCode)
+	if body[semantic.FieldQueryList] == nil && hasAnyKey(body, semantic.FieldFirmwareType, semantic.FieldFirmwareVersion, semantic.FieldVersion) {
 		query := map[string]any{}
-		for _, key := range []string{"firmwareType", "firmwareVersion", "version", "languageCode"} {
+		for _, key := range []string{semantic.FieldFirmwareType, semantic.FieldFirmwareVersion, semantic.FieldVersion, semantic.FieldLanguageCode} {
 			if value, ok := body[key]; ok {
 				query[key] = value
 				delete(body, key)
 			}
 		}
-		body["queryList"] = []any{query}
+		body[semantic.FieldQueryList] = []any{query}
 	}
-	if !hasAnyKey(body, "queryList") {
+	if !hasAnyKey(body, semantic.FieldQueryList) {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "ota.version_file.batch_list", "ota_version_file_query_context_missing"), nil
 	}
 	path := "/v1/ota/upgrade/r/batchListFilesByVersion"
-	if query := readonlyQueryFromParameters(request.Parameters, "language", "script", "region"); query != "" {
+	queryParameters := map[string]any{}
+	if languageCode := request.Parameters[semantic.FieldLanguageCode]; languageCode != nil {
+		queryParameters[semantic.FieldLanguage] = languageCode
+	}
+	if script := request.Parameters[semantic.FieldScript]; script != nil {
+		queryParameters[semantic.FieldScript] = script
+	}
+	if region := request.Parameters[semantic.FieldRegion]; region != nil {
+		queryParameters[semantic.FieldRegion] = region
+	}
+	if query := readonlyQueryValues(queryParameters); query != "" {
 		path += "?" + query
 	}
-	return client.readPath(ctx, request, "ota.version_file.batch_list", path, http.MethodPost, body, map[string]any{"files": nil})
+	return client.readPath(ctx, request, "ota.version_file.batch_list", path, http.MethodPost, body, map[string]any{semantic.FieldFiles: nil})
 }
 
 func (client MetadataReadonlyClient) RunNodePropertyConfigGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
 	nodeID := strings.TrimSpace(firstNonEmpty(
-		stringFromAny(request.Parameters["nodeId"]),
-		stringFromAny(request.Parameters["nodeID"]),
+		stringFromAny(request.Parameters[semantic.FieldNodeID]),
 		request.DeviceID,
-		stringFromAny(request.Parameters["deviceId"]),
-		stringFromAny(request.Parameters["did"]),
-		stringFromAny(request.Parameters["id"]),
+		stringFromAny(request.Parameters[semantic.FieldDeviceID]),
+		stringFromAny(request.Parameters[semantic.FieldID]),
 	))
 	nodeType := strings.TrimSpace(firstNonEmpty(
-		stringFromAny(request.Parameters["nodeType"]),
-		stringFromAny(request.Parameters["type"]),
-		stringFromAny(request.Parameters["entityType"]),
+		stringFromAny(request.Parameters[semantic.FieldNodeType]),
+		stringFromAny(request.Parameters[semantic.FieldType]),
+		stringFromAny(request.Parameters[semantic.FieldEntityType]),
 	))
 	if nodeID == "" || nodeType == "" {
 		result := metadataReadonlyMissingContext(client.endpoint.Region, "node.property_config.get", "node_property_config_context_missing")
@@ -125,10 +170,10 @@ func (client MetadataReadonlyClient) RunNodePropertyConfigGet(ctx context.Contex
 		return result, nil
 	}
 	path := "/v1/nodeConfig/r/node_property?" + readonlyQueryValues(map[string]any{
-		"nodeId":   nodeID,
-		"nodeType": nodeType,
+		semantic.FieldNodeID:   nodeID,
+		semantic.FieldNodeType: nodeType,
 	})
-	result, err := client.readPath(ctx, request, "node.property_config.get", path, http.MethodPost, nil, map[string]any{"properties": nil})
+	result, err := client.readPath(ctx, request, "node.property_config.get", path, http.MethodPost, nil, map[string]any{semantic.FieldProperties: nil})
 	if err != nil {
 		var statusErr HTTPStatusError
 		if errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusBadRequest {
@@ -152,16 +197,6 @@ func readonlyBodyFromParameters(parameters map[string]any, keys ...string) map[s
 		}
 	}
 	return body
-}
-
-func readonlyQueryFromParameters(parameters map[string]any, keys ...string) string {
-	values := map[string]any{}
-	for _, key := range keys {
-		if value, ok := parameters[key]; ok && value != nil {
-			values[key] = value
-		}
-	}
-	return readonlyQueryValues(values)
 }
 
 func readonlyQueryValues(parameters map[string]any) string {

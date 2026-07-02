@@ -8,6 +8,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) buildOperationBatchStepPreparedPayload(ctx context.Context, request contract.Request, endpoint api.Endpoint, _ string, _ string, houseID string, authorization string, clientID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
@@ -60,7 +61,7 @@ func operationBatchRoomCreatePayload(request contract.Request, houseID string, e
 	if reason := validateConfigureCreatePayload("room", nil, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	payload, err := api.BuildRoomCreatePayload(houseID, roomName, firstRequestString(request.Parameters, "description", "desc"), firstRequestString(request.Parameters, "icon"))
+	payload, err := api.BuildRoomCreatePayload(houseID, roomName, firstRequestString(request.Parameters, semantic.FieldDescription), firstRequestString(request.Parameters, semantic.FieldIcon))
 	if err != nil {
 		return nil, nil, "", nil, 0, "invalid_room_create_payload", nil
 	}
@@ -75,7 +76,7 @@ func operationBatchMetadataCreatePayload(request contract.Request, houseID strin
 	if reason := validateConfigureCreatePayload(spec.entityType, payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	name := executionPayloadString(payload, "name")
+	name := executionPayloadString(payload, semantic.FieldName)
 	for _, entity := range entities.Entities {
 		if entity.Type == spec.entityType && entity.Name == name {
 			return nil, nil, "", nil, 0, fmt.Sprintf("%s_name_already_exists", spec.entityType), nil
@@ -89,6 +90,9 @@ func operationBatchHomeOrganizationPayload(ctx context.Context, request contract
 	if err != nil {
 		return nil, nil, "", nil, 0, err.Error(), nil
 	}
+	if reason := resolveHomeOrganizationReferences(request.Intent, payload, entities); reason != "" {
+		return nil, nil, "", nil, 0, reason, nil
+	}
 	if reason := validateHomeOrganizationPayload(request.Intent, payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
@@ -97,7 +101,11 @@ func operationBatchHomeOrganizationPayload(ctx context.Context, request contract
 	}
 	preview, calls, err := homeSortPreview(ctx, endpoint, houseID, authorization, clientID, payload)
 	if err != nil {
-		preview = map[string]any{"previewUnavailable": true, "warning": "home_sort_preview_unavailable", "plannedItems": len(payloadItems(payload))}
+		preview = map[string]any{
+			semantic.FieldPreviewUnavailable: true,
+			semantic.FieldWarning:            "home_sort_preview_unavailable",
+			semantic.FieldPlannedItems:       len(payloadItems(payload)),
+		}
 		calls = 1
 	}
 	return payload, preconditions, summary, preview, calls, "", nil
@@ -107,6 +115,9 @@ func operationBatchHomeSpacePayload(request contract.Request, houseID string, en
 	payload, preconditions, summary, err := buildHomeSpaceConfigurationPayload(request, houseID)
 	if err != nil {
 		return nil, nil, "", nil, 0, err.Error(), nil
+	}
+	if reason := resolveHomeSpaceConfigurationReferences(request.Intent, payload, entities); reason != "" {
+		return nil, nil, "", nil, 0, reason, nil
 	}
 	if reason := validateHomeSpaceConfigurationPayload(request.Intent, payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
@@ -118,6 +129,9 @@ func operationBatchSpaceOrganizationPayload(request contract.Request, houseID st
 	payload, preconditions, summary, err := buildSpaceOrganizationPayload(request, houseID)
 	if err != nil {
 		return nil, nil, "", nil, 0, err.Error(), nil
+	}
+	if reason := resolveSpaceOrganizationReferences(request.Intent, payload, entities); reason != "" {
+		return nil, nil, "", nil, 0, reason, nil
 	}
 	if reason := validateSpaceOrganizationPayload(request.Intent, payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
@@ -137,30 +151,30 @@ func operationBatchSpaceBatchPayload(request contract.Request, houseID string, e
 }
 
 func operationBatchSceneUpdatePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
-	payload, err := buildSceneUpdatePayload(request, houseID)
+	payload, err := buildSceneUpdatePayload(request, houseID, entities)
 	if err != nil {
 		return nil, nil, "", nil, 0, err.Error(), nil
 	}
 	if reason := validateSceneUpdatePayload(payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	name := firstNonEmptyString(executionPayloadString(payload, "name"), valueIDString(payload["sceneId"]))
+	name := firstNonEmptyString(executionPayloadString(payload, semantic.FieldName), valueIDString(payload[semantic.FieldSceneID]))
 	return payload, nil, fmt.Sprintf("更新情景 %s", name), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchAutomationUpdatePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
-	automation, reason := automationStatusTarget(request, entities)
+	automation, reason := automationUpdateTarget(request, entities)
 	if reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	payload, err := buildAutomationUpdatePayload(request, houseID, automation.ID)
+	payload, err := buildAutomationUpdatePayload(request, houseID, automation)
 	if err != nil {
 		return nil, nil, "", nil, 0, err.Error(), nil
 	}
 	if reason := validateAutomationUpdatePayload(payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	name := firstNonEmptyString(executionPayloadString(payload, "name"), automation.Name)
+	name := firstNonEmptyString(executionPayloadString(payload, semantic.FieldName), automation.Name)
 	return payload, nil, fmt.Sprintf("更新自动化 %s", name), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
@@ -169,30 +183,30 @@ func operationBatchAutomationStatusPayload(request contract.Request, houseID str
 	if reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	payload := map[string]any{"houseId": requestNumberOrString(houseID), "automationId": automation.ID}
+	payload := map[string]any{semantic.FieldHouseID: requestNumberOrString(houseID), semantic.FieldAutomationID: automation.ID}
 	return payload, nil, automationStatusSummary(request.Intent, automation), executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchGatewayConfigurePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
-	payload, err := buildGatewayConfigurationPayload(request, houseID)
+	payload, err := buildGatewayConfigurationPayload(request, houseID, entities)
 	if err != nil {
 		return nil, nil, "", nil, 0, err.Error(), nil
 	}
 	if reason := validateGatewayConfigurationPayload(payload, entities); reason != "" {
 		return nil, nil, "", nil, 0, reason, nil
 	}
-	if !entityExists(entities, "device", valueIDString(payload["gatewayId"])) {
+	if !entityExists(entities, "device", valueIDString(payload[semantic.FieldGatewayID])) {
 		return nil, nil, "", nil, 0, "invalid_gateway_reference", nil
 	}
 	return payload, nil, "更新网关配置", executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
 }
 
 func operationBatchPanelConfigurePayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
-	payload, preconditions, summary, err := buildPanelConfigurationPayload(request)
+	payload, preconditions, summary, err := buildPanelConfigurationPayload(request, entities)
 	if err != nil {
 		return nil, nil, "", nil, 0, err.Error(), nil
 	}
-	if !entityExists(entities, "device", valueIDString(payload["deviceId"])) {
+	if !entityExists(entities, "device", valueIDString(payload[semantic.FieldDeviceID])) {
 		return nil, nil, "", nil, 0, "invalid_panel_device_reference", nil
 	}
 	return payload, preconditions, summary, executionPayloadPreview(operation.Prepared{HouseID: houseID, Payload: payload}), 0, "", nil
@@ -207,6 +221,10 @@ func operationBatchLightingDesignImportPayload(request contract.Request, houseID
 	if request.Intent == "device.slot.create" {
 		summary = "创建设备预留槽位"
 	}
-	preview := map[string]any{"counts": lightingDesignImportPayloadCounts(normalized), "createsDeviceSlots": true, "deviceSlotsArePhysicalBindings": false}
+	preview := map[string]any{
+		semantic.FieldCounts:              lightingDesignImportPayloadCounts(normalized),
+		semantic.FieldCreatesDeviceSlots:  true,
+		semantic.FieldDeviceSlotsPhysical: false,
+	}
 	return normalized, nil, summary, preview, 0, "", nil
 }

@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestAdditionalReadonlyAdaptersProjectSafeData(t *testing.T) {
@@ -54,9 +56,9 @@ func TestAdditionalReadonlyAdaptersProjectSafeData(t *testing.T) {
 	request := MetadataReadonlyRequest{
 		HouseID: "1001",
 		Parameters: map[string]any{
-			"roomId": "10",
-			"faqId":  "61",
-			"cid":    "81",
+			"roomId":      "10",
+			"faqId":       "61",
+			"componentId": "81",
 		},
 		Credentials: MetadataReadonlyCredentials{
 			Authorization: "Bearer token-additional-secret",
@@ -124,6 +126,77 @@ func TestAdditionalReadonlyAdaptersProjectSafeData(t *testing.T) {
 	}
 }
 
+func TestThingComponentGetResolvesNaturalComponentName(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/schema/component/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[{"id":81,"name":"亮度","properties":[{"token":"nope"}]}]}`))
+		case "/apis/iot/v2/thing/schema/component/r/81":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":81,"name":"亮度","properties":[{"token":"nope"}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+
+	result, err := client.RunThingComponentGet(context.Background(), MetadataReadonlyRequest{
+		Parameters: map[string]any{semantic.FieldComponentName: "亮度"},
+		Credentials: MetadataReadonlyCredentials{
+			Authorization: "Bearer token-component-name-secret",
+			ClientID:      "client-component-name-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("component get error: %v", err)
+	}
+	if strings.Join(gotCalls, "\n") != "GET /apis/iot/v2/thing/schema/component/r/list\nGET /apis/iot/v2/thing/schema/component/r/81" {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	if result.Partial || result.APICalls != 1 || result.Capability != "thing.component.get" {
+		t.Fatalf("result = %#v", result)
+	}
+	data := result.Data.(map[string]any)
+	component := data["component"].(map[string]any)
+	if component[semantic.FieldID] != "81" || component[semantic.FieldName] != "亮度" {
+		t.Fatalf("component = %#v", component)
+	}
+}
+
+func TestThingComponentGetTreatsNonNumericComponentIDAsName(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v2/thing/schema/component/r/list" {
+			t.Fatalf("natural component id should not be sent as detail path: %s", request.URL.Path)
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+	}))
+	defer server.Close()
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+
+	result, err := client.RunThingComponentGet(context.Background(), MetadataReadonlyRequest{
+		Parameters: map[string]any{semantic.FieldComponentID: "light"},
+		Credentials: MetadataReadonlyCredentials{
+			Authorization: "Bearer token-component-natural-secret",
+			ClientID:      "client-component-natural-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("component get error: %v", err)
+	}
+	if strings.Join(gotCalls, "\n") != "GET /apis/iot/v2/thing/schema/component/r/list" {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	if !result.Partial || result.APICalls != 1 || len(result.Warnings) == 0 || result.Warnings[0] != "component_not_found_or_ambiguous" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestAdditionalReadonlyAdaptersRequireContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		t.Fatalf("unexpected HTTP call: %s %s", request.Method, request.URL.Path)
@@ -149,5 +222,83 @@ func TestAdditionalReadonlyAdaptersRequireContext(t *testing.T) {
 		if !result.Partial || result.APICalls != 0 || len(result.Warnings) != 1 || result.Warnings[0] != run.want {
 			t.Fatalf("%s result = %#v", run.name, result)
 		}
+	}
+}
+
+func TestSceneScopedListBusinessErrorReturnsPartial(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/scene/r/list" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":false,"code":500,"message":"服务器内部错误","data":{"details":"hidden"}}`))
+	}))
+	defer server.Close()
+
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunSceneScopedList(context.Background(), MetadataReadonlyRequest{
+		HouseID:    "1001",
+		Parameters: map[string]any{"roomId": "10"},
+		Credentials: MetadataReadonlyCredentials{
+			Authorization: "Bearer token-additional-secret",
+			ClientID:      "client-additional-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunSceneScopedList error = %v", err)
+	}
+	if !result.Partial || result.Capability != "scene.scoped.list" || result.APICalls != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != "cloud_business_response_not_success" {
+		t.Fatalf("warnings = %#v", result.Warnings)
+	}
+	if result.Data != nil {
+		t.Fatalf("partial business result should not expose raw data: %#v", result.Data)
+	}
+}
+
+func TestSceneScopedListFallsBackToAllScenesOnBusinessError(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/scene/r/list":
+			_, _ = writer.Write([]byte(`{"success":false,"code":500,"message":"服务器内部错误"}`))
+		case "/apis/iot/v1/scene/r/all":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"sceneId":"scene-1","houseId":"1001","roomId":"10","name":"灯光区回家"},{"sceneId":"scene-2","houseId":"1001","roomId":"11","name":"客厅回家"}]}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.RunSceneScopedList(context.Background(), MetadataReadonlyRequest{
+		HouseID:    "1001",
+		Parameters: map[string]any{"roomId": "10"},
+		Credentials: MetadataReadonlyCredentials{
+			Authorization: "Bearer token-additional-secret",
+			ClientID:      "client-additional-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunSceneScopedList error = %v", err)
+	}
+	if result.Partial || result.Capability != "scene.scoped.list" || result.APICalls != 2 {
+		t.Fatalf("result = %#v", result)
+	}
+	if strings.Join(gotCalls, "\n") != "/apis/iot/v1/scene/r/list\n/apis/iot/v1/scene/r/all" {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	if len(result.Warnings) != 1 || result.Warnings[0] != "scene_scoped_list_all_fallback" {
+		t.Fatalf("warnings = %#v", result.Warnings)
+	}
+	data := result.Data.(map[string]any)
+	scenes := data[semantic.FieldScenes].([]any)
+	if len(scenes) != 1 || scenes[0].(map[string]any)[semantic.FieldName] != "灯光区回家" {
+		t.Fatalf("scenes = %#v", scenes)
 	}
 }

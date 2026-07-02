@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -15,19 +16,19 @@ func (app *app) invokeOperationLessonRecord(request contract.Request, profile st
 	} else {
 		houseID = ""
 	}
-	lessonPayload := requestMap(request.Parameters["lesson"])
+	lessonPayload := requestMap(request.Parameters[semantic.FieldLesson])
 	if lessonPayload == nil {
 		lessonPayload = request.Parameters
 	}
 	intent := firstNonEmptyString(
-		lessonString(lessonPayload, "intent"),
-		lessonString(lessonPayload, "operationIntent"),
-		lessonString(lessonPayload, "targetIntent"),
+		lessonString(lessonPayload, semantic.FieldIntent),
+		lessonString(lessonPayload, semantic.FieldOperationIntent),
+		lessonString(lessonPayload, semantic.FieldTargetIntent),
 	)
 	if intent == "" || intent == request.Intent {
 		intent = firstNonEmptyString(
-			lessonString(request.Parameters, "targetIntent"),
-			lessonString(request.Parameters, "operationIntent"),
+			lessonString(request.Parameters, semantic.FieldTargetIntent),
+			lessonString(request.Parameters, semantic.FieldOperationIntent),
 		)
 	}
 	now := time.Now().Unix()
@@ -36,28 +37,31 @@ func (app *app) invokeOperationLessonRecord(request contract.Request, profile st
 		Region:          region,
 		HouseID:         houseID,
 		Intent:          intent,
-		LessonType:      lessonString(lessonPayload, "lessonType"),
-		Symptom:         lessonString(lessonPayload, "symptom"),
-		Cause:           lessonString(lessonPayload, "cause"),
-		RecommendedPath: lessonString(lessonPayload, "recommendedPath"),
-		Avoid:           lessonString(lessonPayload, "avoid"),
-		ParametersHint:  lessonString(lessonPayload, "parametersHint"),
-		FallbackIntent:  lessonString(lessonPayload, "fallbackIntent"),
-		Evidence:        lessonString(lessonPayload, "evidence"),
-		Source:          lessonString(lessonPayload, "source"),
-		Confidence:      lessonString(lessonPayload, "confidence"),
-		Status:          lessonString(lessonPayload, "status"),
+		LessonType:      lessonString(lessonPayload, semantic.FieldLessonType),
+		Symptom:         lessonString(lessonPayload, semantic.FieldSymptom),
+		Cause:           lessonString(lessonPayload, semantic.FieldCause),
+		RecommendedPath: lessonString(lessonPayload, semantic.FieldRecommendedPath),
+		Avoid:           lessonString(lessonPayload, semantic.FieldAvoid),
+		ParametersHint:  lessonString(lessonPayload, semantic.FieldParametersHint),
+		FallbackIntent:  lessonString(lessonPayload, semantic.FieldFallbackIntent),
+		Evidence:        lessonString(lessonPayload, semantic.FieldEvidence),
+		Source:          lessonString(lessonPayload, semantic.FieldSource),
+		Confidence:      lessonString(lessonPayload, semantic.FieldConfidence),
+		Status:          lessonString(lessonPayload, semantic.FieldStatus),
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	if stale, ok := lessonBool(lessonPayload, "stale"); ok {
+	if stale, ok := lessonBool(lessonPayload, semantic.FieldStale); ok {
 		record.Stale = stale
 	}
-	if lastValidatedAt, ok := requestInteger(lessonPayload["lastValidatedAt"]); ok {
+	if lastValidatedAt, ok := requestInteger(lessonPayload[semantic.FieldLastValidatedAt]); ok {
 		record.LastValidatedAt = int64(lastValidatedAt)
 	}
 	if record.Intent == "" || record.LessonType == "" || record.Symptom == "" || record.RecommendedPath == "" {
 		return operationLessonClarificationResponse(request, "missing_required_lesson_fields"), nil
+	}
+	if operationLessonRecordDryRunRequested(request) {
+		return operationLessonRecordPreviewResponse(request, record), nil
 	}
 	upsert, err := app.memoryStore.UpsertOperationLesson(record)
 	if err != nil {
@@ -73,21 +77,21 @@ func (app *app) invokeOperationLessonList(request contract.Request, profile stri
 		houseID = ""
 	}
 	limit := 0
-	if parsed, ok := requestInt(request.Parameters["limit"]); ok {
+	if parsed, ok := requestInt(request.Parameters[semantic.FieldLimit]); ok {
 		limit = parsed
 	}
 	filter := storage.OperationLessonFilter{
 		Profile:         profile,
 		Region:          region,
 		HouseID:         houseID,
-		Intent:          firstRequestString(request.Parameters, "intent", "operationIntent", "targetIntent"),
-		LessonType:      firstRequestString(request.Parameters, "lessonType", "type"),
-		Query:           firstRequestString(request.Parameters, "query", "keyword", "symptom"),
-		Status:          firstRequestString(request.Parameters, "status"),
-		Source:          firstRequestString(request.Parameters, "source"),
-		MinConfidence:   firstRequestString(request.Parameters, "minConfidence", "confidenceAtLeast"),
-		IncludeStale:    requestBool(request.Parameters, "includeStale", "include_stale"),
-		IncludeRejected: requestBool(request.Parameters, "includeRejected", "include_rejected"),
+		Intent:          firstRequestString(request.Parameters, semantic.FieldIntent, semantic.FieldOperationIntent, semantic.FieldTargetIntent),
+		LessonType:      firstRequestString(request.Parameters, semantic.FieldLessonType),
+		Query:           firstRequestString(request.Parameters, semantic.FieldQuery, semantic.FieldKeyword, semantic.FieldSymptom),
+		Status:          firstRequestString(request.Parameters, semantic.FieldStatus),
+		Source:          firstRequestString(request.Parameters, semantic.FieldSource),
+		MinConfidence:   firstRequestString(request.Parameters, semantic.FieldMinConfidence, semantic.FieldConfidenceAtLeast),
+		IncludeStale:    requestBool(request.Parameters, semantic.FieldIncludeStale),
+		IncludeRejected: requestBool(request.Parameters, semantic.FieldIncludeRejected),
 		Limit:           limit,
 	}
 	lessons, err := app.memoryStore.ListOperationLessons(filter)
@@ -140,4 +144,9 @@ func lessonBool(values map[string]any, keys ...string) (bool, bool) {
 
 func isOperationLessonIntent(intent string) bool {
 	return strings.HasPrefix(intent, "operation.lesson.")
+}
+
+func operationLessonRecordDryRunRequested(request contract.Request) bool {
+	return requestBool(request.Options, semantic.FieldDryRun, semantic.FieldPreviewOnly) ||
+		requestBool(request.Parameters, semantic.FieldDryRun, semantic.FieldPreviewOnly)
 }

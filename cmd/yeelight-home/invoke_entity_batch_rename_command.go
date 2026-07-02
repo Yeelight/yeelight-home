@@ -10,6 +10,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const entityRenameBatchLimit = 20
@@ -19,7 +20,11 @@ func (app *app) prepareEntityBatchRename(ctx context.Context, request contract.R
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", []string{
+			semantic.ParameterPath(semantic.FieldHouseID),
+			semantic.FieldPath(semantic.FieldHomeRef, semantic.FieldID),
+			"local profile houseId",
+		}), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -36,8 +41,8 @@ func (app *app) prepareEntityBatchRename(ctx context.Context, request contract.R
 		return entityBatchRenameClarificationResponse(request, reason), nil
 	}
 	payload := map[string]any{
-		"houseId": requestNumberOrString(houseID),
-		"items":   items,
+		semantic.FieldHouseID: requestNumberOrString(houseID),
+		semantic.FieldItems:   items,
 	}
 	preview := entityBatchRenamePreview(items, entities)
 	now := time.Now()
@@ -55,21 +60,21 @@ func (app *app) prepareEntityBatchRename(ctx context.Context, request contract.R
 }
 
 func normalizeEntityBatchRenameItems(request contract.Request, entities api.EntityListResult) ([]any, string) {
-	rawItems, ok := requestMapList(request.Parameters["items"])
+	rawItems, ok := requestMapList(request.Parameters[semantic.FieldItems])
 	if !ok || len(rawItems) == 0 || len(rawItems) > entityRenameBatchLimit {
 		return nil, "invalid_entity_rename_batch_payload"
 	}
 	result := make([]any, 0, len(rawItems))
 	seen := map[string]bool{}
 	for _, raw := range rawItems {
-		entityType := firstRequestString(raw, "entityType", "type")
+		entityType := firstRequestString(raw, semantic.FieldEntityType)
 		typeID, typeReason := entityRenameTypeID(raw, entityType)
 		if typeReason != "" {
 			return nil, typeReason
 		}
 		entityType, _ = entityTypeForRenameType(typeID)
-		id := firstRequestString(raw, "id", "entityId", "resId", "deviceId", "sceneId")
-		currentName := firstRequestString(raw, "currentName", "oldName", "nameFrom")
+		id := firstRequestString(raw, semantic.FieldID, semantic.FieldEntityID)
+		currentName := firstRequestString(raw, semantic.FieldCurrentName)
 		if id == "" && currentName != "" {
 			resolved, reason := resolveEntityRenameTargetByName(entities, entityType, currentName)
 			if reason != "" {
@@ -84,7 +89,7 @@ func normalizeEntityBatchRenameItems(request contract.Request, entities api.Enti
 		if !ok {
 			return nil, "invalid_entity_rename_reference"
 		}
-		newName := firstRequestString(raw, "newName", "name")
+		newName := firstRequestString(raw, semantic.FieldNewName, semantic.FieldName)
 		if newName == "" || newName == current.Name {
 			return nil, "invalid_entity_rename_name"
 		}
@@ -99,14 +104,14 @@ func normalizeEntityBatchRenameItems(request contract.Request, entities api.Enti
 		}
 		seen[key] = true
 		item := map[string]any{
-			"id":         id,
-			"entityId":   id,
-			"typeId":     typeID,
-			"entityType": entityType,
-			"name":       newName,
+			semantic.FieldID:       id,
+			semantic.FieldEntityID: id,
+			semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType): typeID,
+			semantic.FieldEntityType: entityType,
+			semantic.FieldName:       newName,
 		}
-		if index, ok := requestInt(raw["index"]); ok {
-			item["index"] = index
+		if index, ok := requestInt(raw[semantic.FieldIndex]); ok {
+			item[semantic.FieldIndex] = index
 		}
 		result = append(result, item)
 	}
@@ -114,12 +119,6 @@ func normalizeEntityBatchRenameItems(request contract.Request, entities api.Enti
 }
 
 func entityRenameTypeID(item map[string]any, entityType string) (int, string) {
-	if typeID, ok := requestInt(item["typeId"]); ok {
-		if _, ok := entityTypeForRenameType(typeID); ok {
-			return typeID, ""
-		}
-		return 0, "invalid_entity_rename_resource_type"
-	}
 	switch strings.ToLower(strings.TrimSpace(entityType)) {
 	case "device":
 		return 2, ""
@@ -142,20 +141,14 @@ func entityTypeForRenameType(typeID int) (string, bool) {
 }
 
 func resolveEntityRenameTargetByName(entities api.EntityListResult, entityType string, name string) (api.EntitySummary, string) {
-	matches := []api.EntitySummary{}
-	for _, entity := range entities.Entities {
-		if entity.Type == entityType && entity.Name == name {
-			matches = append(matches, entity)
-		}
+	match, candidates, _ := findEntity(entityGetTarget{name: name, entityType: entityType}, entities.Entities)
+	if match.ID != "" {
+		return match, ""
 	}
-	switch len(matches) {
-	case 0:
-		return api.EntitySummary{}, "entity_rename_target_not_found"
-	case 1:
-		return matches[0], ""
-	default:
+	if len(candidates) > 0 {
 		return api.EntitySummary{}, "ambiguous_entity_rename_target"
 	}
+	return api.EntitySummary{}, "entity_rename_target_not_found"
 }
 
 func entityBatchRenamePreview(items []any, entities api.EntityListResult) map[string]any {
@@ -165,33 +158,40 @@ func entityBatchRenamePreview(items []any, entities api.EntityListResult) map[st
 		if !ok {
 			continue
 		}
-		entityType := requestString(item["entityType"])
-		entityID := requestString(item["id"])
+		entityType := requestString(item[semantic.FieldEntityType])
+		entityID := requestString(item[semantic.FieldID])
 		row := map[string]any{
-			"entityType": entityType,
-			"id":         entityID,
-			"name":       item["name"],
+			semantic.FieldEntityType: entityType,
+			semantic.FieldID:         entityID,
+			semantic.FieldName:       item[semantic.FieldName],
 		}
 		if current, ok := findEntitySummary(entities, entityType, entityID); ok {
-			row["currentName"] = current.Name
-			row["roomId"] = current.RoomID
+			row[semantic.FieldCurrentName] = current.Name
+			row[semantic.FieldRoomID] = current.RoomID
 		}
 		rows = append(rows, row)
 	}
 	sort.Slice(rows, func(left, right int) bool {
-		if rows[left]["entityType"] == rows[right]["entityType"] {
-			return requestString(rows[left]["id"]) < requestString(rows[right]["id"])
+		if rows[left][semantic.FieldEntityType] == rows[right][semantic.FieldEntityType] {
+			return requestString(rows[left][semantic.FieldID]) < requestString(rows[right][semantic.FieldID])
 		}
-		return requestString(rows[left]["entityType"]) < requestString(rows[right]["entityType"])
+		return requestString(rows[left][semantic.FieldEntityType]) < requestString(rows[right][semantic.FieldEntityType])
 	})
 	return map[string]any{
-		"itemCount": len(rows),
-		"items":     rows,
+		semantic.FieldItemCount: len(rows),
+		semantic.FieldItems:     rows,
 	}
 }
 
 func entityBatchRenameAcceptedFields() []string {
-	return []string{"parameters.houseId", "parameters.items[].entityType", "parameters.items[].id", "parameters.items[].currentName", "parameters.items[].newName", "parameters.items[].typeId"}
+	return []string{
+		semantic.ParameterPath(semantic.FieldHouseID),
+		semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityType),
+		semanticParameterArrayPath(semantic.FieldItems, semantic.FieldID),
+		semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityID),
+		semanticParameterArrayPath(semantic.FieldItems, semantic.FieldCurrentName),
+		semanticParameterArrayPath(semantic.FieldItems, semantic.FieldNewName),
+	}
 }
 
 func entityBatchRenameClarificationResponse(request contract.Request, reason string) contract.Response {

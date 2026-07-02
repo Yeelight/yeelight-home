@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestInvokePanelButtonConfigureDryRunPreviewsWithoutWriting(t *testing.T) {
@@ -20,7 +22,7 @@ func TestInvokePanelButtonConfigureDryRunPreviewsWithoutWriting(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-panel-config-secret", "client-panel-config-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-panel-config-plan","locale":"zh-CN","utterance":"把客厅面板第一个按键绑定回家情景","intent":"panel.button.configure","targets":[{"entityType":"device","id":"panel-1"}],"parameters":{"houseId":"200171","buttons":[{"id":"btn-1","keyValue":1,"resId":"scene-1","resType":6,"visible":1,"type":2,"accessToken":"must-drop"}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-panel-config-plan","locale":"zh-CN","utterance":"把客厅面板第一个按键绑定回家情景","intent":"panel.button.configure","targets":[{"entityType":"device","id":"panel-1"}],"parameters":{"houseId":"200171","buttons":[{"id":"btn-1","keyValue":1,"targetId":"scene-1","targetType":"scene","visible":1,"type":2,"accessToken":"must-drop"}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
@@ -44,6 +46,35 @@ func TestInvokePanelButtonConfigureDryRunPreviewsWithoutWriting(t *testing.T) {
 	if preview["intent"] != "panel.button.configure" || result["dryRun"] != true {
 		t.Fatalf("result = %#v", result)
 	}
+	if strings.Contains(stdout.String(), `"resId"`) || strings.Contains(stdout.String(), `"resType"`) {
+		t.Fatalf("preview leaked internal panel fields: %s", stdout.String())
+	}
+}
+
+func TestInvokePanelButtonConfigureResolvesNaturalDeviceName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writePanelConfigEntityList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-panel-config-secret", "client-panel-config-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-panel-config-natural","locale":"zh-CN","utterance":"把客廷面板第一个按键叫回家","intent":"panel.button.configure","parameters":{"houseId":"200171","deviceName":"客廷面板","buttons":[{"id":"btn-1","alias":"回家"}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	payloadPreview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	if payloadPreview[semantic.FieldDeviceID] != "panel-1" {
+		t.Fatalf("payloadPreview = %#v", payloadPreview)
+	}
 }
 
 func TestInvokeKnobConfigureRequiresKnownDevice(t *testing.T) {
@@ -55,7 +86,7 @@ func TestInvokeKnobConfigureRequiresKnownDevice(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-panel-config-secret", "client-panel-config-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-knob-config-missing","locale":"zh-CN","utterance":"配置不存在的旋钮","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"missing","details":[{"id":"detail-1","index":1,"mode":"scene"}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-knob-config-missing","locale":"zh-CN","utterance":"配置不存在的旋钮","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"missing","actions":[{"id":"detail-1","index":1,"mode":"scene"}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -70,8 +101,64 @@ func TestInvokeKnobConfigureRequiresKnownDevice(t *testing.T) {
 	if clarification["reason"] != "invalid_panel_device_reference" {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	if clarification["payloadShape"] == nil || clarification["examples"] == nil || !strings.Contains(requestString(clarification["nextStep"]), "knob.get") {
+	if clarification[semantic.FieldPayloadShape] == nil || clarification[semantic.FieldExamples] == nil || !strings.Contains(requestString(clarification[semantic.FieldNextStep]), "knob.get") {
 		t.Fatalf("clarification missing knob payload guide = %#v", clarification)
+	}
+}
+
+func TestInvokePanelButtonEventResetResolvesNaturalDeviceName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writePanelConfigEntityList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-panel-reset-secret", "client-panel-config-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-panel-event-reset-natural","locale":"zh-CN","utterance":"清空客廷面板单击动作","intent":"panel.button_event.reset","parameters":{"houseId":"200171","deviceName":"客廷面板","buttonEventId":"101"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	payloadPreview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	if payloadPreview[semantic.FieldDeviceID] != "panel-1" || payloadPreview[semantic.FieldButtonEventID] != "101" {
+		t.Fatalf("payloadPreview = %#v", payloadPreview)
+	}
+}
+
+func TestInvokePanelButtonEventUpdateAcceptsNestedButtonEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writePanelConfigEntityList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-panel-event-secret", "client-panel-config-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-panel-event-nested","locale":"zh-CN","utterance":"把客廷面板单击绑定回家情景","intent":"panel.button_event.update","parameters":{"houseId":"200171","deviceName":"客廷面板","buttonEvent":{"buttonEventId":"101","alias":"单击","actions":[{"targetType":"scene","targetId":"scene-1","targetName":"回家模式"}]}}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	payloadPreview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	if payloadPreview[semantic.FieldDeviceID] != "panel-1" {
+		t.Fatalf("payloadPreview = %#v", payloadPreview)
+	}
+	event := payloadPreview[semantic.FieldButtonEvent].(map[string]any)
+	if event[semantic.FieldButtonEventID] != "101" || event[semantic.FieldAlias] != "单击" {
+		t.Fatalf("event = %#v", event)
 	}
 }
 
@@ -84,7 +171,7 @@ func TestInvokePanelButtonEventUpdateInvalidPayloadReturnsPayloadGuide(t *testin
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-panel-event-secret", "client-panel-config-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-panel-event-bad","locale":"zh-CN","utterance":"把面板单击改成回家模式","intent":"panel.button_event.update","parameters":{"houseId":"200171","deviceId":"panel-1","buttonEventId":"101","params":{"set":{"p":true}}}}`
+	input := `{"contractVersion":"1.0","requestId":"req-panel-event-bad","locale":"zh-CN","utterance":"把面板单击改成回家模式","intent":"panel.button_event.update","parameters":{"houseId":"200171","deviceId":"panel-1","buttonEventId":"101","actions":[]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -96,11 +183,42 @@ func TestInvokePanelButtonEventUpdateInvalidPayloadReturnsPayloadGuide(t *testin
 		t.Fatalf("response = %#v", response)
 	}
 	clarification := response["clarification"].(map[string]any)
-	if clarification["reason"] != "invalid_panel_button_event_payload" || clarification["payloadShape"] == nil || clarification["examples"] == nil {
+	if clarification["reason"] != "invalid_panel_button_event_payload" || clarification[semantic.FieldPayloadShape] == nil || clarification[semantic.FieldExamples] == nil {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	if !strings.Contains(requestString(clarification["nextStep"]), "complete details list") {
-		t.Fatalf("clarification nextStep = %#v", clarification["nextStep"])
+	if !strings.Contains(requestString(clarification[semantic.FieldNextStep]), "complete actions list") {
+		t.Fatalf("clarification nextStep = %#v", clarification[semantic.FieldNextStep])
+	}
+}
+
+func TestInvokeKnobConfigureResolvesNaturalDeviceName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writePanelConfigEntityList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-knob-config-secret", "client-panel-config-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-knob-natural","locale":"zh-CN","utterance":"把客廷旋钮第一路绑定回家模式","intent":"knob.configure","parameters":{"houseId":"200171","deviceName":"客廷旋钮","actions":[{"id":"detail-1","index":1,"configType":"scene","targetType":"scene","targetId":"scene-1"}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	payloadPreview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	if payloadPreview[semantic.FieldDeviceID] != "knob-1" {
+		t.Fatalf("payloadPreview = %#v", payloadPreview)
+	}
+	actions := payloadPreview[semantic.FieldActions].([]any)
+	action := actions[0].(map[string]any)
+	if action[semantic.FieldIndex] != float64(1) || action[semantic.FieldConfigType] != "scene" {
+		t.Fatalf("action preview = %#v", action)
 	}
 }
 
@@ -113,7 +231,7 @@ func TestInvokeKnobConfigureInvalidPayloadReturnsPayloadGuide(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-knob-config-secret", "client-panel-config-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-knob-bad","locale":"zh-CN","utterance":"把旋钮第一路绑定回家模式","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"knob-1","params":{"sceneId":"scene-1"}}}`
+	input := `{"contractVersion":"1.0","requestId":"req-knob-bad","locale":"zh-CN","utterance":"把旋钮第一路绑定回家模式","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"knob-1","actions":[]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -125,11 +243,11 @@ func TestInvokeKnobConfigureInvalidPayloadReturnsPayloadGuide(t *testing.T) {
 		t.Fatalf("response = %#v", response)
 	}
 	clarification := response["clarification"].(map[string]any)
-	if clarification["reason"] != "invalid_knob_configure_payload" || clarification["payloadShape"] == nil || clarification["examples"] == nil {
+	if clarification["reason"] != "invalid_knob_configure_payload" || clarification[semantic.FieldPayloadShape] == nil || clarification[semantic.FieldExamples] == nil {
 		t.Fatalf("clarification = %#v", clarification)
 	}
-	if !strings.Contains(requestString(clarification["nextStep"]), "Preserve the current detail row") {
-		t.Fatalf("clarification nextStep = %#v", clarification["nextStep"])
+	if !strings.Contains(requestString(clarification[semantic.FieldNextStep]), "Preserve the current detail row") {
+		t.Fatalf("clarification nextStep = %#v", clarification[semantic.FieldNextStep])
 	}
 }
 
@@ -171,7 +289,7 @@ func TestInvokePanelButtonEventBatchUpdateDryRunPreviewsWithoutWriting(t *testin
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-panel-event-secret", "client-panel-config-1", "200171")
 
-	input := `{"contractVersion":"1.0","requestId":"req-panel-event-plan","locale":"zh-CN","utterance":"批量更新客厅面板按键动作","intent":"panel.button_event.batch_update","targets":[{"entityType":"device","id":"panel-1"}],"parameters":{"houseId":"200171","buttonEvents":[{"buttonEventId":"101","alias":"单击","details":[{"resId":"scene-1","typeId":6,"accessToken":"must-drop"}]},{"buttonEventId":"102","details":[{"resId":"scene-2","typeId":6}]}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-panel-event-plan","locale":"zh-CN","utterance":"批量更新客厅面板按键动作","intent":"panel.button_event.batch_update","targets":[{"entityType":"device","id":"panel-1"}],"parameters":{"houseId":"200171","buttonEvents":[{"buttonEventId":"101","alias":"单击","actions":[{"targetId":"scene-1","targetType":"scene","accessToken":"must-drop"}]},{"buttonEventId":"102","actions":[{"targetId":"scene-2","targetType":"scene"}]}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
@@ -194,6 +312,9 @@ func TestInvokePanelButtonEventBatchUpdateDryRunPreviewsWithoutWriting(t *testin
 	preview := result["preview"].(map[string]any)
 	if preview["intent"] != "panel.button_event.batch_update" || result["dryRun"] != true {
 		t.Fatalf("result = %#v", result)
+	}
+	if strings.Contains(stdout.String(), `"resId"`) || strings.Contains(stdout.String(), `"typeId"`) || strings.Contains(stdout.String(), `"resType"`) {
+		t.Fatalf("preview leaked internal panel event fields: %s", stdout.String())
 	}
 }
 
@@ -222,7 +343,7 @@ func TestInvokeKnobConfigureExecutesDirectly(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-panel-config-secret", "client-panel-config-1", "200171")
-	input := `{"contractVersion":"1.0","requestId":"req-knob-config-execute","locale":"zh-CN","utterance":"配置旋钮第一个子键为情景","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"knob-1","details":[{"id":"detail-1","index":1,"mode":"scene","resId":"scene-1"}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-knob-config-execute","locale":"zh-CN","utterance":"配置旋钮第一个子键为情景","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"knob-1","actions":[{"id":"detail-1","index":1,"mode":"scene","targetType":"scene","targetId":"scene-1"}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -265,7 +386,7 @@ func TestInvokePanelButtonEventUpdateExecutesDirectly(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-panel-event-secret", "client-panel-config-1", "200171")
-	input := `{"contractVersion":"1.0","requestId":"req-panel-event-execute","locale":"zh-CN","utterance":"更新面板按键动作","intent":"panel.button_event.update","parameters":{"houseId":"200171","deviceId":"panel-1","buttonEventId":"101","alias":"单击","details":[{"resId":"scene-1","typeId":6}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-panel-event-execute","locale":"zh-CN","utterance":"更新面板按键动作","intent":"panel.button_event.update","parameters":{"houseId":"200171","deviceId":"panel-1","buttonEventId":"101","alias":"单击","actions":[{"targetType":"scene","targetId":"scene-1","targetName":"回家模式"}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -274,6 +395,11 @@ func TestInvokePanelButtonEventUpdateExecutesDirectly(t *testing.T) {
 	}
 	if writeBody["buttonEventId"] != "101" || writeBody["alias"] != "单击" {
 		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	details := writeBody["details"].([]any)
+	detail := details[0].(map[string]any)
+	if detail["typeId"] != float64(6) || detail["resId"] != "scene-1" || detail["resName"] != "回家模式" {
+		t.Fatalf("writeBody details = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
 	if response["status"] != "success" || response["traceId"] != "panel-configuration-execute" {

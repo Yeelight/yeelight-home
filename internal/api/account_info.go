@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type AccountInfoCredentials struct {
@@ -57,27 +59,27 @@ func redactedAccountSummary(data any) map[string]any {
 		return map[string]any{}
 	}
 	summary := map[string]any{}
-	for _, key := range []string{"id", "uid", "userId", "accountId"} {
+	for _, key := range semantic.AccountIDFields() {
 		if value := firstAnyString(item, key); value != "" {
-			summary["id"] = maskIdentifier(value)
+			summary[semantic.FieldID] = maskIdentifier(value)
 			break
 		}
 	}
-	for _, key := range []string{"nickname", "nickName", "name", "displayName"} {
+	for _, key := range semantic.AccountDisplayNameFields() {
 		if value := firstAnyString(item, key); value != "" {
-			summary["displayName"] = value
+			summary[semantic.FieldDisplayName] = value
 			break
 		}
 	}
-	for _, key := range []string{"phone", "mobile", "mobilePhone"} {
+	for _, key := range semantic.AccountPhoneFields() {
 		if value := firstAnyString(item, key); value != "" {
-			summary["phoneMasked"] = maskTail(value, 4)
+			summary[semantic.FieldPhoneMasked] = maskTail(value, 4)
 			break
 		}
 	}
-	for _, key := range []string{"email", "mail"} {
+	for _, key := range semantic.AccountEmailFields() {
 		if value := firstAnyString(item, key); value != "" {
-			summary["emailMasked"] = maskEmail(value)
+			summary[semantic.FieldEmailMasked] = maskEmail(value)
 			break
 		}
 	}

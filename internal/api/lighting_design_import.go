@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const (
@@ -68,10 +70,7 @@ func NewLightingDesignImportClient(endpoint Endpoint, client *http.Client) Light
 }
 
 func (client LightingDesignImportClient) Run(ctx context.Context, request LightingDesignImportRequest) (LightingDesignImportResult, error) {
-	houseID := strings.TrimSpace(firstNonEmpty(request.HouseID, stringFromMap(request.Payload, "houseId")))
-	if houseID == "" {
-		return LightingDesignImportResult{}, fmt.Errorf("house id is required")
-	}
+	houseID := strings.TrimSpace(firstNonEmpty(request.HouseID, stringFromMap(request.Payload, semantic.FieldHouseID)))
 	credentials := requestCredentials{
 		Authorization: request.Credentials.Authorization,
 		ClientID:      request.Credentials.ClientID,
@@ -80,10 +79,7 @@ func (client LightingDesignImportClient) Run(ctx context.Context, request Lighti
 	if strings.TrimSpace(credentials.Authorization) == "" {
 		return LightingDesignImportResult{}, fmt.Errorf("missing token; run auth login --qr or set YEELIGHT_HOME_ACCESS_TOKEN")
 	}
-	payload, err := NormalizeLightingDesignImportPayload(houseID, request.Payload)
-	if err != nil {
-		return LightingDesignImportResult{}, err
-	}
+	payload := copyLightingDesignDeepMap(request.Payload)
 	response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/meta/import", payload, credentials)
 	if err != nil {
 		return LightingDesignImportResult{}, err
@@ -115,6 +111,9 @@ func (client LightingDesignImportClient) Run(ctx context.Context, request Lighti
 	if importedHouseID := lightingDesignMetaImportHouseID(status); importedHouseID != "" {
 		result.HouseID = importedHouseID
 		credentials.HouseID = importedHouseID
+	}
+	if strings.TrimSpace(result.HouseID) == "" {
+		return LightingDesignImportResult{}, fmt.Errorf("lighting.design.import status missing houseId for verification")
 	}
 	verified, verifiedEntities, calls, err := client.verify(ctx, result.HouseID, credentials, result.Counts, request.VerifyAttempts, request.VerifyInterval)
 	result.APICalls += calls

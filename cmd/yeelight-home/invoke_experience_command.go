@@ -7,6 +7,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) invokeSceneTest(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -22,7 +23,14 @@ func (app *app) invokeSceneTest(ctx context.Context, request contract.Request, e
 		if response.Result == nil {
 			response.Result = map[string]any{}
 		}
-		response.Result["testOnly"] = true
+		response.Result[semantic.FieldTestOnly] = true
+	}
+	if response.Status == "blocked" {
+		response.TraceID = "scene-test-blocked"
+		if response.Result == nil {
+			response.Result = map[string]any{}
+		}
+		response.Result[semantic.FieldTestOnly] = true
 	}
 	return response, nil
 }
@@ -35,11 +43,13 @@ func (app *app) invokeSceneExecute(ctx context.Context, request contract.Request
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
-	entities, err := app.loadEntities(ctx, endpoint, profile, region, houseID, authorization, clientID, entityLoadOptions{PreferCache: true})
+	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
 	if err != nil {
 		return contract.Response{}, err
 	}
-	match, candidates, _ := findEntity(target, entities.Entities)
+	entities := resolved.Entities
+	match := resolved.Match
+	candidates := resolved.Candidates
 	if match.ID == "" {
 		return sceneExecuteClarificationResponse(request, "scene_not_found", target, candidates, entityListAPICalls(entities)), nil
 	}
@@ -58,9 +68,17 @@ func (app *app) invokeSceneExecute(ctx context.Context, request contract.Request
 		},
 	})
 	if err != nil {
+		if sceneExecuteBlockedByNoGateway(err) {
+			return sceneExecuteBlockedResponse(request, entities, match, "scene_no_valid_gateway", "当前情景没有可执行网关，Runtime 已阻止执行。请先确保该家庭有有效网关，或改为查看/编辑情景详情。"), nil
+		}
 		return contract.Response{}, err
 	}
 	return sceneExecuteResponse(request, entities, match, execution), nil
+}
+
+func sceneExecuteBlockedByNoGateway(err error) bool {
+	message := strings.TrimSpace(fmt.Sprint(err))
+	return strings.Contains(message, "当前情景无有效网关")
 }
 
 func (app *app) invokeLightingExperienceApply(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -88,10 +106,10 @@ func (app *app) invokeLightingExperienceApply(ctx context.Context, request contr
 		if response.Result == nil {
 			response.Result = map[string]any{}
 		}
-		response.Result["experience"] = map[string]any{
-			"delegatedIntent":  action.intent,
-			"temporaryControl": true,
-			"persistentWrites": false,
+		response.Result[semantic.FieldExperience] = map[string]any{
+			semantic.FieldDelegatedIntent:  action.intent,
+			semantic.FieldTemporaryControl: true,
+			semantic.FieldPersistentWrites: false,
 		}
 	}
 	return response, nil
@@ -103,19 +121,19 @@ type experienceLightAction struct {
 }
 
 func explicitExperienceAction(request contract.Request) (experienceLightAction, bool) {
-	if value, ok := lightIntegerValue(request, 1, 100, "brightness", "level", "l"); ok {
+	if value, ok := lightIntegerValue(request, 1, 100, semantic.FieldBrightness); ok {
 		return experienceLightAction{
 			intent: "light.brightness.set",
 			parameters: map[string]any{
-				"brightness": value,
+				semantic.FieldBrightness: value,
 			},
 		}, true
 	}
-	if value, ok := lightIntegerValue(request, 2700, 6500, "colorTemperature", "color_temperature", "ct"); ok {
+	if value, ok := lightIntegerValue(request, 2700, 6500, semantic.FieldColorTemperature); ok {
 		return experienceLightAction{
 			intent: "light.color_temperature.set",
 			parameters: map[string]any{
-				"colorTemperature": value,
+				semantic.FieldColorTemperature: value,
 			},
 		}, true
 	}
@@ -123,7 +141,7 @@ func explicitExperienceAction(request contract.Request) (experienceLightAction, 
 		return experienceLightAction{
 			intent: "light.color.set",
 			parameters: map[string]any{
-				"color": value,
+				semantic.FieldColor: value,
 			},
 		}, true
 	}
@@ -150,14 +168,14 @@ func experienceBlockedResponse(request contract.Request, code string, message st
 		Status:          "blocked",
 		UserMessage:     message,
 		Result: map[string]any{
-			"persistentWrites": false,
-			"blockReason":      code,
+			semantic.FieldPersistentWrites: false,
+			semantic.FieldBlockReason:      code,
 		},
 		Warnings: []string{code},
 		TraceID:  "lighting-experience-blocked",
 		Metrics: map[string]any{
-			"apiCalls":  0,
-			"cacheHits": 0,
+			semantic.FieldAPICalls:  0,
+			semantic.FieldCacheHits: 0,
 		},
 		Error: &contract.Error{
 			Code:    code,

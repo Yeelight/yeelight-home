@@ -52,6 +52,9 @@ func (client StateQueryClient) Run(ctx context.Context, request StateQueryReques
 	if deviceID == "" {
 		return StateQueryResult{}, fmt.Errorf("device id is required")
 	}
+	if propertyName != "" && isSensitiveCloudField(propertyName) {
+		return StateQueryResult{}, fmt.Errorf("device state query refused sensitive property: %s", propertyName)
+	}
 	if propertyName == "" && len(request.PropertySet) > 0 {
 		return client.runPropertySet(ctx, request, deviceID)
 	}
@@ -98,6 +101,10 @@ func (client StateQueryClient) runPropertySet(ctx context.Context, request State
 	skipped := []string{}
 	apiCalls := 0
 	for _, property := range compactStringSet(request.PropertySet) {
+		if isSensitiveCloudField(property) {
+			skipped = append(skipped, property+":sensitive_property_not_readable")
+			continue
+		}
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/controll/device/"+url.PathEscape(deviceID)+"/r/properties/"+url.PathEscape(property), map[string]any{}, requestCredentials{
 			Authorization: request.Credentials.Authorization,
 			ClientID:      request.Credentials.ClientID,
@@ -145,12 +152,23 @@ func projectStateProperties(data any) map[string]any {
 	switch typed := data.(type) {
 	case map[string]any:
 		if nested, ok := typed["properties"].(map[string]any); ok {
-			return nested
+			return filterStateProperties(nested)
 		}
-		return typed
+		return filterStateProperties(typed)
 	default:
 		return map[string]any{}
 	}
+}
+
+func filterStateProperties(properties map[string]any) map[string]any {
+	result := map[string]any{}
+	for key, value := range properties {
+		if isSensitiveCloudField(key) {
+			continue
+		}
+		result[key] = value
+	}
+	return result
 }
 
 func stateDataShape(data any) string {

@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type DevSeedSceneRequest struct {
@@ -161,31 +163,31 @@ func (client DevSeedClient) createScene(ctx context.Context, request DevSeedScen
 		return writeProbeResult{}, fmt.Errorf("device id must be numeric for scene create")
 	}
 	params := map[string]any{
-		"set": map[string]any{propertyName: request.PropertyValue},
+		semantic.FieldSet: map[string]any{propertyName: request.PropertyValue},
 	}
 	paramsJSON, err := compactJSON(params)
 	if err != nil {
 		return writeProbeResult{}, err
 	}
 	body := map[string]any{
-		"houseId": parsedHouseID,
-		"name":    strings.TrimSpace(request.Name),
-		"details": []any{
+		semantic.FieldHouseID: parsedHouseID,
+		semantic.FieldName:    strings.TrimSpace(request.Name),
+		semantic.FieldDetails: []any{
 			map[string]any{
-				"typeId":  2,
-				"resId":   parsedDeviceID,
-				"resName": deviceName,
-				"action":  0,
-				"rank":    0,
-				"params":  paramsJSON,
+				semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType): 2,
+				semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID):   parsedDeviceID,
+				semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName): deviceName,
+				semantic.FieldAction:                 0,
+				semantic.FieldRank:                   0,
+				semantic.InternalActionParamsField(): paramsJSON,
 			},
 		},
 	}
 	if value := strings.TrimSpace(request.Description); value != "" {
-		body["desc"] = value
+		body[semantic.InternalField(semantic.DomainCommon, semantic.FieldDescription)] = value
 	}
 	if value := strings.TrimSpace(request.Icon); value != "" {
-		body["icon"] = value
+		body[semantic.FieldIcon] = value
 	}
 	response, err := callJSON(ctx, client.client, http.MethodPut, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+houseID+"/scene/w/create", body, credentials)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type moduleCommandSpec struct {
@@ -58,14 +59,14 @@ func buildModuleRequest(resource string, action string, spec moduleCommandSpec, 
 		return contract.Request{}, err
 	}
 	if spec.Intent == "light.power.set" && resource == "light" {
-		parameters["power"] = action == "on"
+		parameters[semantic.FieldPower] = action == "on"
 	}
 	if value := firstFlagValue(flags, spec.TargetIDKeys...); value != "" {
 		parameters[targetParameterName(spec.TargetIDKeys)] = value
 	}
 	if spec.TargetName {
 		if value := firstFlagValue(flags, "name", resource+"-name", "target-name", "entity-name"); value != "" {
-			parameters["name"] = value
+			parameters[semantic.FieldName] = value
 		}
 	}
 	targets := moduleTargets(spec, parameters)
@@ -106,78 +107,79 @@ func moduleParameters(flags cliFlags) (map[string]any, error) {
 
 func moduleParameterFlags() map[string]string {
 	return map[string]string{
-		"area-code":          "areaCode",
-		"area-id":            "areaId",
-		"area-ids":           "areaIds",
-		"automation-id":      "automationId",
-		"automation-ids":     "automationIds",
-		"button-event-id":    "buttonEventId",
-		"brightness":         "brightness",
-		"color":              "color",
-		"color-temperature":  "colorTemperature",
-		"component-id":       "componentId",
-		"ct":                 "colorTemperature",
-		"delta":              "delta",
-		"description":        "description",
-		"device-id":          "deviceId",
-		"device-ids":         "deviceIds",
-		"entity-id":          "entityId",
-		"entity-ids":         "entityIds",
-		"entity-name":        "entityName",
-		"faq-id":             "faqId",
-		"favorite-id":        "favoriteId",
-		"favorite-ids":       "favoriteIds",
-		"gateway-id":         "gatewayId",
-		"gateway-ids":        "gatewayIds",
-		"group-id":           "groupId",
-		"group-ids":          "groupIds",
-		"hex":                "hex",
-		"id":                 "id",
-		"ids":                "ids",
-		"keyword":            "keyword",
-		"knob-id":            "knobId",
-		"limit":              "limit",
-		"material-code":      "materialCode",
-		"member-id":          "memberId",
-		"meshgroup-id":       "meshgroupId",
-		"model":              "model",
-		"multi-field":        "multiField",
-		"name":               "name",
-		"node-id":            "nodeId",
-		"panel-id":           "panelId",
-		"page-no":            "pageNo",
-		"page-size":          "pageSize",
-		"parent-id":          "parentId",
-		"property":           "propertyName",
-		"product-id":         "productId",
-		"product-ids":        "productIds",
-		"product-model":      "productModel",
-		"product-name":       "productName",
-		"product-short-name": "productShortName",
-		"product-sku":        "productSku",
-		"product-spu":        "productSpu",
-		"progress-id":        "progressId",
-		"repeat-type":        "repeatType",
-		"res-id":             "resId",
-		"res-name":           "resName",
-		"room-id":            "roomId",
-		"room-ids":           "roomIds",
-		"room-name":          "roomName",
-		"scene-id":           "sceneId",
-		"scene-ids":          "sceneIds",
-		"schema-id":          "schemaId",
-		"share-id":           "shareId",
-		"sku":                "sku",
-		"spu":                "spu",
-		"status":             "status",
-		"target":             "target",
-		"target-name":        "name",
-		"target-room-id":     "targetRoomId",
-		"target-room-name":   "targetRoomName",
-		"type":               "type",
-		"type-id":            "typeId",
-		"user-role":          "userRole",
-		"value":              "value",
+		"area-code":          semantic.FieldAreaCode,
+		"area-id":            semantic.FieldAreaID,
+		"area-ids":           semantic.FieldAreaIDs,
+		"automation-id":      semantic.FieldAutomationID,
+		"automation-ids":     semantic.FieldAutomationIDs,
+		"button-event-id":    semantic.FieldButtonEventID,
+		"brightness":         semantic.FieldBrightness,
+		"color":              semantic.FieldColor,
+		"color-temperature":  semantic.FieldColorTemperature,
+		"confirmed":          semantic.FieldConfirmed,
+		"delta":              semantic.FieldDelta,
+		"description":        semantic.FieldDescription,
+		"device-id":          semantic.FieldDeviceID,
+		"device-ids":         semantic.FieldDeviceIDs,
+		"entity-id":          semantic.FieldEntityID,
+		"entity-ids":         semantic.FieldEntityIDs,
+		"entity-name":        semantic.FieldEntityName,
+		"faq-id":             semantic.FieldFAQID,
+		"favorite-id":        semantic.FieldFavoriteID,
+		"favorite-ids":       semantic.FieldFavoriteIDs,
+		"gateway-id":         semantic.FieldGatewayID,
+		"gateway-ids":        semantic.FieldGatewayIDs,
+		"group-capability":   semantic.FieldGroupCapability,
+		"group-category":     semantic.FieldGroupCategory,
+		"group-id":           semantic.FieldGroupID,
+		"group-ids":          semantic.FieldGroupIDs,
+		"hex":                semantic.FieldHex,
+		"id":                 semantic.FieldID,
+		"ids":                semantic.FieldIDs,
+		"keyword":            semantic.FieldKeyword,
+		"knob-id":            semantic.FieldKnobID,
+		"limit":              semantic.FieldLimit,
+		"member-id":          semantic.FieldMemberID,
+		"member-name":        semantic.FieldMemberName,
+		"meshgroup-id":       semantic.FieldMeshGroupID,
+		"model":              semantic.FieldModel,
+		"multi-field":        semantic.FieldMultiField,
+		"name":               semantic.FieldName,
+		"node-id":            semantic.FieldNodeID,
+		"panel-id":           semantic.FieldPanelID,
+		"page-no":            semantic.FieldPageNo,
+		"page-size":          semantic.FieldPageSize,
+		"parent-id":          semantic.FieldParentID,
+		"property":           semantic.FieldProperty,
+		"sku-code":           semantic.FieldSKUCode,
+		"capability-pid":     semantic.FieldCapabilityPID,
+		"capability-pids":    semantic.FieldCapabilityPIDs,
+		"product-model":      semantic.FieldProductModel,
+		"product-name":       semantic.FieldProductName,
+		"product-short-name": semantic.FieldProductShortName,
+		"product-sku":        semantic.FieldProductSKU,
+		"product-spu":        semantic.FieldProductSPU,
+		"progress-id":        semantic.FieldProgressID,
+		"repeat":             semantic.FieldRepeat,
+		"room-id":            semantic.FieldRoomID,
+		"room-ids":           semantic.FieldRoomIDs,
+		"room-name":          semantic.FieldRoomName,
+		"scene-id":           semantic.FieldSceneID,
+		"scene-ids":          semantic.FieldSceneIDs,
+		"schema-id":          semantic.FieldSchemaID,
+		"share-id":           semantic.FieldShareID,
+		"sku":                semantic.FieldSKU,
+		"spu":                semantic.FieldSPU,
+		"status":             semantic.FieldStatus,
+		"target":             semantic.FieldTarget,
+		"target-id":          semantic.FieldTargetID,
+		"target-name":        semantic.FieldTargetName,
+		"target-room-id":     semantic.FieldTargetRoomID,
+		"target-room-name":   semantic.FieldTargetRoomName,
+		"target-type":        semantic.FieldTargetType,
+		"type":               semantic.FieldType,
+		"user-role":          semantic.FieldUserRole,
+		"value":              semantic.FieldValue,
 	}
 }
 
@@ -185,17 +187,17 @@ func moduleTargets(spec moduleCommandSpec, parameters map[string]any) []map[stri
 	if spec.EntityType == "" {
 		return nil
 	}
-	target := map[string]any{"entityType": spec.EntityType}
+	target := map[string]any{semantic.FieldEntityType: spec.EntityType}
 	for _, key := range moduleTargetIDParameterKeys(spec.EntityType) {
 		if value := requestString(parameters[key]); value != "" {
-			target["id"] = value
+			target[semantic.FieldID] = value
 			break
 		}
 	}
-	if value := requestString(parameters["name"]); value != "" {
-		target["name"] = value
+	if value := requestString(parameters[semantic.FieldName]); value != "" {
+		target[semantic.FieldName] = value
 	}
-	for _, key := range []string{"roomId", "targetRoomId", "roomName", "targetRoomName"} {
+	for _, key := range []string{semantic.FieldRoomID, semantic.FieldTargetRoomID, semantic.FieldRoomName, semantic.FieldTargetRoomName} {
 		if value := requestString(parameters[key]); value != "" {
 			target[key] = value
 		}
@@ -206,19 +208,19 @@ func moduleTargets(spec moduleCommandSpec, parameters map[string]any) []map[stri
 func moduleTargetIDParameterKeys(entityType string) []string {
 	switch entityType {
 	case "device":
-		return []string{"deviceId", "gatewayId", "panelId", "knobId", "sensorId", "meshgroupId", "entityId", "id"}
+		return []string{semantic.FieldDeviceID, semantic.FieldGatewayID, semantic.FieldPanelID, semantic.FieldKnobID, semantic.FieldSensorID, semantic.FieldMeshGroupID, semantic.FieldEntityID, semantic.FieldID}
 	case "room":
-		return []string{"roomId", "entityId", "id"}
+		return []string{semantic.FieldRoomID, semantic.FieldEntityID, semantic.FieldID}
 	case "scene":
-		return []string{"sceneId", "entityId", "id"}
+		return []string{semantic.FieldSceneID, semantic.FieldEntityID, semantic.FieldID}
 	case "automation":
-		return []string{"automationId", "entityId", "id"}
+		return []string{semantic.FieldAutomationID, semantic.FieldEntityID, semantic.FieldID}
 	case "group":
-		return []string{"groupId", "meshgroupId", "entityId", "id"}
+		return []string{semantic.FieldGroupID, semantic.FieldMeshGroupID, semantic.FieldEntityID, semantic.FieldID}
 	case "area":
-		return []string{"areaId", "entityId", "id"}
+		return []string{semantic.FieldAreaID, semantic.FieldEntityID, semantic.FieldID}
 	default:
-		return []string{"entityId", "id"}
+		return []string{semantic.FieldEntityID, semantic.FieldID}
 	}
 }
 
@@ -236,7 +238,7 @@ func targetParameterName(keys []string) string {
 			return strings.Join(parts, "") + "Id"
 		}
 	}
-	return "id"
+	return semantic.FieldID
 }
 
 func firstFlagValue(flags cliFlags, names ...string) string {
@@ -292,16 +294,16 @@ func moduleResourceNames() []string {
 func writeModuleText(stdout io.Writer, stderr io.Writer, response contract.Response) int {
 	_, _ = fmt.Fprintf(stdout, "%s: %s\n", response.Status, response.UserMessage)
 	if response.Result != nil {
-		if preview := requestMap(response.Result["preview"]); preview != nil {
-			if summary := requestString(preview["summary"]); summary != "" {
+		if preview := requestMap(response.Result[semantic.FieldPreview]); preview != nil {
+			if summary := requestString(preview[semantic.FieldSummary]); summary != "" {
 				_, _ = fmt.Fprintf(stdout, "preview: %s\n", summary)
 			}
-		} else if summary := requestString(response.Result["summary"]); summary != "" {
+		} else if summary := requestString(response.Result[semantic.FieldSummary]); summary != "" {
 			_, _ = fmt.Fprintf(stdout, "preview: %s\n", summary)
 		}
 	}
 	if response.Clarification != nil {
-		if reason := requestString(response.Clarification["reason"]); reason != "" {
+		if reason := requestString(response.Clarification[semantic.FieldReason]); reason != "" {
 			_, _ = fmt.Fprintf(stdout, "reason: %s\n", reason)
 		}
 	}

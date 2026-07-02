@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type PanelConfigurationKind string
@@ -124,52 +126,52 @@ func (client PanelConfigurationClient) write(ctx context.Context, kind PanelConf
 	var err error
 	switch kind {
 	case PanelButtonConfigure:
-		buttons, ok := payload["buttons"].([]any)
+		buttons, ok := payload[semantic.FieldButtons].([]any)
 		if !ok || len(buttons) == 0 {
 			return fmt.Errorf("buttons are required")
 		}
 		response, err = callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/panel/w/button/update/"+deviceID, buttons, credentials)
 	case PanelButtonEventUpdate:
-		event, ok := payload["buttonEvent"].(map[string]any)
-		if !ok || strings.TrimSpace(stringFromAny(event["buttonEventId"])) == "" {
+		event, ok := payload[semantic.FieldButtonEvent].(map[string]any)
+		if !ok || strings.TrimSpace(stringFromAny(event[semantic.FieldButtonEventID])) == "" {
 			return fmt.Errorf("button event is required")
 		}
 		event = mapWithoutKeys(event)
-		event["deviceId"] = deviceID
+		event[semantic.FieldDeviceID] = deviceID
 		response, err = callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/panel/w/button/event/update", event, credentials)
 	case PanelButtonEventBatchUpdate:
-		events, ok := payload["buttonEvents"].([]any)
+		events, ok := payload[semantic.FieldButtonEvents].([]any)
 		if !ok || len(events) == 0 {
 			return fmt.Errorf("button events are required")
 		}
 		normalizedEvents := make([]any, 0, len(events))
 		for _, rawEvent := range events {
 			event, ok := rawEvent.(map[string]any)
-			if !ok || strings.TrimSpace(stringFromAny(event["buttonEventId"])) == "" {
+			if !ok || strings.TrimSpace(stringFromAny(event[semantic.FieldButtonEventID])) == "" {
 				return fmt.Errorf("button events are required")
 			}
 			event = mapWithoutKeys(event)
-			event["deviceId"] = deviceID
+			event[semantic.FieldDeviceID] = deviceID
 			normalizedEvents = append(normalizedEvents, event)
 		}
 		body := map[string]any{
-			"buttonEvents": normalizedEvents,
+			semantic.FieldButtonEvents: normalizedEvents,
 		}
 		response, err = callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/panel/w/button/event/update/batch", body, credentials)
 	case PanelButtonEventReset:
-		buttonEventID := strings.TrimSpace(stringFromAny(payload["buttonEventId"]))
+		buttonEventID := strings.TrimSpace(stringFromAny(payload[semantic.FieldButtonEventID]))
 		if buttonEventID == "" {
 			return fmt.Errorf("button event id is required")
 		}
 		response, err = callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/panel/w/button/event/"+pathSegment(buttonEventID)+"/reset", nil, credentials)
 	case KnobConfigure:
 		body := map[string]any{
-			"id":      deviceID,
-			"details": payload["details"],
+			semantic.FieldID:      deviceID,
+			semantic.FieldDetails: payload[semantic.FieldDetails],
 		}
 		response, err = callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/multi-knob/update", body, credentials)
 	case KnobReset:
-		index := strings.TrimSpace(stringFromAny(payload["index"]))
+		index := strings.TrimSpace(stringFromAny(payload[semantic.FieldIndex]))
 		if index == "" {
 			return fmt.Errorf("knob index is required")
 		}
@@ -187,7 +189,7 @@ func (client PanelConfigurationClient) write(ctx context.Context, kind PanelConf
 }
 
 func buildPanelButtonConfigureWritePayload(current any, deviceID string, payload map[string]any) (map[string]any, error) {
-	expectedRows, ok := payload["buttons"].([]any)
+	expectedRows, ok := payload[semantic.FieldButtons].([]any)
 	if !ok || len(expectedRows) == 0 {
 		return nil, fmt.Errorf("buttons are required")
 	}
@@ -206,24 +208,24 @@ func buildPanelButtonConfigureWritePayload(current any, deviceID string, payload
 			return nil, fmt.Errorf("panel button reference not found")
 		}
 		item := mapWithoutKeys(base)
-		for _, key := range []string{"name", "alias", "keyValue", "index", "resId", "resType", "visible", "icon", "sort", "type", "extend"} {
+		for _, key := range semantic.PanelButtonWriteFields() {
 			if value, exists := expected[key]; exists {
 				item[key] = value
 			}
 		}
-		item["deviceId"] = deviceID
-		if strings.TrimSpace(stringFromAny(item["id"])) == "" {
-			if id := strings.TrimSpace(stringFromAny(expected["id"])); id != "" {
-				item["id"] = id
+		item[semantic.FieldDeviceID] = deviceID
+		if strings.TrimSpace(stringFromAny(item[semantic.FieldID])) == "" {
+			if id := strings.TrimSpace(stringFromAny(expected[semantic.FieldID])); id != "" {
+				item[semantic.FieldID] = id
 			}
 		}
-		if strings.TrimSpace(stringFromAny(item["type"])) == "" {
+		if strings.TrimSpace(stringFromAny(item[semantic.FieldType])) == "" {
 			return nil, fmt.Errorf("panel button type is required")
 		}
 		merged = append(merged, item)
 	}
 	return map[string]any{
-		"buttons": merged,
+		semantic.FieldButtons: merged,
 	}, nil
 }
 
@@ -241,18 +243,18 @@ func findPanelButtonBase(rows []any, expected map[string]any) (map[string]any, b
 }
 
 func panelButtonBaseMatches(row map[string]any, expected map[string]any) bool {
-	if expectedID := strings.TrimSpace(stringFromAny(expected["id"])); expectedID != "" {
-		if strings.TrimSpace(stringFromAny(row["id"])) == expectedID {
+	if expectedID := strings.TrimSpace(stringFromAny(expected[semantic.FieldID])); expectedID != "" {
+		if strings.TrimSpace(stringFromAny(row[semantic.FieldID])) == expectedID {
 			return true
 		}
-		if index := strings.TrimSpace(stringFromAny(row["index"])); index != "" && index == expectedID {
+		if index := strings.TrimSpace(stringFromAny(row[semantic.FieldIndex])); index != "" && index == expectedID {
 			return true
 		}
-		if keyValue := strings.TrimSpace(stringFromAny(row["keyValue"])); keyValue != "" && keyValue == expectedID {
+		if keyValue := strings.TrimSpace(stringFromAny(row[semantic.FieldKeyValue])); keyValue != "" && keyValue == expectedID {
 			return true
 		}
 	}
-	for _, key := range []string{"id", "index", "keyValue", "name", "alias"} {
+	for _, key := range []string{semantic.FieldID, semantic.FieldIndex, semantic.FieldKeyValue, semantic.FieldName, semantic.FieldAlias} {
 		expectedValue := strings.TrimSpace(stringFromAny(expected[key]))
 		if expectedValue == "" {
 			continue
@@ -320,8 +322,8 @@ func (client PanelConfigurationClient) readPanel(ctx context.Context, deviceID s
 		return nil, metadataReadonlyBusinessError("panel button info", buttons)
 	}
 	return map[string]any{
-		"detail":  detail["data"],
-		"buttons": buttons["data"],
+		semantic.FieldDetail:  detail["data"],
+		semantic.FieldButtons: buttons["data"],
 	}, nil
 }
 
@@ -343,33 +345,72 @@ func panelConfigurationMatches(kind PanelConfigurationKind, data any, payload ma
 		if !ok {
 			return false
 		}
-		return configRowsContainExpected(source["buttons"], payload["buttons"], []string{"id", "keyValue", "index", "resId", "resType", "visible", "sort", "type", "alias", "name"})
+		return configRowsContainExpected(source[semantic.FieldButtons], payload[semantic.FieldButtons], panelButtonVerifyFields())
 	case PanelButtonEventUpdate:
 		source, ok := data.(map[string]any)
 		if !ok {
 			return false
 		}
-		return configRowsContainExpected(source["detail"], []any{payload["buttonEvent"]}, []string{"id", "buttonEventId", "alias", "details"}) ||
-			configRowsContainExpected(source, []any{payload["buttonEvent"]}, []string{"id", "buttonEventId", "alias", "details"})
+		keys := []string{semantic.FieldID, semantic.FieldButtonEventID, semantic.FieldAlias, semantic.FieldDetails}
+		return configRowsContainExpected(source[semantic.FieldButtons], []any{payload[semantic.FieldButtonEvent]}, keys) ||
+			configRowsContainExpected(source[semantic.FieldDetail], []any{payload[semantic.FieldButtonEvent]}, keys) ||
+			configRowsContainExpected(source, []any{payload[semantic.FieldButtonEvent]}, keys)
 	case PanelButtonEventBatchUpdate:
 		source, ok := data.(map[string]any)
 		if !ok {
 			return false
 		}
-		return configRowsContainExpected(source["detail"], payload["buttonEvents"], []string{"id", "buttonEventId", "alias", "details"}) ||
-			configRowsContainExpected(source, payload["buttonEvents"], []string{"id", "buttonEventId", "alias", "details"})
+		keys := []string{semantic.FieldID, semantic.FieldButtonEventID, semantic.FieldAlias, semantic.FieldDetails}
+		return configRowsContainExpected(source[semantic.FieldButtons], payload[semantic.FieldButtonEvents], keys) ||
+			configRowsContainExpected(source[semantic.FieldDetail], payload[semantic.FieldButtonEvents], keys) ||
+			configRowsContainExpected(source, payload[semantic.FieldButtonEvents], keys)
 	case PanelButtonEventReset:
 		_, ok := data.(map[string]any)
 		return ok
 	case KnobConfigure:
 		if item, ok := data.(map[string]any); ok {
-			return configRowsContainExpected(item["details"], payload["details"], []string{"id", "index", "configType", "mode", "model", "resId", "typeId", "resType", "resIndex", "resName", "param", "sens", "action", "property", "value"})
+			return configRowsContainExpected(item[semantic.FieldDetails], payload[semantic.FieldDetails], knobDetailVerifyFields())
 		}
-		return configRowsContainExpected(data, payload["details"], []string{"id", "index", "configType", "mode", "model", "resId", "typeId", "resType", "resIndex", "resName", "param", "sens", "action", "property", "value"})
+		return configRowsContainExpected(data, payload[semantic.FieldDetails], knobDetailVerifyFields())
 	case KnobReset:
 		return data != nil
 	default:
 		return false
+	}
+}
+
+func panelButtonVerifyFields() []string {
+	return []string{
+		semantic.FieldID,
+		semantic.FieldName,
+		semantic.FieldAlias,
+		semantic.FieldKeyValue,
+		semantic.FieldIndex,
+		semantic.InternalField(semantic.DomainPanel, semantic.FieldTargetID),
+		semantic.InternalField(semantic.DomainPanel, semantic.FieldTargetType),
+		semantic.FieldVisible,
+		semantic.FieldIcon,
+		semantic.FieldSort,
+		semantic.FieldType,
+		semantic.FieldExtend,
+	}
+}
+
+func knobDetailVerifyFields() []string {
+	return []string{
+		semantic.FieldID,
+		semantic.FieldIndex,
+		semantic.FieldConfigType,
+		semantic.FieldMode,
+		semantic.FieldModel,
+		semantic.InternalField(semantic.DomainKnob, semantic.FieldTargetID),
+		semantic.FieldResourceIndex,
+		semantic.InternalField(semantic.DomainKnob, semantic.FieldTargetName),
+		semantic.InternalKnobActionParamsField(),
+		semantic.InternalField(semantic.DomainKnob, semantic.FieldSensitivity),
+		semantic.FieldAction,
+		semantic.FieldProperty,
+		semantic.FieldValue,
 	}
 }
 
@@ -412,8 +453,8 @@ func configRowMatches(actual map[string]any, expected map[string]any, keys []str
 			continue
 		}
 		actualValue := actual[key]
-		if key == "buttonEventId" && strings.TrimSpace(stringFromAny(actualValue)) == "" {
-			actualValue = actual["id"]
+		if key == semantic.FieldButtonEventID && strings.TrimSpace(stringFromAny(actualValue)) == "" {
+			actualValue = actual[semantic.FieldID]
 		}
 		if !configValueContainsExpected(actualValue, expectedValue) {
 			return false
@@ -466,15 +507,15 @@ func configValueContainsExpected(actual any, expected any) bool {
 
 func configMapContainsExpected(actual map[string]any, expected map[string]any) bool {
 	for key, expectedValue := range expected {
-		if key == "details" {
+		if key == semantic.FieldDetails {
 			continue
 		}
 		if !configValueContainsExpected(actual[key], expectedValue) {
 			return false
 		}
 	}
-	if expectedDetails, ok := expected["details"]; ok {
-		actualDetails := actual["details"]
+	if expectedDetails, ok := expected[semantic.FieldDetails]; ok {
+		actualDetails := actual[semantic.FieldDetails]
 		if !configValueContainsExpected(actualDetails, expectedDetails) {
 			return false
 		}
@@ -483,7 +524,27 @@ func configMapContainsExpected(actual map[string]any, expected map[string]any) b
 }
 
 func panelEventDetailContainsExpected(actual map[string]any, expected map[string]any) bool {
-	for _, key := range []string{"resId", "typeId", "resType", "params", "rank", "resName", "idx", "repeatType", "repeatValue", "startTime", "endTime"} {
+	if !configAnyFieldContainsExpected(actual, expected,
+		semantic.InternalField(semantic.DomainPanel, semantic.FieldTargetType),
+		semantic.InternalField(semantic.DomainKnob, semantic.FieldTargetType),
+	) {
+		return false
+	}
+	if !configAnyFieldContainsExpected(actual, expected,
+		semantic.InternalPanelActionParamsField(),
+		semantic.InternalKnobActionParamsField(),
+	) {
+		return false
+	}
+	for _, key := range []string{
+		semantic.InternalField(semantic.DomainPanel, semantic.FieldTargetID),
+		semantic.FieldRank,
+		semantic.InternalField(semantic.DomainPanel, semantic.FieldSubIndex),
+		semantic.InternalRepeatTypeField(),
+		semantic.InternalRepeatValueField(),
+		semantic.FieldStartTime,
+		semantic.FieldEndTime,
+	} {
 		expectedValue, ok := expected[key]
 		if !ok {
 			continue
@@ -493,6 +554,27 @@ func panelEventDetailContainsExpected(actual map[string]any, expected map[string
 		}
 	}
 	return true
+}
+
+func configAnyFieldContainsExpected(actual map[string]any, expected map[string]any, keys ...string) bool {
+	var expectedValue any
+	hasExpected := false
+	for _, key := range keys {
+		if value, ok := expected[key]; ok {
+			expectedValue = value
+			hasExpected = true
+			break
+		}
+	}
+	if !hasExpected {
+		return true
+	}
+	for _, key := range keys {
+		if configValueContainsExpected(actual[key], expectedValue) {
+			return true
+		}
+	}
+	return false
 }
 
 func configRowsFromData(data any) []any {
@@ -508,7 +590,7 @@ func configRowsFromData(data any) []any {
 		return result
 	case map[string]any:
 		result := []any{}
-		if firstAnyString(typed, "id", "buttonEventId") != "" {
+		if firstAnyString(typed, semantic.FieldID, semantic.FieldButtonEventID) != "" {
 			result = append(result, typed)
 		}
 		for _, value := range typed {

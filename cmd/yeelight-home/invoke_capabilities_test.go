@@ -88,7 +88,7 @@ func TestInvokeEntityCapabilitiesUsesDeviceSchemaWhenTargetIsDevice(t *testing.T
 		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-1","name":"主灯","roomId":"room-1","online":true}]}}`))
 		case "/apis/iot/v2/thing/schema/house/house-1/device/r/info/1/100":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"id":"device-1","name":"主灯","pid":17000008,"cid":1001,"category":"light","roomId":"room-1","subDevices":[{"cid":2001,"index":1,"name":"主灯组件","properties":[{"propId":"brightness","desc":"亮度","access":6,"format":"uint8","type":1,"valueRange":{"min":1,"max":100,"step":1}}],"supportActions":[{"actionName":"set_brightness"}],"events":[{"eventId":10,"eventTypeId":1,"name":"状态变化"}]}],"supportActions":[{"actionName":"set_power"}]}]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"id":"device-1","name":"主灯","pid":17000008,"cid":1001,"category":"light","roomId":"room-1","properties":[{"propId":"p","desc":"开关","access":6,"format":"bool","type":1}],"subDevices":[{"cid":2001,"index":1,"name":"主灯组件","properties":[{"propId":"l","desc":"亮度","access":6,"format":"uint8","type":1,"valueRange":{"min":1,"max":100,"step":1}}],"supportActions":[{"actionName":"set_brightness"}],"events":[{"eventId":10,"eventTypeId":1,"name":"状态变化"}]}],"supportActions":[{"actionName":"set_power"}]}]}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -133,12 +133,28 @@ func TestInvokeEntityCapabilitiesUsesDeviceSchemaWhenTargetIsDevice(t *testing.T
 		t.Fatalf("operations = %#v", operations)
 	}
 	schema, ok := result["deviceSchema"].(map[string]any)
-	if !ok || schema["pid"] != "17000008" || schema["category"] != "light" {
+	if !ok || schema["capabilityPid"] != "17000008" || schema["category"] != "light" {
 		t.Fatalf("deviceSchema = %#v", result["deviceSchema"])
 	}
 	components, ok := schema["components"].([]any)
 	if !ok || len(components) != 1 {
 		t.Fatalf("components = %#v", schema["components"])
+	}
+	properties, ok := schema["properties"].([]any)
+	if !ok || len(properties) != 1 || properties[0].(map[string]any)["id"] != "power" {
+		t.Fatalf("device properties should expose standard fields: %#v", schema["properties"])
+	}
+	componentProperties, ok := components[0].(map[string]any)["properties"].([]any)
+	if !ok || len(componentProperties) != 1 || componentProperties[0].(map[string]any)["id"] != "brightness" {
+		t.Fatalf("component properties should expose standard fields: %#v", components[0])
+	}
+	if strings.Contains(stdout.String(), `"id":"p"`) || strings.Contains(stdout.String(), `"id":"l"`) {
+		t.Fatalf("internal property id leaked: %s", stdout.String())
+	}
+	for _, forbidden := range []string{"componentId", `"cid"`} {
+		if strings.Contains(stdout.String(), forbidden) {
+			t.Fatalf("internal component identity leaked: %s", stdout.String())
+		}
 	}
 	if strings.Contains(stdout.String(), "rawSecret") {
 		t.Fatalf("raw schema leaked: %s", stdout.String())

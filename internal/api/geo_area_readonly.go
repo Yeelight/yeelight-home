@@ -5,12 +5,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (client MetadataReadonlyClient) RunGeoAreaChildrenList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
 	parentID := strings.TrimSpace(firstNonEmpty(
-		stringFromAny(request.Parameters["parentId"]),
-		stringFromAny(request.Parameters["parentID"]),
+		stringFromAny(request.Parameters[semantic.FieldParentID]),
 	))
 	if parentID == "" {
 		parentID = "0"
@@ -29,7 +30,7 @@ func (client MetadataReadonlyClient) RunGeoAreaChildrenList(ctx context.Context,
 		Region:     client.endpoint.Region,
 		Capability: "geo_area.children.list",
 		Data: map[string]any{
-			"areas": projectGeoAreaRows(response["data"]),
+			semantic.FieldAreas: projectGeoAreaRows(response["data"]),
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,
@@ -39,14 +40,14 @@ func (client MetadataReadonlyClient) RunGeoAreaChildrenList(ctx context.Context,
 
 func (client MetadataReadonlyClient) RunGeoAreaSearch(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
 	name := strings.TrimSpace(firstNonEmpty(
-		stringFromAny(request.Parameters["name"]),
-		stringFromAny(request.Parameters["keyword"]),
-		stringFromAny(request.Parameters["areaName"]),
+		stringFromAny(request.Parameters[semantic.FieldName]),
+		stringFromAny(request.Parameters[semantic.FieldKeyword]),
+		stringFromAny(request.Parameters[semantic.FieldAreaName]),
 	))
 	if name == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "geo_area.search", "geo_area_name_missing"), nil
 	}
-	response, err := client.call(ctx, http.MethodPost, "/v1/area/r/areas", map[string]any{"name": name}, request.Credentials)
+	response, err := client.call(ctx, http.MethodPost, "/v1/area/r/areas", map[string]any{semantic.FieldName: name}, request.Credentials)
 	if err != nil {
 		return MetadataReadonlyResult{}, err
 	}
@@ -57,7 +58,7 @@ func (client MetadataReadonlyClient) RunGeoAreaSearch(ctx context.Context, reque
 		Region:     client.endpoint.Region,
 		Capability: "geo_area.search",
 		Data: map[string]any{
-			"areas": projectGeoAreaRows(response["data"]),
+			semantic.FieldAreas: projectGeoAreaRows(response["data"]),
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,
@@ -74,18 +75,18 @@ func projectGeoAreaRows(data any) []any {
 			continue
 		}
 		area := map[string]any{}
-		copyGeoAreaField(area, item, "id", "id")
-		copyGeoAreaField(area, item, "name", "name")
-		copyGeoAreaField(area, item, "fullName", "fullname")
-		copyGeoAreaField(area, item, "fullName", "fullName")
-		copyGeoAreaField(area, item, "code", "code")
-		copyGeoAreaField(area, item, "parentId", "parentId")
-		copyGeoAreaField(area, item, "level", "level")
-		copyGeoAreaField(area, item, "fetchWeather", "fetchWeather")
-		copyGeoAreaField(area, item, "leaf", "leaf")
-		copyGeoAreaField(area, item, "lanCode", "lanCode")
-		copyGeoAreaField(area, item, "latitude", "latitude")
-		copyGeoAreaField(area, item, "longitude", "longitude")
+		copyGeoAreaField(area, item, semantic.FieldID, "id")
+		copyGeoAreaField(area, item, semantic.FieldName, "name")
+		copyGeoAreaField(area, item, semantic.FieldFullName, "fullname")
+		copyGeoAreaField(area, item, semantic.FieldFullName, "fullName")
+		copyGeoAreaField(area, item, semantic.FieldCode, "code")
+		copyGeoAreaField(area, item, semantic.FieldParentID, "parentId")
+		copyGeoAreaField(area, item, semantic.FieldLevel, "level")
+		copyGeoAreaField(area, item, semantic.FieldFetchWeather, "fetchWeather")
+		copyGeoAreaField(area, item, semantic.FieldLeaf, "leaf")
+		copyGeoAreaField(area, item, semantic.FieldLanguageCode, "lanCode")
+		copyGeoAreaField(area, item, semantic.FieldLatitude, "latitude")
+		copyGeoAreaField(area, item, semantic.FieldLongitude, "longitude")
 		if len(area) > 0 {
 			areas = append(areas, area)
 		}

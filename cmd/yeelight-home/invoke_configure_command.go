@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 const preparedExecutionTTL = 10 * time.Minute
@@ -19,10 +20,10 @@ func (app *app) prepareRoomCreate(ctx context.Context, request contract.Request,
 	}
 	roomName := roomCreateName(request)
 	if strings.TrimSpace(roomName) == "" {
-		return configureClarificationResponse(request, "missing_room_name", []string{"parameters.name", "parameters.roomName"}), nil
+		return configureClarificationResponse(request, "missing_room_name", semanticParameterPaths(semantic.FieldName, semantic.FieldRoomName)), nil
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	entities, err := api.NewEntityListClient(endpoint, nil).Run(ctx, api.EntityListRequest{
 		HouseID: houseID,
@@ -40,14 +41,20 @@ func (app *app) prepareRoomCreate(ctx context.Context, request contract.Request,
 		}
 	}
 	if reason := validateConfigureCreatePayload("room", nil, entities); reason != "" {
-		return configureClarificationResponse(request, reason, []string{"parameters.houseId", "parameters.name"}), nil
+		return configureClarificationResponse(request, reason, semanticParameterPaths(semantic.FieldHouseID, semantic.FieldName)), nil
 	}
-	payload, err := api.BuildRoomCreatePayload(houseID, roomName, firstRequestString(request.Parameters, "description", "desc"), firstRequestString(request.Parameters, "icon"))
+	payload, err := api.BuildRoomCreatePayload(houseID, roomName, firstRequestString(request.Parameters, semantic.FieldDescription), firstRequestString(request.Parameters, semantic.FieldIcon))
 	if err != nil {
-		return configureClarificationResponse(request, "invalid_room_create_payload", []string{"parameters.houseId", "parameters.name"}), nil
+		return configureClarificationResponse(request, "invalid_room_create_payload", semanticParameterPaths(semantic.FieldHouseID, semantic.FieldName)), nil
+	}
+	roomCreatePayload := map[string]any{
+		semantic.FieldHouseID:     payload[semantic.FieldHouseID],
+		semantic.FieldName:        payload[semantic.FieldName],
+		semantic.FieldDescription: firstRequestString(request.Parameters, semantic.FieldDescription),
+		semantic.FieldIcon:        payload[semantic.FieldIcon],
 	}
 	now := time.Now()
-	record, err := operation.NewPrepared(profile, region, houseID, "room.create", request.RequestID, fmt.Sprintf("创建房间 %s", roomName), payload, []string{
+	record, err := operation.NewPrepared(profile, region, houseID, "room.create", request.RequestID, fmt.Sprintf("创建房间 %s", roomName), roomCreatePayload, []string{
 		"提交前重新读取家庭实体列表",
 		"房间名不存在时才创建",
 		"创建后通过房间列表按名称验证",
@@ -64,7 +71,7 @@ func (app *app) prepareMetadataCreate(ctx context.Context, request contract.Requ
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	payload, err := spec.buildPayload(request, houseID)
 	if err != nil {
@@ -81,12 +88,29 @@ func (app *app) prepareMetadataCreate(ctx context.Context, request contract.Requ
 		return contract.Response{}, err
 	}
 	if reason := validateConfigureCreatePayload(spec.entityType, payload, entities); reason != "" {
+		if spec.entityType == "group" {
+			candidates := groupCreateReferenceCandidateMaps(payload, entities, reason)
+			return configureClarificationResponseWithCandidates(request, reason, spec.acceptedFields, payloadGuideForIntent(request.Intent), candidates), nil
+		}
 		return configureClarificationResponseWithGuide(request, reason, spec.acceptedFields, payloadGuideForIntent(request.Intent)), nil
 	}
-	name := executionPayloadString(payload, "name")
+	name := executionPayloadString(payload, semantic.FieldName)
 	for _, entity := range entities.Entities {
 		if entity.Type == spec.entityType && entity.Name == name {
 			return metadataCreateAlreadyExistsResponse(request, entities, entity, spec.entityLabel), nil
+		}
+	}
+	extraAPICalls := 0
+	warnings := []string{}
+	if spec.entityType == "group" {
+		groupCapability := firstRequestString(request.Parameters, semantic.FieldGroupCapability, semantic.FieldGroupCategory)
+		calls, enrichWarnings, reason := enrichGroupCreatePayload(ctx, endpoint, houseID, authorization, clientID, groupCapability, payload)
+		extraAPICalls += calls
+		warnings = append(warnings, enrichWarnings...)
+		if reason != "" {
+			response := configureClarificationResponseWithGuide(request, reason, spec.acceptedFields, payloadGuideForIntent(request.Intent))
+			response.Warnings = append(response.Warnings, warnings...)
+			return response, nil
 		}
 	}
 	now := time.Now()
@@ -95,7 +119,9 @@ func (app *app) prepareMetadataCreate(ctx context.Context, request contract.Requ
 		return contract.Response{}, err
 	}
 	app.preparedOperation = &record
-	return executionPreviewResponse(request, record, entities), nil
+	response := executionPreviewResponseWithDetails(request, record, entities, nil, extraAPICalls)
+	response.Warnings = append(response.Warnings, warnings...)
+	return response, nil
 }
 
 func executionVerifyCode(err error) (string, string) {
@@ -251,12 +277,12 @@ func (app *app) executePreparedExecution(ctx context.Context, request contract.R
 }
 
 func (app *app) executeRoomCreate(ctx context.Context, request contract.Request, endpoint api.Endpoint, record operation.Prepared, authorization string, clientID string) (contract.Response, error) {
-	roomName := executionPayloadString(record.Payload, "name")
+	roomName := executionPayloadString(record.Payload, semantic.FieldName)
 	result, err := api.NewRoomCreateClient(endpoint, nil).Run(ctx, api.RoomCreateRequest{
 		HouseID:        record.HouseID,
 		Name:           roomName,
-		Description:    executionPayloadString(record.Payload, "desc"),
-		Icon:           executionPayloadString(record.Payload, "icon"),
+		Description:    executionPayloadString(record.Payload, semantic.FieldDescription),
+		Icon:           executionPayloadString(record.Payload, semantic.FieldIcon),
 		VerifyAttempts: 5,
 		VerifyInterval: time.Second,
 		Credentials: api.RoomCreateCredentials{
@@ -307,7 +333,7 @@ func (app *app) executeHomeOrganization(ctx context.Context, request contract.Re
 }
 
 func roomCreateName(request contract.Request) string {
-	return firstRequestString(request.Parameters, "name", "roomName", "room_name")
+	return firstRequestString(request.Parameters, semantic.FieldName, semantic.FieldRoomName)
 }
 
 func executionPayloadString(payload map[string]any, key string) string {

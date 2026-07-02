@@ -29,31 +29,30 @@ func (store JSONStore) SaveInteractionSignal(record InteractionSignalRecord) (In
 	if record.Count <= 0 {
 		record.Count = 1
 	}
-	document, err := store.loadScope(record.Profile, record.Region, record.HouseID)
+	var saved InteractionSignalRecord
+	err := store.mutateScope(record.Profile, record.Region, record.HouseID, func(document *jsonDocument) error {
+		for index, existing := range document.Signals {
+			if existing.ID != record.ID {
+				continue
+			}
+			if record.FirstSeenAt == 0 {
+				record.FirstSeenAt = existing.FirstSeenAt
+			}
+			if record.Count <= existing.Count {
+				record.Count = existing.Count + 1
+			}
+			document.Signals[index] = record
+			saved = record
+			return nil
+		}
+		document.Signals = append(document.Signals, record)
+		saved = record
+		return nil
+	})
 	if err != nil {
 		return InteractionSignalRecord{}, err
 	}
-	for index, existing := range document.Signals {
-		if existing.ID != record.ID {
-			continue
-		}
-		if record.FirstSeenAt == 0 {
-			record.FirstSeenAt = existing.FirstSeenAt
-		}
-		if record.Count <= existing.Count {
-			record.Count = existing.Count + 1
-		}
-		document.Signals[index] = record
-		if err := store.saveScope(record.Profile, record.Region, record.HouseID, document); err != nil {
-			return InteractionSignalRecord{}, err
-		}
-		return record, nil
-	}
-	document.Signals = append(document.Signals, record)
-	if err := store.saveScope(record.Profile, record.Region, record.HouseID, document); err != nil {
-		return InteractionSignalRecord{}, err
-	}
-	return record, nil
+	return saved, nil
 }
 
 func (store JSONStore) ListInteractionSignals(profile string, region string, houseID string) ([]InteractionSignalRecord, error) {

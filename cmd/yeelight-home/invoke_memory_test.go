@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yeelight/yeelight-home/internal/semantic"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -207,6 +208,49 @@ func TestInvokeMemoryListPauseAndForget(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Fatalf("list after forget = %#v", list)
+	}
+}
+
+func TestInvokeMemoryForgetDeletesOnlyRequestedIDs(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
+	for _, item := range []storage.PreferenceRecord{
+		{ID: "pref-delete", Profile: "default", Region: "dev", HouseID: "house-1", ScopeType: "test", ScopeRef: "session-a", PreferenceType: "ambience", PreferenceValue: "romantic", Kind: "explicit", UpdatedAt: 123},
+		{ID: "pref-keep", Profile: "default", Region: "dev", HouseID: "house-1", ScopeType: "home", PreferenceType: "ambience", PreferenceValue: "warm", Kind: "explicit", UpdatedAt: 124},
+	} {
+		if err := app.memoryStore.SavePreference(item); err != nil {
+			t.Fatalf("SavePreference error: %v", err)
+		}
+	}
+	for _, item := range []storage.RecommendationRecord{
+		{ID: "rec-delete", Profile: "default", Region: "dev", HouseID: "house-1", Type: "lighting_design", Explanation: "delete me", Evidence: "test", Status: "pending", CreatedAt: 123, UpdatedAt: 123},
+		{ID: "rec-keep", Profile: "default", Region: "dev", HouseID: "house-1", Type: "lighting_design", Explanation: "keep me", Evidence: "real", Status: "pending", CreatedAt: 124, UpdatedAt: 124},
+	} {
+		if err := app.memoryStore.SaveRecommendation(item); err != nil {
+			t.Fatalf("SaveRecommendation error: %v", err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(`{"contractVersion":"1.0","requestId":"req-memory-forget-selected","locale":"zh-CN","utterance":"只删除这次测试记忆","intent":"memory.forget","parameters":{"houseId":"house-1","preferenceIds":["pref-delete"],"recommendationIds":["rec-delete"]}}`), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("forget selected exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"deletedCount":2`) {
+		t.Fatalf("forget selected stdout = %s", stdout.String())
+	}
+
+	exported, err := app.memoryStore.Export("default", "dev", "house-1")
+	if err != nil {
+		t.Fatalf("Export error: %v", err)
+	}
+	preferences := exported[semantic.FieldPreferences].([]storage.PreferenceRecord)
+	recommendations := exported[semantic.FieldRecommendations].([]storage.RecommendationRecord)
+	if len(preferences) != 1 || preferences[0].ID != "pref-keep" {
+		t.Fatalf("preferences after selected forget = %#v", preferences)
+	}
+	if len(recommendations) != 1 || recommendations[0].ID != "rec-keep" {
+		t.Fatalf("recommendations after selected forget = %#v", recommendations)
 	}
 }
 
@@ -507,6 +551,51 @@ func TestInvokeRecommendationFeedbackRejectsLocalRecommendation(t *testing.T) {
 	}
 	recommendation := response["recommendation"].(map[string]any)
 	if recommendation["status"] != "rejected" || recommendation["feedbackRecorded"] != true {
+		t.Fatalf("recommendation = %#v", recommendation)
+	}
+	list, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 1)
+	if err != nil {
+		t.Fatalf("ListRecommendations error: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("list = %#v", list)
+	}
+}
+
+func TestInvokeRecommendationFeedbackHideDismissesLocalRecommendation(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-memory-secret", "client-memory-1", "house-1")
+	now := time.Now().Unix()
+	if err := app.memoryStore.SaveRecommendation(storage.RecommendationRecord{
+		ID:          "rec-1",
+		Profile:     "default",
+		Region:      "dev",
+		HouseID:     "house-1",
+		Type:        "scene",
+		Explanation: "晚上常调暗客厅灯",
+		Evidence:    "脱敏 evidence 3 次",
+		Status:      "pending",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("SaveRecommendation error: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	input := `{"contractVersion":"1.0","requestId":"req-rec-hide","locale":"zh-CN","utterance":"这条建议不要再提醒我","intent":"recommendation.feedback","parameters":{"houseId":"house-1","recommendationId":"rec-1","feedback":"hide"}}`
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("feedback exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid feedback response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "recommendation-feedback-local" {
+		t.Fatalf("response = %#v", response)
+	}
+	recommendation := response["recommendation"].(map[string]any)
+	if recommendation["status"] != "dismissed" || recommendation["feedbackRecorded"] != true {
 		t.Fatalf("recommendation = %#v", recommendation)
 	}
 	list, err := app.memoryStore.ListRecommendations("default", "dev", "house-1", time.Now().Unix(), 1)

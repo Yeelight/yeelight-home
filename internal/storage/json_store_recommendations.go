@@ -31,22 +31,20 @@ func (store JSONStore) SaveRecommendation(record RecommendationRecord) error {
 	if strings.TrimSpace(record.ID) == "" || strings.TrimSpace(record.Profile) == "" || strings.TrimSpace(record.HouseID) == "" {
 		return errors.New("recommendation id, profile and houseId are required")
 	}
-	document, err := store.loadScope(record.Profile, record.Region, record.HouseID)
-	if err != nil {
-		return err
-	}
-	replaced := false
-	for index, existing := range document.Recommendations {
-		if existing.ID == record.ID {
-			document.Recommendations[index] = record
-			replaced = true
-			break
+	return store.mutateScope(record.Profile, record.Region, record.HouseID, func(document *jsonDocument) error {
+		replaced := false
+		for index, existing := range document.Recommendations {
+			if existing.ID == record.ID {
+				document.Recommendations[index] = record
+				replaced = true
+				break
+			}
 		}
-	}
-	if !replaced {
-		document.Recommendations = append(document.Recommendations, record)
-	}
-	return store.saveScope(record.Profile, record.Region, record.HouseID, document)
+		if !replaced {
+			document.Recommendations = append(document.Recommendations, record)
+		}
+		return nil
+	})
 }
 
 func (store JSONStore) UpsertRecommendation(record RecommendationRecord) (RecommendationUpsertResult, error) {
@@ -70,57 +68,56 @@ func (store JSONStore) UpsertRecommendation(record RecommendationRecord) (Recomm
 	if record.CreatedAt <= 0 {
 		return RecommendationUpsertResult{}, errors.New("recommendation timestamp is required")
 	}
-	document, err := store.loadScope(record.Profile, record.Region, record.HouseID)
+	var result RecommendationUpsertResult
+	err := store.mutateScope(record.Profile, record.Region, record.HouseID, func(document *jsonDocument) error {
+		for index, existing := range document.Recommendations {
+			if !recommendationEquivalent(existing, record) {
+				continue
+			}
+			if strings.TrimSpace(record.ID) == "" {
+				record.ID = existing.ID
+			}
+			if existing.CreatedAt > 0 && existing.CreatedAt < record.CreatedAt {
+				record.CreatedAt = existing.CreatedAt
+			}
+			record.Evidence = mergeEvidence(existing.Evidence, record.Evidence)
+			if record.Source == "" {
+				record.Source = existing.Source
+			}
+			if record.Confidence == "" {
+				record.Confidence = existing.Confidence
+			}
+			if record.Priority == 0 {
+				record.Priority = existing.Priority
+			}
+			if record.ActionHint == nil {
+				record.ActionHint = existing.ActionHint
+			}
+			if record.ParametersHint == nil {
+				record.ParametersHint = existing.ParametersHint
+			}
+			if rawStatus == "" || recommendationFeedbackStatus(existing.Status) {
+				record.Status = existing.Status
+				record.CooldownUntil = existing.CooldownUntil
+			}
+			if existing.CooldownUntil > record.CooldownUntil {
+				record.CooldownUntil = existing.CooldownUntil
+			}
+			document.Recommendations[index] = record
+			result = RecommendationUpsertResult{Record: record, Created: false, Merged: true}
+			return nil
+		}
+		if strings.TrimSpace(record.ID) == "" {
+			record.ID = recommendationStableID(record)
+		}
+		document.Recommendations = append(document.Recommendations, record)
+		result = RecommendationUpsertResult{Record: record, Created: true}
+		return nil
+	})
 	if err != nil {
 		return RecommendationUpsertResult{}, err
 	}
-	for index, existing := range document.Recommendations {
-		if !recommendationEquivalent(existing, record) {
-			continue
-		}
-		if strings.TrimSpace(record.ID) == "" {
-			record.ID = existing.ID
-		}
-		if existing.CreatedAt > 0 && existing.CreatedAt < record.CreatedAt {
-			record.CreatedAt = existing.CreatedAt
-		}
-		record.Evidence = mergeEvidence(existing.Evidence, record.Evidence)
-		if record.Source == "" {
-			record.Source = existing.Source
-		}
-		if record.Confidence == "" {
-			record.Confidence = existing.Confidence
-		}
-		if record.Priority == 0 {
-			record.Priority = existing.Priority
-		}
-		if record.ActionHint == nil {
-			record.ActionHint = existing.ActionHint
-		}
-		if record.ParametersHint == nil {
-			record.ParametersHint = existing.ParametersHint
-		}
-		if rawStatus == "" || recommendationFeedbackStatus(existing.Status) {
-			record.Status = existing.Status
-			record.CooldownUntil = existing.CooldownUntil
-		}
-		if existing.CooldownUntil > record.CooldownUntil {
-			record.CooldownUntil = existing.CooldownUntil
-		}
-		document.Recommendations[index] = record
-		if err := store.saveScope(record.Profile, record.Region, record.HouseID, document); err != nil {
-			return RecommendationUpsertResult{}, err
-		}
-		return RecommendationUpsertResult{Record: record, Created: false, Merged: true}, nil
-	}
-	if strings.TrimSpace(record.ID) == "" {
-		record.ID = recommendationStableID(record)
-	}
-	document.Recommendations = append(document.Recommendations, record)
-	if err := store.saveScope(record.Profile, record.Region, record.HouseID, document); err != nil {
-		return RecommendationUpsertResult{}, err
-	}
-	return RecommendationUpsertResult{Record: record, Created: true}, nil
+	return result, nil
 }
 
 func (store JSONStore) ListRecommendations(profile string, region string, houseID string, now int64, limit int) ([]RecommendationRecord, error) {
@@ -170,28 +167,29 @@ func (store JSONStore) ApplyRecommendationFeedback(profile string, region string
 	if containsSensitiveKey(feedback.Status) {
 		return RecommendationRecord{}, errors.New("recommendation feedback must not contain token-like data")
 	}
-	document, err := store.loadScope(profile, region, houseID)
+	var updated RecommendationRecord
+	err := store.mutateScope(profile, region, houseID, func(document *jsonDocument) error {
+		for index, record := range document.Recommendations {
+			if record.Profile != profile || !sameStorageRegion(record.Region, region) || record.HouseID != houseID || record.ID != recommendationID {
+				continue
+			}
+			if strings.TrimSpace(feedback.Status) != "" {
+				record.Status = strings.TrimSpace(feedback.Status)
+			}
+			record.CooldownUntil = feedback.CooldownUntil
+			if feedback.UpdatedAt > 0 {
+				record.UpdatedAt = feedback.UpdatedAt
+			}
+			document.Recommendations[index] = record
+			updated = record
+			return nil
+		}
+		return errors.New("recommendation not found")
+	})
 	if err != nil {
 		return RecommendationRecord{}, err
 	}
-	for index, record := range document.Recommendations {
-		if record.Profile != profile || !sameStorageRegion(record.Region, region) || record.HouseID != houseID || record.ID != recommendationID {
-			continue
-		}
-		if strings.TrimSpace(feedback.Status) != "" {
-			record.Status = strings.TrimSpace(feedback.Status)
-		}
-		record.CooldownUntil = feedback.CooldownUntil
-		if feedback.UpdatedAt > 0 {
-			record.UpdatedAt = feedback.UpdatedAt
-		}
-		document.Recommendations[index] = record
-		if err := store.saveScope(profile, region, houseID, document); err != nil {
-			return RecommendationRecord{}, err
-		}
-		return record, nil
-	}
-	return RecommendationRecord{}, errors.New("recommendation not found")
+	return updated, nil
 }
 
 func normalizeRecommendationRecord(record RecommendationRecord) RecommendationRecord {

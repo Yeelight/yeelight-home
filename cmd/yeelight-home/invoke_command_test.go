@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/yeelight/yeelight-home/internal/credential"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestInvokeReturnsAuthRequiredForValidRequest(t *testing.T) {
@@ -32,6 +33,53 @@ func TestInvokeReturnsAuthRequiredForValidRequest(t *testing.T) {
 	}
 	if response["requestId"] != "req-1" {
 		t.Fatalf("requestId = %v", response["requestId"])
+	}
+}
+
+func TestInvokeReturnsJSONErrorWhenCloudWriteFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/200171/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"401391","name":"灯光区"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/200171/group/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/scene/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/200171/scene/w/create":
+			_, _ = writer.Write([]byte(`{"success":false,"code":500,"message":"服务器内部错误"}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-json-error", "client-json-error", "200171")
+	input := `{"contractVersion":"1.0","requestId":"req-cloud-write-error","locale":"zh-CN","utterance":"建一个打开灯光区的情景","intent":"scene.create","parameters":{"houseId":"200171","name":"临时情景","actions":[{"targetType":"room","targetId":"401391","targetName":"灯光区","set":{"power":true}}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitInternalError {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "error" || response["traceId"] != "invoke-error" {
+		t.Fatalf("response = %#v", response)
+	}
+	errPayload, ok := response["error"].(map[string]any)
+	if !ok || errPayload["code"] != "invoke_failed" || !strings.Contains(requestString(errPayload["message"]), "scene create returned non-success") {
+		t.Fatalf("error = %#v", response["error"])
+	}
+	result := response["result"].(map[string]any)
+	if result[semantic.FieldSafeToRetry] != false || result[semantic.FieldNextAction] != "report_backend_failure_do_not_retry_same_payload" {
+		t.Fatalf("result = %#v", result)
+	}
+	if !strings.Contains(stderr.String(), "invoke: scene create returned non-success") {
+		t.Fatalf("stderr = %s", stderr.String())
 	}
 }
 
@@ -101,7 +149,7 @@ func TestInvokeHomeSummaryUsesStoredCredentialAndReadOnlyAPI(t *testing.T) {
 		t.Fatalf("houses = %#v", result["houses"])
 	}
 	first, ok := houses[0].(map[string]any)
-	if !ok || first["name"] != "默认家庭" {
+	if !ok || first["houseId"] != "house-1" || first["id"] != "house-1" || first["name"] != "默认家庭" {
 		t.Fatalf("first house = %#v", houses[0])
 	}
 }
@@ -147,7 +195,7 @@ func TestInvokeHomeSummaryIgnoresSelectedHouseWhenAccountListsAreEmpty(t *testin
 	result := response["result"].(map[string]any)
 	houses := result["houses"].([]any)
 	metrics := response["metrics"].(map[string]any)
-	if len(houses) != 0 || result["houseCount"] != float64(0) || result["source"] != "/v1/house/r/all+/v1/house/r/list" || metrics["apiCalls"] != float64(2) {
+	if len(houses) != 0 || result["houseCount"] != float64(0) || result["source"] != "/v1/house/r/all+/v1/house/r/list" || metrics[semantic.FieldAPICalls] != float64(2) {
 		t.Fatalf("response = %#v", response)
 	}
 }
@@ -351,8 +399,56 @@ func TestInvokeEntityListUsesStoredCredentialAndReadOnlyAPI(t *testing.T) {
 		t.Fatalf("entities = %#v", result["entities"])
 	}
 	metrics, ok := response["metrics"].(map[string]any)
-	if !ok || metrics["apiCalls"] != float64(6) {
+	if !ok || metrics[semantic.FieldAPICalls] != float64(6) {
 		t.Fatalf("metrics = %#v", response["metrics"])
+	}
+}
+
+func TestInvokeEntityListFiltersByEntityTypeAndRoomName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-light","name":"灯光区"},{"id":"room-panel","name":"开关面板区"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"device-rgbw","name":"light-色彩灯通用固件 - RGBW-264193-01","roomId":"room-light"},{"id":"device-panel","name":"scene_panel-情景面板","roomId":"room-panel"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-entity-filter-secret", "client-entity-filter-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-entity-filter","locale":"zh-CN","utterance":"列一下灯光区设备","intent":"entity.list","parameters":{"houseId":"house-1","entityType":"device","roomName":"灯光区"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["total"] != float64(1) {
+		t.Fatalf("result = %#v", result)
+	}
+	entities := result["entities"].([]any)
+	entity := entities[0].(map[string]any)
+	if entity["entityId"] != "device-rgbw" || entity["entityType"] != "device" {
+		t.Fatalf("entities = %#v", entities)
+	}
+	counts := result["counts"].(map[string]any)
+	if counts["device"] != float64(1) || counts["room"] != nil {
+		t.Fatalf("counts = %#v", counts)
 	}
 }
 
@@ -405,11 +501,101 @@ func TestInvokeEntityGetReturnsMatchedEntityFromReadOnlyList(t *testing.T) {
 		t.Fatalf("result = %#v", response["result"])
 	}
 	entity, ok := result["entity"].(map[string]any)
-	if !ok || entity["id"] != "device-1" || entity["type"] != "device" || entity["roomId"] != "room-1" || entity["online"] != true {
+	if !ok ||
+		entity["entityId"] != "device-1" ||
+		entity["entityType"] != "device" ||
+		entity["id"] != "device-1" ||
+		entity["type"] != "device" ||
+		entity["roomId"] != "room-1" ||
+		entity["online"] != true {
 		t.Fatalf("entity = %#v", result["entity"])
 	}
 	if result["matchedBy"] != "id" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeEntityGetMatchesPhoneticNameTypo(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-entity-phonetic-secret", "client-entity-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-entity-get-phonetic","locale":"zh-CN","utterance":"看看客廷","intent":"entity.get","parameters":{"houseId":"house-1","entityType":"room","name":"客廷"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["matchedBy"] != "phonetic_name" {
+		t.Fatalf("result = %#v", result)
+	}
+	entity := result["entity"].(map[string]any)
+	if entity["entityId"] != "room-1" || entity["name"] != "客厅" {
+		t.Fatalf("entity = %#v", entity)
+	}
+}
+
+func TestInvokeEntityGetAsksClarificationForClosePhoneticCandidates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"},{"id":"room-2","name":"客停"}]}}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-entity-phonetic-secret", "client-entity-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-entity-get-phonetic-ambiguous","locale":"zh-CN","utterance":"看看客廷","intent":"entity.get","parameters":{"houseId":"house-1","entityType":"room","name":"客廷"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "clarification_required" {
+		t.Fatalf("response = %#v", response)
+	}
+	clarification := response["clarification"].(map[string]any)
+	if clarification["reason"] != "ambiguous_target" {
+		t.Fatalf("clarification = %#v", clarification)
+	}
+	candidates := clarification["candidates"].([]any)
+	if len(candidates) != 2 {
+		t.Fatalf("candidates = %#v", candidates)
 	}
 }
 

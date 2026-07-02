@@ -14,6 +14,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/credential"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 	"github.com/yeelight/yeelight-home/internal/storage"
 )
 
@@ -34,23 +35,25 @@ func TestRootHelpAndVersionFlags(t *testing.T) {
 		{name: "intent schema help command", args: []string{"help", "intent", "schema"}, wantOutput: "machine-readable SkillRequest schema"},
 		{name: "explain help command", args: []string{"help", "explain"}, wantOutput: "yeelight-home explain <intent> [--json]"},
 		{name: "module action help command", args: []string{"help", "scene", "execute"}, wantOutput: "Intent:\n  scene.execute"},
-		{name: "scene update help shows payload shape", args: []string{"help", "scene", "update"}, wantOutput: "complete updated details[] list"},
+		{name: "scene update help shows payload shape", args: []string{"help", "scene", "update"}, wantOutput: "complete updated actions[] list"},
 		{name: "scene update help shows millisecond timing", args: []string{"help", "scene", "update"}, wantOutput: "non-negative milliseconds"},
 		{name: "scene update help shows source backed action keys", args: []string{"help", "scene", "update"}, wantOutput: "blink, motorAdjust, delayCancel"},
 		{name: "scene update help shows audio action evidence keys", args: []string{"help", "scene", "update"}, wantOutput: "musicPlayerCtrl, or localAudioCtrl"},
-		{name: "scene update help shows channel keys require evidence", args: []string{"help", "scene", "update"}, wantOutput: "0-sp/1-sp"},
-		{name: "scene create help shows details shape", args: []string{"help", "scene", "create"}, wantOutput: "details[] item fields:"},
+		{name: "scene update help shows evidence-only custom actions", args: []string{"help", "scene", "update"}, wantOutput: "only when Runtime detail/capability"},
+		{name: "scene create help shows actions shape", args: []string{"help", "scene", "create"}, wantOutput: "actions[] item fields:"},
 		{name: "automation update help shows payload shape", args: []string{"help", "automation", "update"}, wantOutput: "complete condition/action payload"},
-		{name: "automation update help shows source backed condition fields", args: []string{"help", "automation", "update"}, wantOutput: "id, pid, typeId, resId, prop, operation, value, extArgs"},
+		{name: "automation update help shows source backed condition fields", args: []string{"help", "automation", "update"}, wantOutput: "targetType, targetId, property, operation, value"},
 		{name: "automation create help shows actions shape", args: []string{"help", "automation", "create"}, wantOutput: "actions[] item fields:"},
-		{name: "lighting apply help shows properties", args: []string{"help", "lighting", "apply"}, wantOutput: "propertyName  one of p, l, ct, c"},
-		{name: "lighting import help shows meta import", args: []string{"help", "lighting", "import"}, wantOutput: "/v1/meta/import"},
-		{name: "lighting import help shows product metadata", args: []string{"help", "lighting", "import"}, wantOutput: "extraMeta"},
-		{name: "lighting import help shows HouseMeta groups", args: []string{"help", "lighting", "import"}, wantOutput: "deviceTempIdList[]"},
-		{name: "device module help uses HouseMeta slot example", args: []string{"help", "device"}, wantOutput: "gateway\":{\"tempId\":\"gw1\""},
-		{name: "lighting module help uses HouseMeta import example", args: []string{"help", "lighting"}, wantOutput: "deviceTempIdList"},
-		{name: "panel button event help shows details", args: []string{"help", "panel", "button-event-update"}, wantOutput: "Button event updates replace the target event's complete details[] list"},
-		{name: "knob configure help shows config type", args: []string{"help", "knob", "configure"}, wantOutput: "index, configType, resId, typeId"},
+		{name: "scene action help shows standard target fields", args: []string{"help", "scene", "update"}, wantOutput: "targetType=device|group|meshGroup|scene"},
+		{name: "automation action help shows standard target fields", args: []string{"help", "automation", "update"}, wantOutput: "targetType=device|group|meshGroup|scene"},
+		{name: "lighting apply help shows properties", args: []string{"help", "lighting", "apply"}, wantOutput: "property      one of power, brightness, colorTemperature, color"},
+		{name: "lighting import help shows design model", args: []string{"help", "lighting", "import"}, wantOutput: "standard lighting design model"},
+		{name: "lighting import help shows product fields", args: []string{"help", "lighting", "import"}, wantOutput: "skuCode, capabilityPid, productComponentId"},
+		{name: "lighting import help shows group fields", args: []string{"help", "lighting", "import"}, wantOutput: "groupCapability, slotKeys[]"},
+		{name: "device module help uses design slot example", args: []string{"help", "device"}, wantOutput: "\"deviceSlots\""},
+		{name: "lighting module help uses design import example", args: []string{"help", "lighting"}, wantOutput: "\"slotKeys\""},
+		{name: "panel button event help shows actions", args: []string{"help", "panel", "button-event-update"}, wantOutput: "Button event updates replace the target event's complete action list"},
+		{name: "knob configure help shows config type", args: []string{"help", "knob", "configure"}, wantOutput: "index, configType, targetType, targetId"},
 		{name: "knob configure help shows event evidence words", args: []string{"help", "knob", "configure"}, wantOutput: "rotate, press_rotate, click, double_click, and hold"},
 		{name: "operation batch help shows operations", args: []string{"help", "operation", "batch-configure"}, wantOutput: "operations[] is an ordered list"},
 		{name: "favorite batch help shows items", args: []string{"help", "favorite", "batch-add"}, wantOutput: "Batch favorite intents use"},
@@ -150,30 +153,133 @@ func TestIntentExplainReturnsMachineReadablePayloadGuide(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["intent"] != "lighting.design.import" || response["implemented"] != true {
+	if response[semantic.FieldIntent] != "lighting.design.import" || response[semantic.FieldImplemented] != true {
 		t.Fatalf("response = %#v", response)
 	}
-	guide := response["payloadGuide"].(map[string]any)
-	shape := guide["payloadShape"].(map[string]any)
-	if shape["gateway"] == nil || shape["sceneList"] == nil || shape["automationList"] == nil {
+	guide := response[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldRooms] == nil || shape[semantic.FieldScenes] == nil || shape[semantic.FieldAutomations] == nil {
 		t.Fatalf("payload shape = %#v", shape)
 	}
-	if !strings.Contains(response["nextStep"].(string), "/v1/meta/import") {
-		t.Fatalf("nextStep = %#v", response["nextStep"])
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "standard lighting design model") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
 	}
-	fields := response["acceptedFields"].([]any)
+	fields := response[semantic.FieldAcceptedFields].([]any)
 	if len(fields) == 0 {
 		t.Fatalf("acceptedFields empty")
 	}
 	for _, field := range []string{
-		"parameters.gateway.roomList[].deviceList[].pid",
-		"parameters.gateway.roomList[].groupList[].deviceTempIdList",
-		"parameters.sceneList[].details[]",
-		"parameters.automationList[].actions[]",
+		semantic.ParameterPath(semantic.ArrayField(semantic.FieldRooms), semantic.ArrayField(semantic.FieldDeviceSlots)),
+		semantic.ParameterPath(semantic.ArrayField(semantic.FieldRooms), semantic.ArrayField(semantic.FieldGroups), semantic.FieldSlotKeys),
+		semantic.ParameterPath(semantic.ArrayField(semantic.FieldScenes), semantic.ArrayField(semantic.FieldActions)),
+		semantic.ParameterPath(semantic.ArrayField(semantic.FieldAutomations), semantic.FieldTrigger),
 	} {
 		if !containsAnyString(fields, field) {
 			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
 		}
+	}
+	text := string(stdout.Bytes())
+	for _, forbidden := range []string{"\"tid\"", "\"n\"", "\"rl\"", "\"atl\"", "HouseMeta", "/v1/meta/import", "deviceTempIdList"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("intent explain should not recommend short-key HouseMeta fields %s: %s", forbidden, text)
+		}
+	}
+}
+
+func TestIntentExplainThingProductInfoV3ShowsProductVersionContext(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "explain", "--intent", "thing.product.info.v3.batch_get", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response[semantic.FieldIntent] != "thing.product.info.v3.batch_get" || response[semantic.FieldImplemented] != true {
+		t.Fatalf("response = %#v", response)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldCapabilityProductID),
+		semantic.ParameterPath(semantic.FieldCapabilityProductIDs),
+		semantic.ParameterPath(semantic.FieldVersion),
+		semantic.ParameterPath(semantic.FieldSchemaVersion),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	guide := response[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldCapabilityProductID] == nil || shape[semantic.FieldVersion] == nil || shape[semantic.FieldSchemaVersion] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "version") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentExplainProductFAQShowsSearchAndDetailContext(t *testing.T) {
+	tests := []struct {
+		intent string
+		fields []string
+	}{
+		{
+			intent: "thing.product_faq.detail.get",
+			fields: []string{
+				semantic.ParameterPath(semantic.FieldFAQID),
+				semantic.ParameterPath(semantic.FieldID),
+			},
+		},
+		{
+			intent: "thing.product_faq.page_detail.list",
+			fields: []string{
+				semantic.ParameterPath(semantic.FieldCapabilityProductID),
+				semantic.ParameterPath(semantic.FieldModuleID),
+				semantic.ParameterPath(semantic.FieldKeyword),
+				semantic.ParameterPath(semantic.FieldPageNo),
+				semantic.ParameterPath(semantic.FieldPageSize),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			code := run([]string{"intent", "explain", "--intent", test.intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("invalid json response: %v", err)
+			}
+			if response[semantic.FieldIntent] != test.intent || response[semantic.FieldImplemented] != true {
+				t.Fatalf("response = %#v", response)
+			}
+			fields := response[semantic.FieldAcceptedFields].([]any)
+			for _, field := range test.fields {
+				if !containsAnyString(fields, field) {
+					t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+				}
+			}
+			guide := response[semantic.FieldPayloadGuide].(map[string]any)
+			shape := guide[semantic.FieldPayloadShape].(map[string]any)
+			for _, field := range test.fields {
+				key := strings.TrimPrefix(field, semantic.FieldParameters+".")
+				if shape[key] == nil {
+					t.Fatalf("payload shape should include %s: %#v", key, shape)
+				}
+			}
+			if !strings.Contains(response[semantic.FieldNextStep].(string), "FAQ") {
+				t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+			}
+		})
 	}
 }
 
@@ -196,8 +302,699 @@ func TestIntentSchemaCommandReturnsSkillRequestSchema(t *testing.T) {
 	}
 	parameters := properties["parameters"].(map[string]any)
 	parameterProperties := parameters["properties"].(map[string]any)
-	if parameterProperties["gateway"] == nil || parameterProperties["sceneList"] == nil || parameterProperties["automationList"] == nil {
+	if parameterProperties["rooms"] == nil || parameterProperties["scenes"] == nil || parameterProperties["automations"] == nil {
 		t.Fatalf("parameter properties = %#v", parameterProperties)
+	}
+}
+
+func TestIntentSchemaCommandKeepsOperationBatchStepIntentString(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "schema", "--intent", "operation.batch.configure", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json schema: %v", err)
+	}
+	properties := schema["properties"].(map[string]any)
+	parameters := properties["parameters"].(map[string]any)
+	parameterProperties := parameters["properties"].(map[string]any)
+	operations := parameterProperties[semantic.FieldOperations].(map[string]any)
+	items := operations["items"].(map[string]any)
+	itemProperties := items["properties"].(map[string]any)
+	intentSchema := itemProperties[semantic.FieldIntent].(map[string]any)
+	if intentSchema["type"] != "string" {
+		t.Fatalf("operation step intent schema = %#v", intentSchema)
+	}
+	targetsSchema := itemProperties[semantic.FieldTargets].(map[string]any)
+	if targetsSchema["type"] != "array" {
+		t.Fatalf("operation step targets schema = %#v", targetsSchema)
+	}
+}
+
+func TestIntentSchemaKeepsPluralNameFieldsAsArrays(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "schema", "--intent", "gateway.configure", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json schema: %v", err)
+	}
+	properties := schema["properties"].(map[string]any)
+	parameters := properties["parameters"].(map[string]any)
+	parameterProperties := parameters["properties"].(map[string]any)
+	roomNames := parameterProperties[semantic.FieldRoomNames].(map[string]any)
+	if roomNames["type"] != "array" {
+		t.Fatalf("roomNames schema = %#v", roomNames)
+	}
+}
+
+func TestIntentSchemaShowsSemanticActionAliases(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "schema", "--intent", "scene.update", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{"targetType", "targetId", "targetName", "set"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("schema missing semantic alias %q: %s", want, text)
+		}
+	}
+}
+
+func TestIntentSchemaSceneUpdateShowsNaturalSceneTarget(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "schema", "--intent", "scene.update", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{"sceneName", "currentName", "newName"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("schema missing scene update target field %q: %s", want, text)
+		}
+	}
+}
+
+func TestIntentSchemaPayloadGuidesPreserveHouseID(t *testing.T) {
+	for _, intent := range []string{"scene.create", "automation.create", "group.create"} {
+		t.Run(intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"intent", "schema", "--intent", intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var schema map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+				t.Fatalf("invalid json schema: %v", err)
+			}
+			parameters := schema["properties"].(map[string]any)[semantic.FieldParameters].(map[string]any)
+			properties := parameters["properties"].(map[string]any)
+			if properties[semantic.FieldHouseID] == nil {
+				t.Fatalf("schema for %s missing houseId: %s", intent, stdout.String())
+			}
+		})
+	}
+}
+
+func TestIntentExplainProductPediaShowsQueryFields(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "product.pedia.search", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldQuery),
+		semantic.ParameterPath(semantic.FieldKeyword),
+		semantic.ParameterPath(semantic.FieldSKUCode),
+		semantic.ParameterPath(semantic.FieldProductModel),
+		semantic.ParameterPath(semantic.FieldLimit),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+}
+
+func TestIntentExplainTargetIntentsShowNaturalTargetFields(t *testing.T) {
+	tests := map[string][]string{
+		"diagnose.device": {
+			semantic.ParameterPath(semantic.FieldDeviceName),
+			semantic.ParameterPath(semantic.FieldRoomName),
+		},
+		"panel.get": {
+			semantic.ParameterPath(semantic.FieldDeviceName),
+		},
+		"scene.execute": {
+			semantic.ParameterPath(semantic.FieldSceneName),
+		},
+		"automation.disable": {
+			semantic.ParameterPath(semantic.FieldAutomationName),
+		},
+		"gateway.detail.get": {
+			semantic.ParameterPath(semantic.FieldGatewayName),
+		},
+	}
+	for intent, expectedFields := range tests {
+		t.Run(intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"intent", "explain", "--intent", intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("invalid json response: %v", err)
+			}
+			fields := response[semantic.FieldAcceptedFields].([]any)
+			for _, field := range expectedFields {
+				if !containsAnyString(fields, field) {
+					t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+				}
+			}
+		})
+	}
+}
+
+func TestIntentSchemaAutomationUpdateShowsNaturalAutomationTarget(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "schema", "--intent", "automation.update", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{"automationName", "currentName", "newName"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("schema missing automation update target field %q: %s", want, text)
+		}
+	}
+}
+
+func TestIntentExplainGroupCreateShowsSemanticMemberShape(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "explain", "--intent", "group.create", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldName),
+		semantic.ParameterPath(semantic.FieldRoomID),
+		semantic.ParameterPath(semantic.FieldRoomName),
+		semantic.ParameterPath(semantic.FieldGroupCapability),
+		semantic.ParameterPath(semantic.FieldDeviceIDs),
+		semantic.ParameterPath(semantic.FieldDeviceNames),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	text := stdout.String()
+	if strings.Contains(text, "componentId") || strings.Contains(text, "groupComponent") {
+		t.Fatalf("group.create explain should not expose lower-level group component fields: %s", text)
+	}
+}
+
+func TestIntentExplainGroupUpdateShowsSemanticShape(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"intent", "explain", "--intent", "group.update", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{"groupId", "groupName", "currentName", "name", "description", "icon", "roomId", "targetRoomName"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("group.update explain missing %s: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "componentId") || strings.Contains(text, "groupComponent") {
+		t.Fatalf("group.update explain should not expose lower-level group component fields: %s", text)
+	}
+}
+
+func TestIntentExplainSpaceOrganizationShowsNaturalNameFields(t *testing.T) {
+	tests := map[string][]string{
+		"room.rename": {
+			semantic.ParameterPath(semantic.FieldRoomName),
+			semantic.ParameterPath(semantic.FieldCurrentName),
+			semantic.ParameterPath(semantic.FieldNewName),
+		},
+		"device.rename": {
+			semantic.ParameterPath(semantic.FieldDeviceName),
+			semantic.ParameterPath(semantic.FieldCurrentName),
+			semantic.ParameterPath(semantic.FieldNewName),
+		},
+		"device.move": {
+			semantic.ParameterPath(semantic.FieldDeviceName),
+			semantic.ParameterPath(semantic.FieldTargetRoomName),
+		},
+		"favorite.add": {
+			semantic.ParameterPath(semantic.FieldEntityType),
+			semantic.ParameterPath(semantic.FieldEntityID),
+			semantic.ParameterPath(semantic.FieldTargetType),
+			semantic.ParameterPath(semantic.FieldTargetID),
+		},
+	}
+	for intent, expectedFields := range tests {
+		t.Run(intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"intent", "explain", "--intent", intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("invalid json response: %v", err)
+			}
+			fields := response[semantic.FieldAcceptedFields].([]any)
+			for _, field := range expectedFields {
+				if !containsAnyString(fields, field) {
+					t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+				}
+			}
+		})
+	}
+}
+
+func TestIntentSchemaFavoriteAddDoesNotRequireUpdateOrBatchFields(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "schema", "--intent", "favorite.add", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json schema: %v", err)
+	}
+	parameters := schema["properties"].(map[string]any)[semantic.FieldParameters].(map[string]any)
+	if required, ok := parameters["required"].([]any); ok {
+		for _, forbidden := range []string{semantic.FieldFavoriteID, semantic.FieldItems} {
+			if containsAnyString(required, forbidden) {
+				t.Fatalf("favorite.add schema must not require %s: %#v", forbidden, required)
+			}
+		}
+	}
+	properties := parameters["properties"].(map[string]any)
+	for _, field := range []string{semantic.FieldTargetType, semantic.FieldTargetID, semantic.FieldEntityType, semantic.FieldEntityID} {
+		if properties[field] == nil {
+			t.Fatalf("favorite.add schema missing %s: %#v", field, properties)
+		}
+	}
+}
+
+func TestIntentExplainLightControlShowsValueFields(t *testing.T) {
+	tests := []struct {
+		intent string
+		fields []string
+	}{
+		{intent: "light.power.set", fields: []string{semantic.ParameterPath(semantic.FieldPower), semantic.ParameterPath(semantic.FieldDeviceName), semantic.ParameterPath(semantic.FieldRoomName)}},
+		{intent: "light.brightness.set", fields: []string{semantic.ParameterPath(semantic.FieldBrightness), semantic.ParameterPath(semantic.FieldDeviceName), semantic.ParameterPath(semantic.FieldRoomName)}},
+		{intent: "light.color_temperature.set", fields: []string{semantic.ParameterPath(semantic.FieldColorTemperature), semantic.ParameterPath(semantic.FieldDeviceName), semantic.ParameterPath(semantic.FieldRoomName)}},
+		{intent: "light.color.set", fields: []string{semantic.ParameterPath(semantic.FieldColor), semantic.ParameterPath(semantic.FieldHex), semantic.ParameterPath(semantic.FieldDeviceName), semantic.ParameterPath(semantic.FieldRoomName)}},
+	}
+	for _, test := range tests {
+		t.Run(test.intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"intent", "explain", "--intent", test.intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("invalid json response: %v", err)
+			}
+			fields := response[semantic.FieldAcceptedFields].([]any)
+			for _, field := range test.fields {
+				if !containsAnyString(fields, field) {
+					t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+				}
+			}
+		})
+	}
+}
+
+func TestIntentExplainLightingExperienceApplyShowsExplicitActionFields(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "lighting.experience.apply", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldBrightness),
+		semantic.ParameterPath(semantic.FieldColorTemperature),
+		semantic.ParameterPath(semantic.FieldColor),
+		semantic.ParameterPath(semantic.FieldHex),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	guide := response[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldBrightness] == nil || shape[semantic.FieldColorTemperature] == nil || shape[semantic.FieldColor] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "does not invent") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentExplainPanelButtonTypeGetShowsButtonTypeField(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "panel.button.type.get", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldDeviceID),
+		semantic.ParameterPath(semantic.FieldDeviceName),
+		semantic.ParameterPath(semantic.FieldButtonType),
+		semantic.ParameterPath(semantic.FieldType),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	guide := response[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldButtonType] == nil || shape[semantic.FieldType] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "panel.get first") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentExplainNodePropertyConfigGetShowsNodeTypeField(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "node.property_config.get", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldNodeID),
+		semantic.ParameterPath(semantic.FieldDeviceID),
+		semantic.ParameterPath(semantic.FieldNodeType),
+		semantic.ParameterPath(semantic.FieldType),
+		semantic.ParameterPath(semantic.FieldEntityType),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	guide := response[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldNodeType] == nil || shape[semantic.FieldNodeID] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "Pass nodeType explicitly") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentExplainAppUpgradeLatestGetShowsSemanticFields(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "app_upgrade.latest.get", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldAppType),
+		semantic.ParameterPath(semantic.FieldOSType),
+		semantic.ParameterPath(semantic.FieldLanguageCode),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "semantic appType") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentExplainProgressGetShowsProgressKeyField(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "progress.get", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldProgressKey),
+		semantic.ParameterPath(semantic.FieldKey),
+		semantic.ParameterPath(semantic.FieldID),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "concrete progressKey") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentSchemaLightColorAllowsRGBObject(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "schema", "--intent", "light.color.set", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	parameters := schema["properties"].(map[string]any)[semantic.FieldParameters].(map[string]any)
+	color := parameters["properties"].(map[string]any)[semantic.FieldColor].(map[string]any)
+	colorTypes, ok := color["type"].([]any)
+	if !ok || !containsAnyString(colorTypes, "object") {
+		t.Fatalf("color schema should allow object: %#v", color)
+	}
+}
+
+func TestIntentSchemaAutomationActionSetIsOptionalObject(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "schema", "--intent", "automation.create", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	parameters := schema["properties"].(map[string]any)[semantic.FieldParameters].(map[string]any)
+	actions := parameters["properties"].(map[string]any)[semantic.FieldActions].(map[string]any)
+	item := actions["items"].(map[string]any)
+	required, _ := item["required"].([]any)
+	if containsAnyString(required, semantic.FieldSet) {
+		t.Fatalf("automation action set must not be globally required: %#v", item)
+	}
+	setSchema := item["properties"].(map[string]any)[semantic.FieldSet].(map[string]any)
+	if setSchema["type"] != "object" {
+		t.Fatalf("automation action set should be object: %#v", setSchema)
+	}
+}
+
+func TestIntentSchemaAutomationTriggerShowsAdvancedConditionFields(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "schema", "--intent", "automation.create", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	parameters := schema["properties"].(map[string]any)[semantic.FieldParameters].(map[string]any)
+	trigger := parameters["properties"].(map[string]any)[semantic.FieldTrigger].(map[string]any)
+	triggerProperties := trigger["properties"].(map[string]any)
+	for _, field := range []string{
+		semantic.FieldConditionKind,
+		semantic.FieldTime,
+		semantic.FieldTargetType,
+		semantic.FieldTargetID,
+		semantic.FieldCapabilityProductID,
+		semantic.FieldEventID,
+		semantic.FieldEventArgs,
+		semantic.FieldProperty,
+		semantic.FieldOperation,
+		semantic.FieldValue,
+	} {
+		if _, ok := triggerProperties[field]; !ok {
+			t.Fatalf("automation trigger schema missing %s: %#v", field, triggerProperties)
+		}
+	}
+}
+
+func TestIntentSchemaEntityRenameBatchAllowsCurrentNameWithoutID(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "schema", "--intent", "entity.rename.batch", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	parameters := schema["properties"].(map[string]any)[semantic.FieldParameters].(map[string]any)
+	items := parameters["properties"].(map[string]any)[semantic.FieldItems].(map[string]any)
+	item := items["items"].(map[string]any)
+	required, _ := item["required"].([]any)
+	if containsAnyString(required, semantic.FieldID) {
+		t.Fatalf("entity.rename.batch item id must not be globally required: %#v", item)
+	}
+}
+
+func TestIntentExplainBasicCreateIntentsShowSemanticShape(t *testing.T) {
+	tests := map[string][]string{
+		"home.create": {
+			semantic.ParameterPath(semantic.FieldName),
+			semantic.ParameterPath(semantic.FieldDescription),
+			semantic.ParameterPath(semantic.FieldAreaName),
+		},
+		"room.create": {
+			semantic.ParameterPath(semantic.FieldName),
+			semantic.ParameterPath(semantic.FieldRoomName),
+			semantic.ParameterPath(semantic.FieldIcon),
+		},
+		"area.create": {
+			semantic.ParameterPath(semantic.FieldName),
+			semantic.ParameterPath(semantic.FieldRoomIDs),
+			semantic.ParameterPath(semantic.FieldParentID),
+		},
+	}
+	for intent, wantFields := range tests {
+		t.Run(intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"intent", "explain", "--intent", intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var response map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+				t.Fatalf("invalid json response: %v", err)
+			}
+			fields := response[semantic.FieldAcceptedFields].([]any)
+			for _, field := range wantFields {
+				if !containsAnyString(fields, field) {
+					t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+				}
+			}
+		})
+	}
+}
+
+func TestIntentSchemaRequiresExistingIDOnlyForUpdates(t *testing.T) {
+	tests := []struct {
+		intent          string
+		idField         string
+		wantIDRule      bool
+		wantRequired    []string
+		wantNotRequired []string
+	}{
+		{intent: "scene.create", idField: "sceneId", wantIDRule: false, wantRequired: []string{"name", "actions"}, wantNotRequired: []string{"sceneId"}},
+		{intent: "scene.update", idField: "sceneId", wantIDRule: false, wantRequired: []string{"actions"}, wantNotRequired: []string{"sceneId", "name"}},
+		{intent: "automation.create", idField: "automationId", wantIDRule: false, wantRequired: []string{"name", "trigger", "actions"}, wantNotRequired: []string{"automationId"}},
+		{intent: "automation.update", idField: "automationId", wantIDRule: false, wantRequired: []string{"trigger", "actions"}, wantNotRequired: []string{"automationId", "name"}},
+	}
+	for _, test := range tests {
+		t.Run(test.intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"intent", "schema", "--intent", test.intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var schema map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+				t.Fatalf("invalid json schema: %v", err)
+			}
+			required := parameterRequiredFields(schema)
+			hasIDRule := containsAnyString(required, test.idField)
+			if hasIDRule != test.wantIDRule {
+				t.Fatalf("%s required fields = %#v", test.intent, required)
+			}
+			for _, field := range test.wantRequired {
+				if !containsAnyString(required, field) {
+					t.Fatalf("%s should require %s; required = %#v", test.intent, field, required)
+				}
+			}
+			for _, field := range test.wantNotRequired {
+				if containsAnyString(required, field) {
+					t.Fatalf("%s should not require %s; required = %#v", test.intent, field, required)
+				}
+			}
+		})
+	}
+}
+
+func TestIntentSchemaActionRowsAllowTargetNameWithoutTargetID(t *testing.T) {
+	for _, intent := range []string{"scene.create", "automation.create"} {
+		t.Run(intent, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{"intent", "schema", "--intent", intent, "--json"}, strings.NewReader(""), &stdout, &stderr)
+			if code != exitOK {
+				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+			}
+			var schema map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &schema); err != nil {
+				t.Fatalf("invalid json schema: %v", err)
+			}
+			actionRequired := parameterArrayItemRequiredFields(t, schema, semantic.FieldActions)
+			if !containsAnyString(actionRequired, semantic.FieldTargetType) {
+				t.Fatalf("%s action rows should require targetType; required = %#v", intent, actionRequired)
+			}
+			if containsAnyString(actionRequired, semantic.FieldTargetID) {
+				t.Fatalf("%s action rows must allow targetName without targetId; required = %#v", intent, actionRequired)
+			}
+		})
 	}
 }
 
@@ -218,9 +1015,27 @@ func TestExplainAliasReturnsIntentSchema(t *testing.T) {
 	if intentSchema["const"] != "scene.update" {
 		t.Fatalf("intent schema = %#v", intentSchema)
 	}
-	if schema["examples"] == nil || schema["nextStep"] == nil {
+	if schema[semantic.FieldExamples] == nil || schema[semantic.FieldNextStep] == nil {
 		t.Fatalf("schema missing examples/nextStep: %#v", schema)
 	}
+}
+
+func parameterRequiredFields(schema map[string]any) []any {
+	properties := schema["properties"].(map[string]any)
+	parameters := properties["parameters"].(map[string]any)
+	required, _ := parameters["required"].([]any)
+	return required
+}
+
+func parameterArrayItemRequiredFields(t *testing.T, schema map[string]any, field string) []any {
+	t.Helper()
+	properties := schema["properties"].(map[string]any)
+	parameters := properties["parameters"].(map[string]any)
+	parameterProperties := parameters["properties"].(map[string]any)
+	arraySchema := parameterProperties[field].(map[string]any)
+	itemSchema := arraySchema["items"].(map[string]any)
+	required, _ := itemSchema["required"].([]any)
+	return required
 }
 
 func TestInvokeIntentExplainReturnsMachineReadablePayloadGuide(t *testing.T) {
@@ -237,25 +1052,129 @@ func TestInvokeIntentExplainReturnsMachineReadablePayloadGuide(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["status"] != "success" {
+	if response[semantic.FieldStatus] != "success" {
 		t.Fatalf("response = %#v", response)
 	}
-	result := response["result"].(map[string]any)
-	explanation := result["intentExplanation"].(map[string]any)
-	if explanation["intent"] != "lighting.design.import" || explanation["implemented"] != true {
+	result := response[semantic.FieldResult].(map[string]any)
+	explanation := result[semantic.FieldIntentExplanation].(map[string]any)
+	if explanation[semantic.FieldIntent] != "lighting.design.import" || explanation[semantic.FieldImplemented] != true {
 		t.Fatalf("intent explanation = %#v", explanation)
 	}
-	guide := explanation["payloadGuide"].(map[string]any)
-	shape := guide["payloadShape"].(map[string]any)
-	if shape["gateway"] == nil || shape["sceneList"] == nil || shape["automationList"] == nil {
+	guide := explanation[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldRooms] == nil || shape[semantic.FieldScenes] == nil || shape[semantic.FieldAutomations] == nil {
 		t.Fatalf("payload shape = %#v", shape)
 	}
-	if !strings.Contains(explanation["nextStep"].(string), "/v1/meta/import") {
-		t.Fatalf("nextStep = %#v", explanation["nextStep"])
+	if !strings.Contains(explanation[semantic.FieldNextStep].(string), "standard lighting design model") {
+		t.Fatalf("nextStep = %#v", explanation[semantic.FieldNextStep])
 	}
-	fields := explanation["acceptedFields"].([]any)
-	if !containsAnyString(fields, "parameters.gateway.roomList[].deviceList[].pid") {
-		t.Fatalf("acceptedFields missing nested HouseMeta device field: %#v", fields)
+	fields := explanation[semantic.FieldAcceptedFields].([]any)
+	if !containsAnyString(fields, semantic.ParameterPath(semantic.ArrayField(semantic.FieldRooms), semantic.ArrayField(semantic.FieldDeviceSlots), semantic.FieldProduct, semantic.FieldProductCode)) {
+		t.Fatalf("acceptedFields missing nested design product field: %#v", fields)
+	}
+}
+
+func TestInvokeIntentExplainHomeMemberIncludesPublicPayloadGuide(t *testing.T) {
+	app := newTestApp(t)
+	input := `{"contractVersion":"1.0","requestId":"req-intent-explain-member","locale":"zh-CN","utterance":"解释家庭分享参数","intent":"intent.explain","parameters":{"intent":"home.member.invite"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	explanation := response[semantic.FieldResult].(map[string]any)[semantic.FieldIntentExplanation].(map[string]any)
+	guide := explanation[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	for _, field := range []string{semantic.FieldHouseID, semantic.FieldExpiresAt, semantic.FieldUserRole, semantic.FieldReuseBarcode} {
+		if shape[field] == nil {
+			t.Fatalf("payload shape should include %s: %#v", field, shape)
+		}
+	}
+	fields := explanation[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldExpiresAt),
+		semantic.ParameterPath(semantic.FieldUserRole),
+		semantic.ParameterPath(semantic.FieldReuseBarcode),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+}
+
+func TestInvokeIntentExplainOperationLessonRecordIncludesPublicPayloadGuide(t *testing.T) {
+	app := newTestApp(t)
+	input := `{"contractVersion":"1.0","requestId":"req-intent-explain-lesson","locale":"zh-CN","utterance":"解释经验记录参数","intent":"intent.explain","parameters":{"intent":"operation.lesson.record"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	explanation := response[semantic.FieldResult].(map[string]any)[semantic.FieldIntentExplanation].(map[string]any)
+	guide := explanation[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	lessonShape := shape[semantic.FieldLesson].(map[string]any)
+	for _, field := range []string{semantic.FieldIntent, semantic.FieldLessonType, semantic.FieldSymptom, semantic.FieldRecommendedPath} {
+		if lessonShape[field] == nil {
+			t.Fatalf("lesson shape should include %s: %#v", field, lessonShape)
+		}
+	}
+	fields := explanation[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldLesson, semantic.FieldIntent),
+		semantic.ParameterPath(semantic.FieldLesson, semantic.FieldLessonType),
+		semantic.ParameterPath(semantic.FieldLesson, semantic.FieldSymptom),
+		semantic.ParameterPath(semantic.FieldLesson, semantic.FieldRecommendedPath),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+}
+
+func TestInvokeIntentExplainRecommendationFeedbackIncludesPublicPayloadGuide(t *testing.T) {
+	app := newTestApp(t)
+	input := `{"contractVersion":"1.0","requestId":"req-intent-explain-recommendation-feedback","locale":"zh-CN","utterance":"解释推荐反馈参数","intent":"intent.explain","parameters":{"intent":"recommendation.feedback"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	explanation := response[semantic.FieldResult].(map[string]any)[semantic.FieldIntentExplanation].(map[string]any)
+	guide := explanation[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	for _, field := range []string{semantic.FieldHouseID, semantic.FieldRecommendationID, semantic.FieldFeedback, semantic.FieldCooldownHours} {
+		if shape[field] == nil {
+			t.Fatalf("payload shape should include %s: %#v", field, shape)
+		}
+	}
+	fields := explanation[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldRecommendationID),
+		semantic.ParameterPath(semantic.FieldFeedback),
+		semantic.ParameterPath(semantic.FieldCooldownHours),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
 	}
 }
 
@@ -287,7 +1206,7 @@ func TestPublicHelpDoesNotAdvertiseLegacyLightingImportPayloads(t *testing.T) {
 				t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 			}
 			output := stdout.String()
-			for _, forbidden := range []string{"\"rooms\":[{\"name\":\"客厅\",\"items\""} {
+			for _, forbidden := range []string{"\"rooms\":[{\"name\":\"客厅\",\"items\"", "HouseMeta", "/v1/meta/import", "deviceTempIdList", "\"typeId\"", "\"resId\"", "\"params\":{\"set\":{\"p\""} {
 				if strings.Contains(output, forbidden) {
 					t.Fatalf("help contains legacy payload marker %q: %s", forbidden, output)
 				}
@@ -952,7 +1871,7 @@ func TestHomeListJSONAccountScopedEmptyListIncludesDiagnostics(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["houseCount"] != float64(0) || response["apiCalls"] != float64(2) || response["source"] != "/v1/house/r/all+/v1/house/r/list" {
+	if response["houseCount"] != float64(0) || response[semantic.FieldAPICalls] != float64(2) || response["source"] != "/v1/house/r/all+/v1/house/r/list" {
 		t.Fatalf("response = %#v", response)
 	}
 	warnings, ok := response["warnings"].([]any)
@@ -1097,7 +2016,7 @@ func TestHomeListJSONIgnoresSelectedHouseWhenAccountListsAreEmpty(t *testing.T) 
 		t.Fatalf("invalid json response: %v", err)
 	}
 	houses := response["houses"].([]any)
-	if len(houses) != 0 || response["houseCount"] != float64(0) || response["apiCalls"] != float64(2) || response["source"] != "/v1/house/r/all+/v1/house/r/list" || response["houseId"] != "" || response["selectedHouseId"] != "house-selected" {
+	if len(houses) != 0 || response["houseCount"] != float64(0) || response[semantic.FieldAPICalls] != float64(2) || response["source"] != "/v1/house/r/all+/v1/house/r/list" || response["houseId"] != "" || response["selectedHouseId"] != "house-selected" {
 		t.Fatalf("response = %#v", response)
 	}
 	warnings, ok := response["warnings"].([]any)

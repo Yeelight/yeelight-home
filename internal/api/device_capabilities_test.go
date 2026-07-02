@@ -34,7 +34,7 @@ func TestDeviceCapabilitiesClientProjectsInstanceSchema(t *testing.T) {
 					"category": "light",
 					"roomId": "room-1",
 					"nodeType": 2,
-					"properties": [{"propId": "power", "desc": "开关", "access": 6, "format": "bool", "type": 1}],
+					"properties": [{"propId": "p", "desc": "开关", "access": 6, "format": "bool", "type": 1}],
 					"subDevices": [{
 						"cid": 2001,
 						"index": 1,
@@ -85,11 +85,14 @@ func TestDeviceCapabilitiesClientProjectsInstanceSchema(t *testing.T) {
 	if result.SchemaStatus != "connected" || result.CapabilitySource != "device_schema_endpoint" {
 		t.Fatalf("result = %#v", result)
 	}
-	if result.Device.ID != "device-1" || result.Device.PID != "17000008" || result.Device.Category != "light" {
+	if result.Device.ID != "device-1" || result.Device.ProductID != "17000008" || result.Device.Category != "light" {
 		t.Fatalf("device = %#v", result.Device)
 	}
 	if len(result.Device.Components) != 1 || result.Device.Components[0].ID != "2001" {
 		t.Fatalf("components = %#v", result.Device.Components)
+	}
+	if len(result.Device.Properties) != 1 || result.Device.Properties[0].ID != "power" {
+		t.Fatalf("device properties must expose standard property names: %#v", result.Device.Properties)
 	}
 	if len(result.Device.Components[0].Properties) != 1 || result.Device.Components[0].Properties[0].ID != "brightness" {
 		t.Fatalf("component properties = %#v", result.Device.Components[0].Properties)

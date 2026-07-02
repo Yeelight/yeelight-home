@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func BuildAreaCreatePayload(houseID string, name string, description string, icon string, parentID string, roomIDs []string) (map[string]any, error) {
@@ -17,39 +19,41 @@ func BuildAreaCreatePayload(houseID string, name string, description string, ico
 		if err != nil {
 			return nil, err
 		}
-		payload["parentId"] = parsed
+		payload[semantic.FieldParentID] = parsed
 	}
 	if len(roomIDs) > 0 {
 		parsed, err := parseIDs(roomIDs, "room id")
 		if err != nil {
 			return nil, err
 		}
-		payload["roomIds"] = parsed
+		payload[semantic.FieldRoomIDs] = parsed
 	}
 	return payload, nil
 }
 
-func BuildGroupCreatePayload(houseID string, name string, roomID string, cid string, deviceIDs []string, description string, icon string) (map[string]any, error) {
+func BuildGroupCreatePayload(houseID string, name string, roomID string, componentID string, deviceIDs []string, description string, icon string) (map[string]any, error) {
 	payload, err := baseCreatePayload(houseID, name, description, icon)
 	if err != nil {
 		return nil, err
 	}
-	parsedRoomID, err := parseID(roomID, "room id")
+	parsedCID, err := parseID(componentID, "component id")
 	if err != nil {
 		return nil, err
 	}
-	parsedCID, err := parseID(cid, "cid")
-	if err != nil {
-		return nil, err
+	if strings.TrimSpace(roomID) != "" {
+		parsedRoomID, err := parseID(roomID, "room id")
+		if err != nil {
+			return nil, err
+		}
+		payload[semantic.FieldRoomID] = parsedRoomID
 	}
-	payload["roomId"] = parsedRoomID
-	payload["cid"] = parsedCID
+	payload[semantic.InternalCloudComponentIDField()] = parsedCID
 	if len(deviceIDs) > 0 {
 		parsed, err := parseIDs(deviceIDs, "device id")
 		if err != nil {
 			return nil, err
 		}
-		payload["deviceIds"] = parsed
+		payload[semantic.FieldDeviceIDs] = parsed
 	}
 	return payload, nil
 }
@@ -62,7 +66,7 @@ func BuildSceneCreatePayload(houseID string, name string, description string, ic
 	if len(details) == 0 {
 		return nil, fmt.Errorf("scene details are required")
 	}
-	payload["details"] = details
+	payload[semantic.FieldDetails] = details
 	return payload, nil
 }
 
@@ -84,19 +88,19 @@ func BuildAutomationCreatePayload(houseID string, name string, startTime string,
 	if len(actions) == 0 {
 		return nil, fmt.Errorf("automation actions are required")
 	}
-	payload["startTime"] = strings.TrimSpace(startTime)
-	payload["endTime"] = strings.TrimSpace(endTime)
-	payload["repeatType"] = repeatType
+	payload[semantic.FieldStartTime] = strings.TrimSpace(startTime)
+	payload[semantic.FieldEndTime] = strings.TrimSpace(endTime)
+	payload[semantic.InternalRepeatTypeField()] = repeatType
 	if value := strings.TrimSpace(repeatValue); value != "" {
-		payload["repeatValue"] = value
+		payload[semantic.InternalRepeatValueField()] = value
 	}
-	payload["params"] = paramsJSON
-	payload["actions"] = actions
+	payload[semantic.InternalAutomationParamsField()] = paramsJSON
+	payload[semantic.FieldActions] = actions
 	if version > 0 {
-		payload["version"] = version
+		payload[semantic.FieldVersion] = version
 	}
 	if status != nil {
-		payload["status"] = *status
+		payload[semantic.FieldStatus] = *status
 	}
 	return payload, nil
 }
@@ -110,14 +114,14 @@ func baseCreatePayload(houseID string, name string, description string, icon str
 		return nil, fmt.Errorf("name is required")
 	}
 	payload := map[string]any{
-		"houseId": parsedHouseID,
-		"name":    strings.TrimSpace(name),
+		semantic.FieldHouseID: parsedHouseID,
+		semantic.FieldName:    strings.TrimSpace(name),
 	}
 	if value := strings.TrimSpace(description); value != "" {
-		payload["desc"] = value
+		payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldDescription)] = value
 	}
 	if value := strings.TrimSpace(icon); value != "" {
-		payload["icon"] = value
+		payload[semantic.FieldIcon] = value
 	}
 	return payload, nil
 }

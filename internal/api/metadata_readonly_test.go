@@ -52,8 +52,15 @@ func TestRunHomeSortListUsesNodeSortedDeviceReadback(t *testing.T) {
 		t.Fatalf("data = %#v", data)
 	}
 	sortRows := data["sort"].([]any)
-	if sortRows[0].(map[string]any)["id"] != "50018330" || sortRows[0].(map[string]any)["resId"] != "50018330" {
+	row := sortRows[0].(map[string]any)
+	if row["id"] != "50018330" || row["targetId"] != "50018330" || row["targetType"] != "device" {
 		t.Fatalf("sort rows not enriched = %#v", sortRows)
+	}
+	if _, ok := row["resId"]; ok {
+		t.Fatalf("sort row leaked resId = %#v", row)
+	}
+	if _, ok := row["typeId"]; ok {
+		t.Fatalf("sort row leaked typeId = %#v", row)
 	}
 }
 
@@ -130,7 +137,7 @@ func TestRunHomeSortListBusinessFailureReturnsPartialEvidence(t *testing.T) {
 		t.Fatalf("data = %#v", result.Data)
 	}
 	evidence, ok := data["backendEvidence"].(map[string]any)
-	if !ok || evidence["controller"] != "SortControllerIotApi#getSort" || evidence["code"] != "400" {
+	if !ok || evidence["status"] != "failed" || evidence["code"] != "400" || evidence["controller"] != nil || evidence["adapter"] != nil {
 		t.Fatalf("evidence = %#v", data["backendEvidence"])
 	}
 }

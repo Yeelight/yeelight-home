@@ -47,16 +47,15 @@ func TestMaintenanceReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 		HouseID:  "house-1",
 		DeviceID: "device-1",
 		Parameters: map[string]any{
-			"pid":            1001,
+			"capabilityPid":  1001,
 			"currentVersion": "1.0",
 			"deviceIds":      []any{"device-1"},
 			"key":            "job-1",
-			"languageCode":   "zh-CN",
-			"type":           "1",
-			"osType":         "1",
+			"languageCode":   "zh",
+			"appType":        "yeelight",
+			"osType":         "android",
 			"firmwareType":   "main",
 			"version":        44,
-			"language":       "zh",
 			"script":         "Hans",
 			"region":         "CN",
 			"nodeId":         "device-1",
@@ -108,7 +107,7 @@ func TestMaintenanceReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 	if strings.Join(gotCalls, "\n") != strings.Join(expectedCalls, "\n") {
 		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
-	if !bytes.Contains(gotBodies[0], []byte(`"pid":1001`)) || bytes.Contains(gotBodies[0], []byte("productId")) {
+	if !bytes.Contains(gotBodies[0], []byte(`"pid":1001`)) || bytes.Contains(gotBodies[0], []byte("capabilityPid")) {
 		t.Fatalf("unexpected listfile body: %s", string(gotBodies[0]))
 	}
 	if !bytes.Contains(gotBodies[4], []byte(`"type":"1"`)) || !bytes.Contains(gotBodies[4], []byte(`"osType":"1"`)) {

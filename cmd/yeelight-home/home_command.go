@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/yeelight/yeelight-home/internal/api"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) runHome(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -68,22 +69,22 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 	}
 	if flags.bool("json") {
 		response := map[string]any{
-			"ok":         true,
-			"profile":    contextInfo.Profile,
-			"region":     contextInfo.Region,
-			"houses":     summary.Houses,
-			"houseCount": summary.HouseCount,
-			"rawShape":   summary.RawShape,
-			"apiCalls":   summary.APICalls,
-			"source":     summary.Source,
-			"houseId":    "",
+			semantic.FieldOK:         true,
+			semantic.FieldProfile:    contextInfo.Profile,
+			semantic.FieldRegion:     contextInfo.Region,
+			semantic.FieldHouses:     summary.Houses,
+			semantic.FieldHouseCount: summary.HouseCount,
+			semantic.FieldRawShape:   summary.RawShape,
+			semantic.FieldAPICalls:   summary.APICalls,
+			semantic.FieldSource:     summary.Source,
+			semantic.FieldHouseID:    "",
 		}
 		if contextInfo.HouseID != "" {
-			response["selectedHouseId"] = contextInfo.HouseID
+			response[semantic.FieldSelectedHouseID] = contextInfo.HouseID
 		}
 		if summary.HouseCount == 0 {
-			response["warnings"] = []string{"empty_account_home_list"}
-			response["next"] = []string{
+			response[semantic.FieldWarnings] = []string{"empty_account_home_list"}
+			response[semantic.FieldNext] = []string{
 				"home list is account-scoped and does not require houseId",
 				"verify the active profile and region with yeelight-home auth status --json",
 				"if you already know a house id, run yeelight-home home select --house-id <id> --region " + contextInfo.Region,
@@ -119,8 +120,8 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 		return exitInternalError
 	}
 	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
-		"region":  flags.string("region", ""),
-		"houseId": houseID,
+		semantic.FieldRegion:  flags.string("region", ""),
+		semantic.FieldHouseID: houseID,
 	})
 	if metadata.Region == "" {
 		metadata.Region = defaultRuntimeRegion
@@ -129,7 +130,7 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
 		return exitInternalError
 	}
-	result := map[string]any{"ok": true, "profile": metadata.Profile, "region": metadata.Region, "houseId": metadata.HouseID}
+	result := map[string]any{semantic.FieldOK: true, semantic.FieldProfile: metadata.Profile, semantic.FieldRegion: metadata.Region, semantic.FieldHouseID: metadata.HouseID}
 	if flags.bool("json") {
 		return writeJSON(stdout, stderr, result)
 	}

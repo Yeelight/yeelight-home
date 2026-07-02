@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type MetadataBatchDeleteKind string
@@ -93,11 +95,11 @@ func (client MetadataBatchDeleteClient) Run(ctx context.Context, request Metadat
 			verifiedEntities = result.VerifiedEntities
 		}
 		results = append(results, map[string]any{
-			"entityType": result.EntityType,
-			"entityId":   result.EntityID,
-			"name":       result.Name,
-			"verified":   result.Verified,
-			"verifiedBy": result.VerifiedBy,
+			semantic.FieldEntityType: result.EntityType,
+			semantic.FieldEntityID:   result.EntityID,
+			semantic.FieldName:       result.Name,
+			semantic.FieldVerified:   result.Verified,
+			semantic.FieldVerifiedBy: result.VerifiedBy,
 		})
 	}
 	return MetadataBatchDeleteResult{

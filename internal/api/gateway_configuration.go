@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type GatewayConfigurationCredentials struct {
@@ -64,7 +66,7 @@ func (client GatewayConfigurationClient) Run(ctx context.Context, request Gatewa
 	if err != nil {
 		return GatewayConfigurationResult{}, err
 	}
-	if firstAnyString(current, "id", "gatewayId", "deviceId") == "" {
+	if firstAnyString(current, semantic.FieldID, semantic.FieldGatewayID, semantic.FieldDeviceID) == "" {
 		return GatewayConfigurationResult{}, fmt.Errorf("gateway %s not found before write", gatewayID)
 	}
 	calls, err = client.validateRoomReferences(ctx, houseID, request.Payload, credentials)
@@ -84,9 +86,9 @@ func (client GatewayConfigurationClient) Run(ctx context.Context, request Gatewa
 	if !verified {
 		return GatewayConfigurationResult{}, fmt.Errorf("gateway.configure write verification mismatch")
 	}
-	name := strings.TrimSpace(stringFromAny(request.Payload["name"]))
+	name := strings.TrimSpace(stringFromAny(request.Payload[semantic.FieldName]))
 	if name == "" {
-		name = firstAnyString(current, "name", "gatewayName", "deviceName")
+		name = firstAnyString(current, semantic.FieldName, semantic.FieldGatewayName, semantic.FieldDeviceName)
 	}
 	return GatewayConfigurationResult{
 		Region:     client.endpoint.Region,
@@ -113,7 +115,7 @@ func (client GatewayConfigurationClient) readGateway(ctx context.Context, houseI
 }
 
 func (client GatewayConfigurationClient) validateRoomReferences(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (int, error) {
-	roomIDs := homeSpaceIDList(payload["roomIds"])
+	roomIDs := homeSpaceIDList(payload[semantic.FieldRoomIDs])
 	if len(roomIDs) == 0 {
 		return 0, nil
 	}
@@ -145,7 +147,7 @@ func gatewayEntityListHas(entities EntityListResult, entityType string, entityID
 }
 
 func (client GatewayConfigurationClient) write(ctx context.Context, houseID string, gatewayID string, payload map[string]any, credentials requestCredentials) error {
-	body := mapWithoutKeys(payload, "houseId", "gatewayId", "id", "capability")
+	body := mapWithoutKeys(payload, semantic.FieldHouseID, semantic.FieldGatewayID, semantic.FieldID, semantic.FieldCapability)
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/gateway/"+pathSegment(gatewayID)+"/w/modify", body, credentials)
 	if err != nil {
 		return err
@@ -191,8 +193,8 @@ func gatewayDetailMatchesPayload(detail map[string]any, payload map[string]any) 
 	if len(detail) == 0 {
 		return false
 	}
-	if expected := strings.TrimSpace(stringFromAny(payload["name"])); expected != "" {
-		if firstAnyString(detail, "name", "gatewayName", "deviceName") != expected {
+	if expected := strings.TrimSpace(stringFromAny(payload[semantic.FieldName])); expected != "" {
+		if firstAnyString(detail, semantic.FieldName, semantic.FieldGatewayName, semantic.FieldDeviceName) != expected {
 			return false
 		}
 	}

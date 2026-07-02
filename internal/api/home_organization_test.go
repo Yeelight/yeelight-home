@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestHomeOrganizationClientAddsFavoriteWithReadAfterWrite(t *testing.T) {
@@ -402,8 +404,46 @@ func TestHomeOrganizationClientConfiguresHomeSortWithArrayBody(t *testing.T) {
 	if len(writeBody) != 1 {
 		t.Fatalf("writeBody = %#v", writeBody)
 	}
+	row := writeBody[0].(map[string]any)
+	if row[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType)] != float64(2) ||
+		row[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)] != float64(50018330) ||
+		row[semantic.FieldRank] != float64(1) {
+		t.Fatalf("writeBody row = %#v", row)
+	}
+	for _, leaked := range []string{semantic.FieldHouseID, semantic.FieldRoomID, semantic.FieldType, semantic.FieldTarget, semantic.FieldTargetType, semantic.FieldTargetID, semantic.FieldTargetName} {
+		if _, ok := row[leaked]; ok {
+			t.Fatalf("sort write body leaked %s: %#v", leaked, row)
+		}
+	}
 	if !result.Verified || result.VerifiedBy != "home.sort.configure_read_after_write" {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestBuildHomeSortAddBodyAcceptsPublicEntityItems(t *testing.T) {
+	body, err := buildHomeSortAddBody([]any{
+		map[string]any{
+			semantic.FieldEntityType: "device",
+			semantic.FieldID:         "50018330",
+			semantic.FieldRank:       1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildHomeSortAddBody error: %v", err)
+	}
+	if len(body) != 1 {
+		t.Fatalf("body = %#v", body)
+	}
+	row := body[0].(map[string]any)
+	if row[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType)] != homeSortGroupTypeDevice ||
+		row[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)] != "50018330" ||
+		row[semantic.FieldRank] != 1 {
+		t.Fatalf("row = %#v", row)
+	}
+	for _, leaked := range []string{semantic.FieldEntityType, semantic.FieldID, semantic.FieldTargetID, semantic.FieldTargetType} {
+		if _, ok := row[leaked]; ok {
+			t.Fatalf("sort write body leaked public helper field %s: %#v", leaked, row)
+		}
 	}
 }
 
@@ -454,6 +494,17 @@ func TestHomeOrganizationClientVerifiesRoomSceneSortWithSpecificEndpoint(t *test
 	}
 	if len(writeBody) != 1 {
 		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	row := writeBody[0].(map[string]any)
+	if row[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType)] != float64(6) ||
+		row[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)] != "1005999" ||
+		row[semantic.FieldRank] != float64(3) {
+		t.Fatalf("writeBody row = %#v", row)
+	}
+	for _, leaked := range []string{semantic.FieldHouseID, semantic.FieldRoomID, semantic.FieldType, semantic.FieldTarget, semantic.FieldTargetType, semantic.FieldTargetID, semantic.FieldTargetName} {
+		if _, ok := row[leaked]; ok {
+			t.Fatalf("sort write body leaked %s: %#v", leaked, row)
+		}
 	}
 	if !result.Verified || result.VerifiedBy != "home.sort.configure_read_after_write" {
 		t.Fatalf("result = %#v", result)
@@ -514,7 +565,7 @@ func TestHomeOrganizationClientReportsVerificationMismatch(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewHomeOrganizationClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client()).Run(context.Background(), HomeOrganizationRequest{
+	result, err := NewHomeOrganizationClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client()).Run(context.Background(), HomeOrganizationRequest{
 		Kind:           HomeOrganizationFavoriteAdd,
 		HouseID:        "200171",
 		VerifyAttempts: 1,
@@ -526,8 +577,11 @@ func TestHomeOrganizationClientReportsVerificationMismatch(t *testing.T) {
 		},
 		Credentials: HomeOrganizationCredentials{Authorization: "secret-token", ClientID: "client-1"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "write verification mismatch") {
-		t.Fatalf("err = %v", err)
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if result.Verified || result.Warning != "write_verification_mismatch" || result.VerifiedBy != "favorite.add_read_after_write" {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

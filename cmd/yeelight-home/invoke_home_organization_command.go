@@ -9,6 +9,7 @@ import (
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
 	"github.com/yeelight/yeelight-home/internal/operation"
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, error) {
@@ -16,7 +17,7 @@ func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Re
 		houseID = requestHouseID
 	}
 	if strings.TrimSpace(houseID) == "" {
-		return configureClarificationResponse(request, "missing_house_id", []string{"parameters.houseId", "homeRef.id", "local profile houseId"}), nil
+		return configureClarificationResponse(request, "missing_house_id", missingHouseIDAcceptedFields()), nil
 	}
 	payload, preconditions, summary, err := buildHomeOrganizationPayload(request, houseID)
 	if err != nil {
@@ -32,6 +33,9 @@ func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Re
 	if err != nil {
 		return contract.Response{}, err
 	}
+	if reason := resolveHomeOrganizationReferences(request.Intent, payload, entities); reason != "" {
+		return homeOrganizationClarificationResponse(request, reason), nil
+	}
 	if reason := validateHomeOrganizationPayload(request.Intent, payload, entities); reason != "" {
 		return homeOrganizationClarificationResponse(request, reason), nil
 	}
@@ -45,9 +49,8 @@ func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Re
 				"warning":            "home_sort_preview_unavailable",
 				"detail":             err.Error(),
 				"plannedItems":       len(payloadItems(payload)),
-				"type":               payload["type"],
-				"target":             payload["target"],
 			}
+			addSemanticSortPayloadPreview(sortPreview, payload)
 			calls = 1
 		}
 		preview = sortPreview
@@ -64,7 +67,11 @@ func (app *app) prepareHomeOrganization(ctx context.Context, request contract.Re
 		previewCalls = calls
 	}
 	now := time.Now()
-	record, err := operation.NewPrepared(profile, region, houseID, request.Intent, request.RequestID, summary, payload, preconditions, now)
+	risk := operation.RiskR2
+	if request.Intent == "favorite.delete" || request.Intent == "favorite.batch_delete" {
+		risk = operation.RiskR3
+	}
+	record, err := operation.NewPreparedWithRisk(profile, region, houseID, request.Intent, request.RequestID, summary, risk, payload, preconditions, now)
 	if err != nil {
 		return contract.Response{}, err
 	}
@@ -138,32 +145,37 @@ func buildHomeSortConfigurePayload(request contract.Request, houseID string) (ma
 	for key, value := range request.Parameters {
 		source[key] = value
 	}
-	source["items"] = items
+	source[semantic.FieldItems] = items
 	payload, warning := api.NormalizeHomeSortPayload(houseID, source)
-	if warning != "" || payload["type"] == nil || payload["target"] == nil {
+	if warning != "" || payload[semantic.FieldType] == nil || payload[semantic.FieldTarget] == nil {
 		return nil, fmt.Errorf("invalid_home_sort_configure_payload")
 	}
-	payload["houseId"] = houseID
-	payload["items"] = items
+	payload[semantic.FieldHouseID] = houseID
+	payload[semantic.FieldItems] = items
 	payload = map[string]any{
-		"houseId": houseID,
-		"type":    payload["type"],
-		"target":  payload["target"],
-		"items":   items,
+		semantic.FieldHouseID: houseID,
+		semantic.FieldType:    payload[semantic.FieldType],
+		semantic.FieldTarget:  payload[semantic.FieldTarget],
+		semantic.FieldItems:   items,
 	}
 	if len(items) == 1 {
 		first, _ := items[0].(map[string]any)
-		for _, key := range []string{"typeId", "resId", "rank", "subIndex"} {
+		for _, key := range []string{
+			semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType),
+			semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID),
+			semantic.FieldRank,
+			semantic.FieldSubIndex,
+		} {
 			if value, ok := first[key]; ok {
 				payload[key] = value
 			}
 		}
 	}
-	if value, ok := source["roomId"]; ok {
-		payload["roomId"] = requestNumberOrString(requestString(value))
-	} else if value, ok := payload["target"]; ok {
-		if sortType, sortOK := requestInt(payload["type"]); sortOK && (sortType == 1 || sortType == 2) {
-			payload["roomId"] = value
+	if value, ok := source[semantic.FieldRoomID]; ok {
+		payload[semantic.FieldRoomID] = requestNumberOrString(requestString(value))
+	} else if value, ok := payload[semantic.FieldTarget]; ok {
+		if sortType, sortOK := requestInt(payload[semantic.FieldType]); sortOK && (sortType == 1 || sortType == 2) {
+			payload[semantic.FieldRoomID] = value
 		}
 	}
 	return payload, nil
@@ -177,10 +189,17 @@ func homeSortPreview(ctx context.Context, endpoint api.Endpoint, houseID string,
 		Locale:          "zh-CN",
 		Utterance:       "preview home sort",
 		Parameters: map[string]any{
-			"houseId": houseID,
+			semantic.FieldHouseID: houseID,
 		},
 	}
-	for _, key := range []string{"typeId", "resId", "roomId", "type", "target", "subIndex"} {
+	for _, key := range []string{
+		semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType),
+		semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID),
+		semantic.FieldRoomID,
+		semantic.FieldType,
+		semantic.FieldTarget,
+		semantic.FieldSubIndex,
+	} {
 		if value, ok := payload[key]; ok {
 			previewRequest.Parameters[key] = value
 		}
@@ -196,12 +215,12 @@ func homeSortPreview(ctx context.Context, endpoint api.Endpoint, houseID string,
 	if result.Partial {
 		return nil, result.APICalls, fmt.Errorf("home sort preview unavailable: %s", strings.Join(result.Warnings, ","))
 	}
-	return map[string]any{
-		"currentItems": homeSortResultItemCount(result.Data),
-		"plannedItems": len(payloadItems(payload)),
-		"type":         payload["type"],
-		"target":       payload["target"],
-	}, result.APICalls, nil
+	preview := map[string]any{
+		semantic.FieldCurrentItems: homeSortResultItemCount(result.Data),
+		semantic.FieldPlannedItems: len(payloadItems(payload)),
+	}
+	addSemanticSortPayloadPreview(preview, payload)
+	return preview, result.APICalls, nil
 }
 
 func homeSortResultItemCount(data any) int {
@@ -209,7 +228,7 @@ func homeSortResultItemCount(data any) int {
 	if !ok {
 		return 0
 	}
-	rows, ok := wrapper["sort"].([]any)
+	rows, ok := wrapper[semantic.FieldSort].([]any)
 	if ok {
 		return len(rows)
 	}
@@ -217,7 +236,7 @@ func homeSortResultItemCount(data any) int {
 }
 
 func requestSortItems(request contract.Request) ([]any, bool) {
-	if rawItems, ok := request.Parameters["items"].([]any); ok && len(rawItems) > 0 {
+	if rawItems, ok := request.Parameters[semantic.FieldItems].([]any); ok && len(rawItems) > 0 {
 		items := make([]any, 0, len(rawItems))
 		for _, raw := range rawItems {
 			item, ok := raw.(map[string]any)
@@ -244,52 +263,228 @@ func normalizeSortItem(source map[string]any) (map[string]any, bool) {
 	if !ok {
 		return nil, false
 	}
-	resID := requestString(firstNonNil(source["resId"], source["entityId"], source["deviceId"], source["sceneId"], source["groupId"], source["roomId"]))
-	rank, ok := requestInt(source["rank"])
-	if resID == "" || !ok {
+	resID := requestString(firstNonNil(source[semantic.FieldTargetID], source[semantic.FieldEntityID], source[semantic.FieldID]))
+	targetName := firstRequestString(source, semantic.FieldTargetName, semantic.FieldEntityName, semantic.FieldName)
+	rank, ok := requestInt(source[semantic.FieldRank])
+	if (resID == "" && targetName == "") || !ok {
 		return nil, false
 	}
 	item := map[string]any{
-		"typeId": typeID,
-		"resId":  requestNumberOrString(resID),
-		"rank":   rank,
+		semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType): typeID,
+		semantic.FieldRank: rank,
 	}
-	if subIndex, ok := requestInt(source["subIndex"]); ok {
-		item["subIndex"] = subIndex
+	if resID != "" {
+		item[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)] = requestNumberOrString(resID)
+	}
+	if targetName != "" {
+		item[semantic.FieldTargetName] = targetName
+	}
+	if subIndex, ok := requestInt(source[semantic.FieldSubIndex]); ok {
+		item[semantic.FieldSubIndex] = subIndex
 	}
 	return item, true
 }
 
 func resourceTypeIDFromRequest(source map[string]any) (int, bool) {
-	if typeID, ok := requestInt(firstNonNil(source["typeId"], source["resourceTypeId"])); ok {
-		if _, valid := entityTypeForGroupType(typeID); valid {
-			return typeID, true
-		}
-		return 0, false
+	entityType := strings.TrimSpace(requestString(firstNonNil(source[semantic.FieldTargetType], source[semantic.FieldEntityType])))
+	if typeID, ok := semanticTargetTypeID(entityType, groupTypeCustom); ok {
+		return typeID, true
 	}
-	entityType := strings.TrimSpace(requestString(firstNonNil(source["entityType"], source["resourceType"], source["type"])))
+	return 0, false
+}
+
+func resolveHomeOrganizationReferences(intent string, payload map[string]any, entities api.EntityListResult) string {
+	switch intent {
+	case "home.sort.configure":
+		if reason := resolveHomeSortTargetReference(payload, entities); reason != "" {
+			return reason
+		}
+		items := payloadItems(payload)
+		if len(items) == 0 {
+			return "invalid_home_sort_configure_payload"
+		}
+		for _, raw := range items {
+			item, ok := raw.(map[string]any)
+			if !ok {
+				return "invalid_home_sort_configure_payload"
+			}
+			inheritHomeSortItemQualifier(payload, item)
+			if reason := resolveTypedResourceName(item, semantic.DomainSort, entities, "invalid_sort_resource_type", "invalid_sort_resource_reference", "ambiguous_sort_resource_reference"); reason != "" {
+				return reason
+			}
+		}
+		if len(items) == 1 {
+			if item, ok := items[0].(map[string]any); ok {
+				for _, key := range []string{
+					semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType),
+					semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID),
+					semantic.FieldRank,
+					semantic.FieldSubIndex,
+				} {
+					if value, ok := item[key]; ok {
+						payload[key] = value
+					}
+				}
+			}
+		}
+	case "favorite.add", "favorite.update", "favorite.delete":
+		if requestString(firstNonNil(payload[semantic.FieldFavoriteID], payload[semantic.FieldID])) != "" {
+			return ""
+		}
+		return resolveTypedResourceName(payload, semantic.DomainFavorite, entities, "invalid_favorite_resource_type", "invalid_favorite_resource_reference", "ambiguous_favorite_resource_reference")
+	case "favorite.batch_add", "favorite.batch_update", "favorite.batch_delete":
+		items := payloadItems(payload)
+		if len(items) == 0 {
+			return "invalid_favorite_batch_payload"
+		}
+		for _, raw := range items {
+			item, ok := raw.(map[string]any)
+			if !ok {
+				return "invalid_favorite_batch_payload"
+			}
+			if item[semantic.FieldFavoriteID] != nil || item[semantic.FieldID] != nil {
+				continue
+			}
+			if reason := resolveTypedResourceName(item, semantic.DomainFavorite, entities, "invalid_favorite_resource_type", "invalid_favorite_resource_reference", "ambiguous_favorite_resource_reference"); reason != "" {
+				return reason
+			}
+		}
+	}
+	return ""
+}
+
+func inheritHomeSortItemQualifier(payload map[string]any, item map[string]any) {
+	sortType, ok := valueInt(payload[semantic.FieldType])
+	if !ok || (sortType != 1 && sortType != 2) {
+		return
+	}
+	for _, key := range []string{semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldTargetRoomName} {
+		if item[key] != nil {
+			continue
+		}
+		if value, ok := payload[key]; ok {
+			item[key] = value
+		}
+	}
+}
+
+func resolveHomeSortTargetReference(payload map[string]any, entities api.EntityListResult) string {
+	sortType, ok := valueInt(payload[semantic.FieldType])
+	if !ok {
+		return "invalid_home_sort_configure_payload"
+	}
+	entityType := ""
+	idField := semantic.FieldTarget
+	switch sortType {
+	case 1, 2:
+		entityType = "room"
+		idField = semantic.FieldRoomID
+	case 4:
+		entityType = "device"
+	case 5:
+		entityType = "area"
+		idField = semantic.FieldAreaID
+	default:
+		return ""
+	}
+	targetIDOrName := firstNonEmptyString(
+		requestString(payload[idField]),
+		requestString(payload[semantic.FieldTarget]),
+	)
+	targetName := firstNonEmptyString(
+		requestString(payload[semantic.FieldTargetName]),
+		requestString(payload[semantic.FieldEntityName]),
+		requestString(payload[semantic.FieldName]),
+		requestString(payload[semantic.FieldRoomName]),
+		requestString(payload[semantic.FieldTargetRoomName]),
+		requestString(payload[semantic.FieldAreaName]),
+		requestString(payload[semantic.FieldDeviceName]),
+	)
+	match, ambiguous := resolveHomeSortTargetEntity(entities, entityType, targetIDOrName, targetName)
+	if ambiguous {
+		return "ambiguous_sort_target_reference"
+	}
+	if match.ID == "" {
+		return "invalid_sort_target_reference"
+	}
+	payload[semantic.FieldTarget] = requestNumberOrString(match.ID)
 	switch entityType {
 	case "room":
-		return groupTypeRoom, true
+		payload[semantic.FieldRoomID] = requestNumberOrString(match.ID)
+	case "area":
+		payload[semantic.FieldAreaID] = requestNumberOrString(match.ID)
 	case "device":
-		return groupTypeDevice, true
-	case "group":
-		return groupTypeCustom, true
-	case "meshgroup", "mesh_group":
-		return groupTypeMesh, true
-	case "scene":
-		return groupTypeScene, true
-	case "automation":
-		return groupTypeAutomation, true
-	default:
-		return 0, false
+		payload[semantic.FieldParentID] = requestNumberOrString(match.ID)
 	}
+	return ""
+}
+
+func resolveHomeSortTargetEntity(entities api.EntityListResult, entityType string, idOrName string, name string) (api.EntitySummary, bool) {
+	if strings.TrimSpace(idOrName) != "" {
+		match, candidates, _ := findEntity(entityGetTarget{id: strings.TrimSpace(idOrName), entityType: entityType}, entities.Entities)
+		if match.ID != "" {
+			return match, false
+		}
+		if len(candidates) > 0 {
+			return api.EntitySummary{}, true
+		}
+		if strings.TrimSpace(name) == "" {
+			name = idOrName
+		}
+	}
+	if strings.TrimSpace(name) == "" {
+		return api.EntitySummary{}, false
+	}
+	match, candidates, _ := findEntity(entityGetTarget{name: strings.TrimSpace(name), entityType: entityType}, entities.Entities)
+	if match.ID != "" {
+		return match, false
+	}
+	return api.EntitySummary{}, len(candidates) > 0
+}
+
+func resolveTypedResourceName(payload map[string]any, domain string, entities api.EntityListResult, typeReason string, referenceReason string, ambiguousReason string) string {
+	typeKey := semantic.InternalField(domain, semantic.FieldTargetType)
+	idKey := semantic.InternalField(domain, semantic.FieldTargetID)
+	typeID, ok := valueInt(payload[typeKey])
+	if !ok {
+		return typeReason
+	}
+	if valueIDString(payload[idKey]) != "" {
+		return ""
+	}
+	targetName := firstNonEmptyString(
+		requestString(payload[semantic.FieldTargetName]),
+		requestString(payload[semantic.FieldEntityName]),
+		requestString(payload[semantic.FieldName]),
+	)
+	if targetName == "" {
+		return referenceReason
+	}
+	entityType, ok := entityTypeForGroupType(typeID)
+	if !ok {
+		return typeReason
+	}
+	target := entityGetTarget{
+		name:       targetName,
+		entityType: entityType,
+		roomID:     firstNonEmptyString(requestString(payload[semantic.FieldRoomID]), requestString(payload[semantic.FieldTargetRoomID])),
+		roomName:   firstNonEmptyString(requestString(payload[semantic.FieldRoomName]), requestString(payload[semantic.FieldTargetRoomName])),
+	}
+	match, candidates, _ := findEntity(target, entities.Entities)
+	if len(candidates) > 1 {
+		return ambiguousReason
+	}
+	if match.ID == "" {
+		return referenceReason
+	}
+	payload[idKey] = requestNumberOrString(match.ID)
+	return ""
 }
 
 func validateHomeOrganizationPayload(intent string, payload map[string]any, entities api.EntityListResult) string {
 	switch intent {
 	case "home.sort.configure":
-		items, ok := payload["items"].([]any)
+		items, ok := payload[semantic.FieldItems].([]any)
 		if !ok || len(items) == 0 {
 			return "invalid_home_sort_configure_payload"
 		}
@@ -298,17 +493,35 @@ func validateHomeOrganizationPayload(intent string, payload map[string]any, enti
 			if !ok {
 				return "invalid_home_sort_configure_payload"
 			}
-			if reason := validateResourceReference(item["typeId"], item["resId"], entities, "invalid_sort_resource_type", "invalid_sort_resource_reference"); reason != "" {
+			if reason := validateResourceReference(
+				item[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetType)],
+				item[semantic.InternalField(semantic.DomainSort, semantic.FieldTargetID)],
+				entities,
+				"invalid_sort_resource_type",
+				"invalid_sort_resource_reference",
+			); reason != "" {
 				return reason
 			}
 		}
 	case "favorite.add", "favorite.update":
-		if reason := validateResourceReference(payload["typeId"], payload["resId"], entities, "invalid_favorite_resource_type", "invalid_favorite_resource_reference"); reason != "" {
+		if reason := validateResourceReference(
+			payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)],
+			payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)],
+			entities,
+			"invalid_favorite_resource_type",
+			"invalid_favorite_resource_reference",
+		); reason != "" {
 			return reason
 		}
 	case "favorite.delete":
-		if payload["typeId"] != nil || payload["resId"] != nil {
-			if reason := validateResourceReference(payload["typeId"], payload["resId"], entities, "invalid_favorite_resource_type", "invalid_favorite_resource_reference"); reason != "" {
+		if payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)] != nil || payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)] != nil {
+			if reason := validateResourceReference(
+				payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)],
+				payload[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)],
+				entities,
+				"invalid_favorite_resource_type",
+				"invalid_favorite_resource_reference",
+			); reason != "" {
 				return reason
 			}
 		}
@@ -322,7 +535,13 @@ func validateHomeOrganizationPayload(intent string, payload map[string]any, enti
 			if !ok {
 				return "invalid_favorite_batch_payload"
 			}
-			if reason := validateResourceReference(item["typeId"], item["resId"], entities, "invalid_favorite_resource_type", "invalid_favorite_resource_reference"); reason != "" {
+			if reason := validateResourceReference(
+				item[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)],
+				item[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)],
+				entities,
+				"invalid_favorite_resource_type",
+				"invalid_favorite_resource_reference",
+			); reason != "" {
 				return reason
 			}
 		}
@@ -336,10 +555,16 @@ func validateHomeOrganizationPayload(intent string, payload map[string]any, enti
 			if !ok {
 				return "invalid_favorite_batch_delete_payload"
 			}
-			if item["typeId"] == nil && item["resId"] == nil {
+			if item[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)] == nil && item[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)] == nil {
 				continue
 			}
-			if reason := validateResourceReference(item["typeId"], item["resId"], entities, "invalid_favorite_resource_type", "invalid_favorite_resource_reference"); reason != "" {
+			if reason := validateResourceReference(
+				item[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetType)],
+				item[semantic.InternalField(semantic.DomainFavorite, semantic.FieldTargetID)],
+				entities,
+				"invalid_favorite_resource_type",
+				"invalid_favorite_resource_reference",
+			); reason != "" {
 				return reason
 			}
 		}
@@ -350,21 +575,64 @@ func validateHomeOrganizationPayload(intent string, payload map[string]any, enti
 func homeOrganizationAcceptedFields(intent string) []string {
 	switch intent {
 	case "home.sort.configure":
-		return []string{"parameters.houseId", "parameters.type", "parameters.target", "parameters.items", "parameters.typeId", "parameters.resId", "parameters.rank"}
+		return append(semanticParameterPaths(semantic.FieldHouseID, semantic.FieldSortType, semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldTargetRoomName, semantic.FieldAreaID, semantic.FieldAreaName, semantic.FieldItems),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRank),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldSubIndex),
+		)
 	case "favorite.add":
-		return []string{"parameters.houseId", "parameters.typeId", "parameters.resId", "parameters.rank"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldTargetType, semantic.FieldEntityType, semantic.FieldTargetID, semantic.FieldEntityID, semantic.FieldTargetName, semantic.FieldEntityName, semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldRank)
 	case "favorite.update":
-		return []string{"parameters.houseId", "parameters.favoriteId", "parameters.typeId", "parameters.resId", "parameters.rank"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldFavoriteID, semantic.FieldTargetType, semantic.FieldEntityType, semantic.FieldTargetID, semantic.FieldEntityID, semantic.FieldTargetName, semantic.FieldEntityName, semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldRank)
 	case "favorite.delete":
-		return []string{"parameters.houseId", "parameters.favoriteId", "parameters.typeId", "parameters.resId", "parameters.rank"}
+		return semanticParameterPaths(semantic.FieldHouseID, semantic.FieldFavoriteID, semantic.FieldTargetType, semantic.FieldEntityType, semantic.FieldTargetID, semantic.FieldEntityID, semantic.FieldTargetName, semantic.FieldEntityName, semantic.FieldRoomID, semantic.FieldRoomName, semantic.FieldRank, semantic.FieldConfirmed)
 	case "favorite.batch_add":
-		return []string{"parameters.houseId", "parameters.items[].typeId", "parameters.items[].resId", "parameters.items[].rank"}
+		return append(semanticParameterPaths(semantic.FieldHouseID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRoomID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRoomName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRank),
+		)
 	case "favorite.batch_update":
-		return []string{"parameters.houseId", "parameters.items[].favoriteId", "parameters.items[].typeId", "parameters.items[].resId", "parameters.items[].rank"}
+		return append(semanticParameterPaths(semantic.FieldHouseID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldFavoriteID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRoomID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRoomName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRank),
+		)
 	case "favorite.batch_delete":
-		return []string{"parameters.houseId", "parameters.items[].favoriteId", "parameters.items[].typeId", "parameters.items[].resId", "parameters.items[].rank"}
+		return append(semanticParameterPaths(semantic.FieldHouseID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldFavoriteID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityType),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldTargetName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldEntityName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRoomID),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRoomName),
+			semanticParameterArrayPath(semantic.FieldItems, semantic.FieldRank),
+			semantic.ParameterPath(semantic.FieldConfirmed),
+		)
 	default:
-		return []string{"parameters.houseId"}
+		return semanticParameterPaths(semantic.FieldHouseID)
 	}
 }
 
@@ -373,7 +641,7 @@ func homeOrganizationClarificationResponse(request contract.Request, reason stri
 }
 
 func payloadItems(payload map[string]any) []any {
-	items, ok := payload["items"].([]any)
+	items, ok := payload[semantic.FieldItems].([]any)
 	if !ok {
 		return nil
 	}

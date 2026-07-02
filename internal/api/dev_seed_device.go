@@ -6,20 +6,22 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type DevSeedDeviceRequest struct {
-	HouseID        string
-	RoomID         string
-	Name           string
-	PID            int
-	DeviceType     int
-	ConnectType    int
-	Bound          bool
-	AllowWriteDev  bool
-	VerifyAttempts int
-	VerifyInterval time.Duration
-	Credentials    DevSeedCredentials
+	HouseID             string
+	RoomID              string
+	Name                string
+	CapabilityProductID int
+	DeviceType          int
+	ConnectType         int
+	Bound               bool
+	AllowWriteDev       bool
+	VerifyAttempts      int
+	VerifyInterval      time.Duration
+	Credentials         DevSeedCredentials
 }
 
 type DevSeedDeviceResult struct {
@@ -91,9 +93,9 @@ func (client DevSeedClient) EnsureDevice(ctx context.Context, request DevSeedDev
 
 func (client DevSeedClient) createDevice(ctx context.Context, request DevSeedDeviceRequest, credentials requestCredentials) (writeProbeResult, error) {
 	houseID := strings.TrimSpace(request.HouseID)
-	pid := request.PID
-	if pid <= 0 {
-		pid = 1
+	productID := request.CapabilityProductID
+	if productID <= 0 {
+		productID = 1
 	}
 	deviceType := request.DeviceType
 	if deviceType <= 0 {
@@ -104,18 +106,18 @@ func (client DevSeedClient) createDevice(ctx context.Context, request DevSeedDev
 		connectType = 0
 	}
 	body := map[string]any{
-		"houseId":     requestNumberOrStringForAPI(houseID),
-		"name":        strings.TrimSpace(request.Name),
-		"pid":         pid,
-		"type":        deviceType,
-		"connectType": connectType,
-		"isBind":      byteFlag(request.Bound),
-		"isVirtual":   1,
-		"did":         time.Now().UnixNano() % 900000000,
-		"mac":         devSeedMAC(),
+		semantic.FieldHouseID: requestNumberOrStringForAPI(houseID),
+		semantic.FieldName:    strings.TrimSpace(request.Name),
+		semantic.InternalField(semantic.DomainProduct, semantic.FieldCapabilityProductID): productID,
+		semantic.FieldType:                        deviceType,
+		semantic.FieldConnectType:                 connectType,
+		semantic.InternalDeviceBindFlagField():    byteFlag(request.Bound),
+		semantic.InternalDeviceVirtualFlagField(): 1,
+		semantic.InternalDeviceIdentifierField():  time.Now().UnixNano() % 900000000,
+		semantic.FieldMAC:                         devSeedMAC(),
 	}
 	if roomID := strings.TrimSpace(request.RoomID); roomID != "" {
-		body["roomId"] = requestNumberOrStringForAPI(roomID)
+		body[semantic.FieldRoomID] = requestNumberOrStringForAPI(roomID)
 	}
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/device/w/insert", body, credentials)
 	if err != nil {

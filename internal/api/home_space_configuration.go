@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type HomeSpaceConfigurationKind string
@@ -113,8 +115,8 @@ func (client HomeSpaceConfigurationClient) preflight(ctx context.Context, kind H
 func (client HomeSpaceConfigurationClient) write(ctx context.Context, kind HomeSpaceConfigurationKind, houseID string, payload map[string]any, credentials requestCredentials) (int, error) {
 	switch kind {
 	case HomeSpaceHomeUpdate:
-		body := mapWithoutKeys(payload, "houseId")
-		body["id"] = requestNumberOrStringForAPI(houseID)
+		body := mapWithoutKeys(payload, semantic.FieldHouseID)
+		body[semantic.FieldID] = requestNumberOrStringForAPI(houseID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/w/modify", body, credentials)
 		if err != nil {
 			return 1, err
@@ -130,7 +132,7 @@ func (client HomeSpaceConfigurationClient) write(ctx context.Context, kind HomeS
 		}
 		calls := 0
 		for _, room := range rooms {
-			body := mapWithoutKeys(room, "roomId", "id")
+			body := mapWithoutKeys(room, semantic.FieldRoomID, semantic.FieldID)
 			response, err := callJSONBody(ctx, client.client, http.MethodPut, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/room/w/create", body, credentials)
 			calls++
 			if err != nil {
@@ -146,7 +148,7 @@ func (client HomeSpaceConfigurationClient) write(ctx context.Context, kind HomeS
 		if err != nil {
 			return 0, err
 		}
-		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/room/w/batchupdate", map[string]any{"rooms": rooms}, credentials)
+		response, err := callJSONBody(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/room/w/batchupdate", map[string]any{semantic.FieldRooms: rooms}, credentials)
 		if err != nil {
 			return 1, err
 		}
@@ -155,10 +157,10 @@ func (client HomeSpaceConfigurationClient) write(ctx context.Context, kind HomeS
 		}
 		return 1, nil
 	case HomeSpaceRoomAreaConfigure:
-		roomID := strings.TrimSpace(stringFromAny(payload["roomId"]))
-		body := mapWithoutKeys(payload, "roomId")
-		body["houseId"] = requestNumberOrStringForAPI(houseID)
-		body["id"] = requestNumberOrStringForAPI(roomID)
+		roomID := strings.TrimSpace(stringFromAny(payload[semantic.FieldRoomID]))
+		body := mapWithoutKeys(payload, semantic.FieldRoomID)
+		body[semantic.FieldHouseID] = requestNumberOrStringForAPI(houseID)
+		body[semantic.FieldID] = requestNumberOrStringForAPI(roomID)
 		response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v2/thing/manage/house/"+pathSegment(houseID)+"/room/"+pathSegment(roomID)+"/w/areas", body, credentials)
 		if err != nil {
 			return 1, err
@@ -241,10 +243,10 @@ func (client HomeSpaceConfigurationClient) verifyHomeUpdate(ctx context.Context,
 	if err != nil {
 		return false, calls, err
 	}
-	if expectedName := strings.TrimSpace(stringFromAny(payload["name"])); expectedName != "" {
-		return firstAnyString(detail, "name", "houseName") == expectedName, calls, nil
+	if expectedName := strings.TrimSpace(stringFromAny(payload[semantic.FieldName])); expectedName != "" {
+		return firstAnyString(detail, semantic.FieldName, semantic.FieldHouseName) == expectedName, calls, nil
 	}
-	return firstAnyString(detail, "id", "houseId") == houseID || len(detail) > 0, calls, nil
+	return firstAnyString(detail, semantic.FieldID, semantic.FieldHouseID) == houseID || len(detail) > 0, calls, nil
 }
 
 func (client HomeSpaceConfigurationClient) verifyRooms(ctx context.Context, houseID string, payload map[string]any, credentials requestCredentials) (bool, EntityListResult, int, error) {
@@ -269,11 +271,11 @@ func (client HomeSpaceConfigurationClient) verifyRoomAreaAccessible(ctx context.
 	if err != nil {
 		return false, entities, calls, err
 	}
-	roomID := strings.TrimSpace(stringFromAny(payload["roomId"]))
+	roomID := strings.TrimSpace(stringFromAny(payload[semantic.FieldRoomID]))
 	if _, ok := findSpaceEntity(entities, "room", roomID); !ok {
 		return false, entities, calls, nil
 	}
-	for _, areaID := range append(homeSpaceIDList(payload["addAreaList"]), homeSpaceIDList(payload["removeAreaList"])...) {
+	for _, areaID := range append(homeSpaceIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldAddAreaIDs)]), homeSpaceIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldRemoveAreaIDs)])...) {
 		if _, ok := findSpaceEntity(entities, "area", areaID); !ok {
 			return false, entities, calls, nil
 		}
@@ -290,7 +292,7 @@ func validateHomeSpaceConfigurationReferences(kind HomeSpaceConfigurationKind, p
 		}
 		seenNames := map[string]bool{}
 		for _, room := range rooms {
-			name := strings.TrimSpace(stringFromAny(room["name"]))
+			name := strings.TrimSpace(stringFromAny(room[semantic.FieldName]))
 			if name == "" {
 				return fmt.Errorf("room name is required")
 			}
@@ -314,7 +316,7 @@ func validateHomeSpaceConfigurationReferences(kind HomeSpaceConfigurationKind, p
 		}
 		seenIDs := map[string]bool{}
 		for _, room := range rooms {
-			roomID := strings.TrimSpace(stringFromAny(firstNonNil(room["roomId"], room["id"])))
+			roomID := strings.TrimSpace(stringFromAny(firstNonNil(room[semantic.FieldRoomID], room[semantic.FieldID])))
 			if roomID == "" {
 				return fmt.Errorf("room id is required")
 			}
@@ -326,22 +328,22 @@ func validateHomeSpaceConfigurationReferences(kind HomeSpaceConfigurationKind, p
 				return fmt.Errorf("duplicate room target")
 			}
 			seenIDs[roomID] = true
-			if strings.TrimSpace(stringFromAny(room["name"])) == "" {
-				room["name"] = current.Name
+			if strings.TrimSpace(stringFromAny(room[semantic.FieldName])) == "" {
+				room[semantic.FieldName] = current.Name
 			}
 			if err := validateHomeSpaceRoomGatewayReferences(room, entities); err != nil {
 				return err
 			}
 		}
 	case HomeSpaceRoomAreaConfigure:
-		roomID := strings.TrimSpace(stringFromAny(payload["roomId"]))
+		roomID := strings.TrimSpace(stringFromAny(payload[semantic.FieldRoomID]))
 		if roomID == "" {
 			return fmt.Errorf("room id is required")
 		}
 		if _, ok := findSpaceEntity(entities, "room", roomID); !ok {
 			return fmt.Errorf("room %s not found before write", roomID)
 		}
-		areaIDs := append(homeSpaceIDList(payload["addAreaList"]), homeSpaceIDList(payload["removeAreaList"])...)
+		areaIDs := append(homeSpaceIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldAddAreaIDs)]), homeSpaceIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldRemoveAreaIDs)])...)
 		if len(areaIDs) == 0 {
 			return fmt.Errorf("room area delta is required")
 		}
@@ -360,12 +362,12 @@ func validateHomeSpaceConfigurationReferences(kind HomeSpaceConfigurationKind, p
 }
 
 func validateHomeSpaceRoomGatewayReferences(room map[string]any, entities EntityListResult) error {
-	if gatewayID := strings.TrimSpace(stringFromAny(room["gatewayDeviceId"])); gatewayID != "" {
+	if gatewayID := strings.TrimSpace(stringFromAny(room[semantic.FieldGatewayDeviceID])); gatewayID != "" {
 		if _, ok := findSpaceEntity(entities, "device", gatewayID); !ok {
 			return fmt.Errorf("device %s not found before write", gatewayID)
 		}
 	}
-	for _, key := range []string{"gatewayIds", "gatewayDeviceIds", "defaultGatewayIds"} {
+	for _, key := range []string{semantic.FieldGatewayIDs, semantic.FieldGatewayDeviceIDs, semantic.FieldDefaultGatewayIDs} {
 		for _, gatewayID := range homeSpaceIDList(room[key]) {
 			if _, ok := findSpaceEntity(entities, "device", gatewayID); !ok {
 				return fmt.Errorf("device %s not found before write", gatewayID)
@@ -376,9 +378,9 @@ func validateHomeSpaceRoomGatewayReferences(room map[string]any, entities Entity
 }
 
 func homeSpaceRoomItems(payload map[string]any) ([]map[string]any, error) {
-	rawItems, ok := payload["rooms"]
+	rawItems, ok := payload[semantic.FieldRooms]
 	if !ok {
-		rawItems = payload["items"]
+		rawItems = payload[semantic.FieldItems]
 	}
 	items, ok := rawItems.([]any)
 	if !ok || len(items) == 0 {
@@ -399,8 +401,8 @@ func homeSpaceRoomItems(payload map[string]any) ([]map[string]any, error) {
 }
 
 func homeSpaceRoomMatches(room map[string]any, entities EntityListResult) bool {
-	roomID := strings.TrimSpace(stringFromAny(firstNonNil(room["roomId"], room["id"])))
-	expectedName := strings.TrimSpace(stringFromAny(room["name"]))
+	roomID := strings.TrimSpace(stringFromAny(firstNonNil(room[semantic.FieldRoomID], room[semantic.FieldID])))
+	expectedName := strings.TrimSpace(stringFromAny(room[semantic.FieldName]))
 	for _, entity := range entities.Entities {
 		if entity.Type != "room" {
 			continue
@@ -450,7 +452,7 @@ func homeSpaceConfigurationItemCount(kind HomeSpaceConfigurationKind, payload ma
 			return len(rooms)
 		}
 	case HomeSpaceRoomAreaConfigure:
-		return len(homeSpaceIDList(payload["addAreaList"])) + len(homeSpaceIDList(payload["removeAreaList"]))
+		return len(homeSpaceIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldAddAreaIDs)])) + len(homeSpaceIDList(payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldRemoveAreaIDs)]))
 	case HomeSpaceHomeUpdate:
 		return 1
 	}

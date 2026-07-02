@@ -75,7 +75,7 @@ func TestInvokeDeviceVirtualCountAndNodeSortedDeviceList(t *testing.T) {
 
 	for _, input := range []string{
 		`{"contractVersion":"1.0","requestId":"req-virtual-count","locale":"zh-CN","utterance":"虚拟设备数量","intent":"device.virtual_count.get","parameters":{"houseId":"house-1"}}`,
-		`{"contractVersion":"1.0","requestId":"req-node-device-list","locale":"zh-CN","utterance":"房间设备排序","intent":"node.sorted_device.list","parameters":{"houseId":"house-1","resType":"1","resId":"room-1"}}`,
+		`{"contractVersion":"1.0","requestId":"req-node-device-list","locale":"zh-CN","utterance":"房间设备排序","intent":"node.sorted_device.list","parameters":{"houseId":"house-1","targetType":"room","targetId":"room-1"}}`,
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -83,7 +83,7 @@ func TestInvokeDeviceVirtualCountAndNodeSortedDeviceList(t *testing.T) {
 		if code != exitOK {
 			t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 		}
-		if strings.Contains(stdout.String(), "token-node-list-secret") || strings.Contains(stdout.String(), "AA:BB:CC") {
+		if strings.Contains(stdout.String(), "token-node-list-secret") || strings.Contains(stdout.String(), "AA:BB:CC") || strings.Contains(stdout.String(), `"resId"`) || strings.Contains(stdout.String(), `"typeId"`) {
 			t.Fatalf("sensitive output leaked: %s", stdout.String())
 		}
 		var response map[string]any

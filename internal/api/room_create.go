@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 type RoomCreateCredentials struct {
@@ -226,14 +228,14 @@ func BuildRoomCreatePayload(houseID string, name string, description string, ico
 		return nil, fmt.Errorf("house id must be numeric for room create")
 	}
 	payload := map[string]any{
-		"houseId": float64(parsedHouseID),
-		"name":    strings.TrimSpace(name),
+		semantic.FieldHouseID: float64(parsedHouseID),
+		semantic.FieldName:    strings.TrimSpace(name),
 	}
 	if value := strings.TrimSpace(description); value != "" {
-		payload["desc"] = value
+		payload[semantic.InternalField(semantic.DomainCommon, semantic.FieldDescription)] = value
 	}
 	if value := strings.TrimSpace(icon); value != "" {
-		payload["icon"] = value
+		payload[semantic.FieldIcon] = value
 	}
 	return payload, nil
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -83,6 +84,46 @@ func TestJSONStoreShardsByProfileRegionAndHouse(t *testing.T) {
 	}
 	if len(loaded) != 1 || loaded[0].ID != "pref-main" {
 		t.Fatalf("loaded house-1 = %#v", loaded)
+	}
+}
+
+func TestJSONStoreConcurrentWritesUseUniqueTempFiles(t *testing.T) {
+	store := NewJSONStore(filepath.Join(t.TempDir(), "memory.json"))
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for index, value := range []string{"prefer_warm", "prefer_dim"} {
+		wg.Add(1)
+		go func(index int, value string) {
+			defer wg.Done()
+			_, err := store.UpsertPreference(PreferenceRecord{
+				Profile:         "default",
+				Region:          "dev",
+				HouseID:         "200171",
+				Kind:            "explicit",
+				Status:          "confirmed",
+				ScopeType:       "profile",
+				PreferenceType:  "lighting_preference",
+				PreferenceValue: value,
+				Evidence:        "concurrent-write-test",
+				CreatedAt:       int64(100 + index),
+				UpdatedAt:       int64(100 + index),
+			})
+			errs <- err
+		}(index, value)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent write error: %v", err)
+		}
+	}
+	loaded, err := store.ListPreferences("default", "dev", "200171")
+	if err != nil {
+		t.Fatalf("ListPreferences error: %v", err)
+	}
+	if len(loaded) == 0 {
+		t.Fatalf("preferences should not be empty after concurrent writes")
 	}
 }
 

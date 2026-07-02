@@ -4,14 +4,16 @@ import (
 	"context"
 	"net/http"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func (client MetadataReadonlyClient) RunThingSchemaList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
-	return client.readThingSchemaPath(ctx, request, "thing.schema.list", "/v1/thing/schema/r/list", map[string]any{"products": nil}, "product_list")
+	return client.readThingSchemaPath(ctx, request, "thing.schema.list", "/v1/thing/schema/r/list", map[string]any{semantic.FieldProducts: nil}, "product_list")
 }
 
 func (client MetadataReadonlyClient) RunThingSchemaDetailList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
-	return client.readThingSchemaPath(ctx, request, "thing.schema.detail.list", "/v1/thing/schema/r/list/detail", map[string]any{"schemas": nil}, "schema_detail_list")
+	return client.readThingSchemaPath(ctx, request, "thing.schema.detail.list", "/v1/thing/schema/r/list/detail", map[string]any{semantic.FieldSchemas: nil}, "schema_detail_list")
 }
 
 func (client MetadataReadonlyClient) RunThingSchemaGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
@@ -19,7 +21,7 @@ func (client MetadataReadonlyClient) RunThingSchemaGet(ctx context.Context, requ
 	if productID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "thing.schema.get", "product_context_missing"), nil
 	}
-	result, err := client.readThingSchemaPath(ctx, request, "thing.schema.get", "/v1/thing/schema/r/"+pathSegment(productID), map[string]any{"schema": nil}, "schema_detail")
+	result, err := client.readThingSchemaPath(ctx, request, "thing.schema.get", "/v1/thing/schema/r/"+pathSegment(productID), map[string]any{semantic.FieldSchema: nil}, "schema_detail")
 	result.Data = withThingSchemaProductID(result.Data, productID)
 	return result, err
 }
@@ -29,7 +31,7 @@ func (client MetadataReadonlyClient) RunThingSchemaEventList(ctx context.Context
 	if productID == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "thing.schema.event.list", "product_context_missing"), nil
 	}
-	result, err := client.readThingSchemaPath(ctx, request, "thing.schema.event.list", "/v1/thing/schema/r/getEvents/"+pathSegment(productID), map[string]any{"events": nil}, "event_list")
+	result, err := client.readThingSchemaPath(ctx, request, "thing.schema.event.list", "/v1/thing/schema/r/getEvents/"+pathSegment(productID), map[string]any{semantic.FieldEvents: nil}, "event_list")
 	result.Data = withThingSchemaProductID(result.Data, productID)
 	return result, err
 }
@@ -39,26 +41,26 @@ func (client MetadataReadonlyClient) RunThingProductInfoBatchGet(ctx context.Con
 	if pids == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "thing.product.info.batch_get", "product_context_missing"), nil
 	}
-	path := "/v2/thing/schema/product/r/info?" + readonlyQueryValues(map[string]any{"pids": pids})
-	result, err := client.readThingSchemaPath(ctx, request, "thing.product.info.batch_get", path, map[string]any{"products": nil}, "schema_detail_list")
+	path := "/v2/thing/schema/product/r/info?" + readonlyQueryValues(map[string]any{semantic.InternalProductIDsField(): pids})
+	result, err := client.readThingSchemaPath(ctx, request, "thing.product.info.batch_get", path, map[string]any{semantic.FieldProducts: nil}, "schema_detail_list")
 	result.Data = withThingSchemaProductID(result.Data, pids)
 	return result, err
 }
 
 func (client MetadataReadonlyClient) RunThingProductInfoV3BatchGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
 	pids := productIDsFromReadonlyRequest(request)
-	version := strings.TrimSpace(firstNonEmpty(stringFromAny(request.Parameters["version"]), stringFromAny(request.Parameters["schemaVersion"])))
+	version := strings.TrimSpace(firstNonEmpty(stringFromAny(request.Parameters[semantic.FieldVersion]), stringFromAny(request.Parameters[semantic.FieldSchemaVersion])))
 	if pids == "" || version == "" {
 		return metadataReadonlyMissingContext(client.endpoint.Region, "thing.product.info.v3.batch_get", "product_version_context_missing"), nil
 	}
-	path := "/v3/thing/schema/product/r/info?" + readonlyQueryValues(map[string]any{"pids": pids, "version": version})
-	result, err := client.readThingSchemaPath(ctx, request, "thing.product.info.v3.batch_get", path, map[string]any{"products": nil}, "schema_detail_list")
+	path := "/v3/thing/schema/product/r/info?" + readonlyQueryValues(map[string]any{semantic.InternalProductIDsField(): pids, semantic.FieldVersion: version})
+	result, err := client.readThingSchemaPath(ctx, request, "thing.product.info.v3.batch_get", path, map[string]any{semantic.FieldProducts: nil}, "schema_detail_list")
 	result.Data = withThingSchemaProductID(result.Data, pids)
 	return result, err
 }
 
 func (client MetadataReadonlyClient) RunThingProductListV3(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
-	return client.readThingSchemaPath(ctx, request, "thing.product.list.v3", "/v3/thing/schema/product/r/list", map[string]any{"products": nil}, "product_list")
+	return client.readThingSchemaPath(ctx, request, "thing.product.list.v3", "/v3/thing/schema/product/r/list", map[string]any{semantic.FieldProducts: nil}, "product_list")
 }
 
 func (client MetadataReadonlyClient) readThingSchemaPath(ctx context.Context, request MetadataReadonlyRequest, capability string, path string, projection map[string]any, shape string) (MetadataReadonlyResult, error) {
@@ -70,11 +72,11 @@ func (client MetadataReadonlyClient) readThingSchemaPath(ctx context.Context, re
 		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, request.HouseID, request.DeviceID, capability, response), nil
 	}
 	data := map[string]any{
-		"schemaVersion": "cloud-v1",
-		"cachePolicy": map[string]any{
-			"scope":      "profile_region_product_schema",
-			"ttlSeconds": 86400,
-			"persistent": false,
+		semantic.FieldSchemaVersion: "cloud-v1",
+		semantic.FieldCachePolicy: map[string]any{
+			semantic.FieldScope:      "profile_region_product_schema",
+			semantic.FieldTTLSeconds: 86400,
+			semantic.FieldPersistent: false,
 		},
 	}
 	for key := range projection {
@@ -93,24 +95,39 @@ func (client MetadataReadonlyClient) readThingSchemaPath(ctx context.Context, re
 
 func productIDFromReadonlyRequest(request MetadataReadonlyRequest) string {
 	return strings.TrimSpace(firstNonEmpty(
-		stringFromAny(request.Parameters["productId"]),
-		stringFromAny(request.Parameters["pid"]),
-		stringFromAny(request.Parameters["productID"]),
-		stringFromAny(request.Parameters["id"]),
+		stringFromAny(request.Parameters[semantic.FieldCapabilityProductID]),
+		stringFromAny(request.Parameters[semantic.FieldID]),
 	))
 }
 
 func productIDsFromReadonlyRequest(request MetadataReadonlyRequest) string {
-	if value := stringFromAny(request.Parameters["pids"]); value != "" {
-		return value
-	}
-	if value := stringFromAny(request.Parameters["productIds"]); value != "" {
-		return value
-	}
-	if value := stringFromAny(request.Parameters["productIDs"]); value != "" {
+	if value := productIDListString(request.Parameters[semantic.FieldCapabilityProductIDs]); value != "" {
 		return value
 	}
 	return productIDFromReadonlyRequest(request)
+}
+
+func productIDListString(value any) string {
+	switch typed := value.(type) {
+	case []any:
+		items := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(stringFromAny(item)); text != "" {
+				items = append(items, text)
+			}
+		}
+		return strings.Join(items, ",")
+	case []string:
+		items := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := strings.TrimSpace(item); text != "" {
+				items = append(items, text)
+			}
+		}
+		return strings.Join(items, ",")
+	default:
+		return strings.TrimSpace(stringFromAny(value))
+	}
 }
 
 func withThingSchemaProductID(data any, productID string) any {
@@ -118,7 +135,7 @@ func withThingSchemaProductID(data any, productID string) any {
 	if !ok {
 		return data
 	}
-	item["productId"] = productID
+	item[semantic.FieldCapabilityProductID] = productID
 	return item
 }
 
@@ -158,38 +175,38 @@ func projectThingSchemaRows(value any, project func(map[string]any) map[string]a
 
 func projectThingSchemaProductSummary(item map[string]any) map[string]any {
 	return compactMap(map[string]any{
-		"pid":         firstAnyString(item, "pid", "productId", "id"),
-		"name":        firstAnyString(item, "name", "productName", "desc"),
-		"category":    firstAnyString(item, "category", "categoryName"),
-		"status":      firstAnyString(item, "status"),
-		"version":     firstAnyString(item, "version", "schemaVersion"),
-		"componentNo": countRows(item["components"]),
-		"eventNo":     countRows(item["events"]),
+		semantic.FieldCapabilityProductID: firstAnyString(item, append(semantic.DeviceCapabilityProductIDFields(), semantic.FieldID)...),
+		semantic.FieldName:                firstAnyString(item, append([]string{semantic.FieldName, semantic.FieldProductName}, semantic.DescriptionFields()...)...),
+		semantic.FieldCategory:            firstAnyString(item, append([]string{semantic.FieldCategory}, semantic.ThingCategoryNameFields()...)...),
+		semantic.FieldStatus:              firstAnyString(item, semantic.FieldStatus),
+		semantic.FieldVersion:             firstAnyString(item, semantic.FieldVersion, semantic.FieldSchemaVersion),
+		semantic.FieldComponentCount:      countRows(item[semantic.FieldComponents]),
+		semantic.FieldEventNo:             countRows(item[semantic.FieldEvents]),
 	})
 }
 
 func projectThingSchemaSummary(item map[string]any) map[string]any {
 	return compactMap(map[string]any{
-		"pid":          firstAnyString(item, "pid", "productId", "id"),
-		"name":         firstAnyString(item, "name", "productName", "desc"),
-		"status":       firstAnyString(item, "status"),
-		"version":      firstAnyString(item, "version", "schemaVersion"),
-		"capability":   firstAnyString(item, "capability"),
-		"eventUnitNum": firstAnyString(item, "eventUnitNum"),
-		"components":   projectComponents(item["components"]),
-		"events":       projectEvents(item["events"]),
-		"actions":      projectActions(firstNonNil(item["supportActions"], item["actions"])),
+		semantic.FieldCapabilityProductID: firstAnyString(item, append(semantic.DeviceCapabilityProductIDFields(), semantic.FieldID)...),
+		semantic.FieldName:                firstAnyString(item, append([]string{semantic.FieldName, semantic.FieldProductName}, semantic.DescriptionFields()...)...),
+		semantic.FieldStatus:              firstAnyString(item, semantic.FieldStatus),
+		semantic.FieldVersion:             firstAnyString(item, semantic.FieldVersion, semantic.FieldSchemaVersion),
+		semantic.FieldCapability:          firstAnyString(item, semantic.FieldCapability),
+		semantic.FieldEventUnitNum:        firstAnyString(item, semantic.FieldEventUnitNum),
+		semantic.FieldComponents:          projectComponents(item[semantic.FieldComponents]),
+		semantic.FieldEvents:              projectEvents(item[semantic.FieldEvents]),
+		semantic.FieldActions:             projectActions(firstNonNil(item[semantic.FieldSupportActions], item[semantic.FieldActions])),
 	})
 }
 
 func projectThingSchemaEventSummary(item map[string]any) map[string]any {
 	return compactMap(map[string]any{
-		"id":     firstAnyString(item, "eventId", "id"),
-		"type":   firstAnyString(item, "eventType", "eventTypeId", "type"),
-		"name":   firstAnyString(item, "name"),
-		"desc":   firstAnyString(item, "desc", "description"),
-		"level":  firstAnyString(item, "level"),
-		"params": projectProperties(item["params"]),
+		semantic.FieldID:          firstAnyString(item, semantic.FieldEventID, semantic.FieldID),
+		semantic.FieldType:        firstAnyString(item, semantic.ThingEventTypeFields()...),
+		semantic.FieldName:        firstAnyString(item, semantic.FieldName),
+		semantic.FieldDescription: firstAnyString(item, semantic.DescriptionFields()...),
+		semantic.FieldLevel:       firstAnyString(item, semantic.FieldLevel),
+		semantic.FieldParameters:  projectProperties(item[semantic.InternalAutomationParamsField()]),
 	})
 }
 
