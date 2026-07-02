@@ -68,6 +68,14 @@ npm install -g yeelight-home
 
 Debian、Ubuntu、Fedora、Arch、Winget、Docker、GHCR、Docker Hub 等渠道见 [INSTALL.md](INSTALL.md) 和 [DISTRIBUTION.md](DISTRIBUTION.md)。
 
+## 让 AI 一句话帮你安装
+
+如果你使用的是可以执行本地终端命令的 AI 助手，可以直接把下面这一句话发给它：
+
+```text
+请从 Yeelight 官方 GitHub Release 或已支持的包管理渠道，为我的系统安装 yeelight-home CLI，然后从 Yeelight 官方 Skill Release 或 ClawHub 来源安装 Yeelight Smart Home Skill。安装后用 `yeelight-home doctor --json` 验证 CLI，并引导我执行 `yeelight-home auth login --qr`；不要要求我把 token、密码或 cookie 粘贴到聊天里。
+```
+
 ## 快速开始
 
 ```sh

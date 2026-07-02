@@ -69,6 +69,14 @@ npm install -g yeelight-home
 
 Debian, Ubuntu, Fedora, Arch, AUR, Snap, Docker, GHCR, Docker Hub, and Winget channel details are maintained in [INSTALL.md](INSTALL.md) and [DISTRIBUTION.md](DISTRIBUTION.md).
 
+## AI-Assisted Install
+
+If you use a local AI assistant that can run terminal commands, paste this single request:
+
+```text
+Install the official yeelight-home CLI for my operating system from Yeelight's GitHub Release or supported package manager, then install the Yeelight Smart Home Skill from the official Yeelight Skill release or ClawHub source. Verify the CLI with `yeelight-home doctor --json`, and guide me through `yeelight-home auth login --qr`; do not ask me to paste tokens, passwords, or cookies into chat.
+```
+
 ## Quick Start
 
 ```sh
