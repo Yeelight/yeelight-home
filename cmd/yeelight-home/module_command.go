@@ -134,6 +134,7 @@ func moduleParameterFlags() map[string]string {
 		"group-id":           semantic.FieldGroupID,
 		"group-ids":          semantic.FieldGroupIDs,
 		"hex":                semantic.FieldHex,
+		"house-id":           semantic.FieldHouseID,
 		"id":                 semantic.FieldID,
 		"ids":                semantic.FieldIDs,
 		"keyword":            semantic.FieldKeyword,

@@ -119,6 +119,43 @@ func TestInvokeOperationLessonRecordRequiresStructuredFields(t *testing.T) {
 	}
 }
 
+func TestOperationLessonModuleCommandHouseFlagScopesLesson(t *testing.T) {
+	app := newTestApp(t)
+	payload := `{"lesson":{"intent":"scene.update","lessonType":"fallback","symptom":"scene.update 返回 invalid_scene_update_payload 后改用 scene.create 成功","recommendedPath":"以后遇到同类 payload 缺口，先读取 scene.detail.get；不可编辑时改用 scene.create 新建替代情景","evidence":"本轮先失败后换路成功","source":"validated_cli","confidence":"high"}}`
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"operation", "lesson-record", "--house-id", "house-1", "--params-json", payload, "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("record exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid record response: %v", err)
+	}
+	result := response["result"].(map[string]any)
+	lesson := result["operationLesson"].(map[string]any)
+	if lesson["houseId"] != "house-1" || lesson["intent"] != "scene.update" {
+		t.Fatalf("lesson result = %#v", result)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = app.run([]string{"operation", "lesson-list", "--house-id", "house-1", "--set", "intent=scene.update", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("list exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var listResponse map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &listResponse); err != nil {
+		t.Fatalf("invalid list response: %v", err)
+	}
+	listResult := listResponse["result"].(map[string]any)
+	items := listResult["operationLessons"].([]any)
+	if listResult["houseId"] != "house-1" || len(items) != 1 {
+		t.Fatalf("list result = %#v", listResult)
+	}
+}
+
 func newLessonFilter(profile string, region string, houseID string, intent string) storage.OperationLessonFilter {
 	return storage.OperationLessonFilter{Profile: profile, Region: region, HouseID: houseID, Intent: intent}
 }
