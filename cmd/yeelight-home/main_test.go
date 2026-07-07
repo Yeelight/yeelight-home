@@ -1237,14 +1237,26 @@ func TestInvokeRejectsUnknownIntent(t *testing.T) {
 	var stderr bytes.Buffer
 
 	code := run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
-	if code != exitInvalidInput {
+	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
 	}
-	if stdout.Len() != 0 {
-		t.Fatalf("stdout = %s", stdout.String())
-	}
-	if !strings.Contains(stderr.String(), "unsupported intent") {
+	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %s", stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid response json: %v", err)
+	}
+	if response["status"] != "not_supported" || response["traceId"] != "invoke-unsupported-intent" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["intent"] != "raw.api.call" || result["safeToRetry"] != false {
+		t.Fatalf("result = %#v", result)
+	}
+	responseError := response["error"].(map[string]any)
+	if responseError["code"] != "unsupported_intent" || !strings.Contains(responseError["message"].(string), "unsupported intent") {
+		t.Fatalf("error = %#v", responseError)
 	}
 }
 

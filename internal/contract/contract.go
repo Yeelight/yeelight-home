@@ -45,11 +45,9 @@ type Error struct {
 }
 
 func DecodeRequest(data []byte) (Request, error) {
-	var request Request
-	decoder := json.NewDecoder(strings.NewReader(string(data)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		return Request{}, fmt.Errorf("decode request: %w", err)
+	request, err := DecodeRequestEnvelope(data)
+	if err != nil {
+		return Request{}, err
 	}
 	if request.ContractVersion != Version {
 		return Request{}, fmt.Errorf("unsupported contractVersion %q", request.ContractVersion)
@@ -65,6 +63,16 @@ func DecodeRequest(data []byte) (Request, error) {
 	}
 	if !isKnownIntent(request.Intent) {
 		return Request{}, fmt.Errorf("unsupported intent %q", request.Intent)
+	}
+	return request, nil
+}
+
+func DecodeRequestEnvelope(data []byte) (Request, error) {
+	var request Request
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return Request{}, fmt.Errorf("decode request: %w", err)
 	}
 	return request, nil
 }

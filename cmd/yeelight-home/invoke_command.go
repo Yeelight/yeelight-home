@@ -27,6 +27,18 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 	}
 	request, err := contract.DecodeRequest(data)
 	if err != nil {
+		if response, ok := invalidSkillRequestResponse(data, err); ok {
+			encoded, encodeErr := contract.EncodeResponse(response)
+			if encodeErr != nil {
+				_, _ = fmt.Fprintf(stderr, "encode SkillResponse: %v\n", encodeErr)
+				return exitInternalError
+			}
+			if _, writeErr := stdout.Write(encoded); writeErr != nil {
+				_, _ = fmt.Fprintf(stderr, "write stdout: %v\n", writeErr)
+				return exitInternalError
+			}
+			return exitOK
+		}
 		_, _ = fmt.Fprintf(stderr, "invalid SkillRequest: %v\n", err)
 		return exitInvalidInput
 	}
@@ -55,6 +67,35 @@ func (app *app) runInvoke(args []string, stdin io.Reader, stdout io.Writer, stde
 		return exitInternalError
 	}
 	return exitOK
+}
+
+func invalidSkillRequestResponse(data []byte, err error) (contract.Response, bool) {
+	message := strings.TrimSpace(fmt.Sprint(err))
+	if !strings.Contains(message, "unsupported intent") {
+		return contract.Response{}, false
+	}
+	request, decodeErr := contract.DecodeRequestEnvelope(data)
+	if decodeErr != nil || strings.TrimSpace(request.RequestID) == "" {
+		return contract.Response{}, false
+	}
+	return contract.Response{
+		ContractVersion: contract.Version,
+		RequestID:       request.RequestID,
+		Status:          "not_supported",
+		UserMessage:     "当前 yeelight-home Runtime 不支持这个 intent。请改用 Skill 随附 intent-catalog.json 中的已支持意图，或先用 intent.explain 查询目标意图的公开契约。",
+		Result: map[string]any{
+			semantic.FieldIntent:      request.Intent,
+			semantic.FieldSafeToRetry: false,
+			semantic.FieldNextAction:  "use_supported_intent_from_catalog_or_call_intent_explain",
+		},
+		Warnings: []string{"unsupported_intent_returned_as_skill_response"},
+		TraceID:  "invoke-unsupported-intent",
+		Metrics:  noAPIMetrics(),
+		Error: &contract.Error{
+			Code:    "unsupported_intent",
+			Message: message,
+		},
+	}, true
 }
 
 func invokeErrorResponse(request contract.Request, err error) contract.Response {
