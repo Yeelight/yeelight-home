@@ -318,6 +318,31 @@ Shows the resolved profile context without exposing token values.
 
 Persists the active profile and optional non-secret profile metadata.
 `,
+	"release": `Usage:
+  yeelight-home release <build|scan|scan-allowlist|stage|manifest|verify-manifest> <path> [output-dir]
+
+Developer release-gate utilities. Public CLI artifacts are produced by the GoReleaser workflow.
+`,
+	"release build": `Usage:
+  yeelight-home release build <root>
+
+Developer smoke utility. Public release artifacts are produced by GoReleaser.
+`,
+	"release manifest": `Usage:
+  yeelight-home release manifest <dir>
+`,
+	"release scan": `Usage:
+  yeelight-home release scan <dir>
+`,
+	"release scan-allowlist": `Usage:
+  yeelight-home release scan-allowlist <allowlist.yaml>
+`,
+	"release stage": `Usage:
+  yeelight-home release stage <allowlist.yaml> <output-dir>
+`,
+	"release verify-manifest": `Usage:
+  yeelight-home release verify-manifest <manifest.json>
+`,
 	"version": `Usage:
   yeelight-home version [--json]
   yeelight-home --version [--json]

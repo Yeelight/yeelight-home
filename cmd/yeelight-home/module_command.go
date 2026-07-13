@@ -62,7 +62,7 @@ func buildModuleRequest(resource string, action string, spec moduleCommandSpec, 
 		parameters[semantic.FieldPower] = action == "on"
 	}
 	if resource == "light" {
-		normalizeLightModuleTarget(parameters)
+		normalizeLightModuleTarget(parameters, flags)
 	}
 	if value := firstFlagValue(flags, spec.TargetIDKeys...); value != "" {
 		parameters[targetParameterName(spec.TargetIDKeys)] = value
@@ -199,7 +199,23 @@ func moduleParameterFlags() map[string]string {
 	}
 }
 
-func normalizeLightModuleTarget(parameters map[string]any) {
+func normalizeLightModuleTarget(parameters map[string]any, flags cliFlags) {
+	for flagName, parameterName := range map[string]string{
+		"area-id":      semantic.FieldAreaID,
+		"device-id":    semantic.FieldDeviceID,
+		"gateway-id":   semantic.FieldGatewayID,
+		"group-id":     semantic.FieldGroupID,
+		"knob-id":      semantic.FieldKnobID,
+		"meshgroup-id": semantic.FieldMeshGroupID,
+		"node-id":      semantic.FieldNodeID,
+		"panel-id":     semantic.FieldPanelID,
+		"room-id":      semantic.FieldRoomID,
+		"target-id":    semantic.FieldTargetID,
+	} {
+		if value := flags.string(flagName, ""); value != "" {
+			parameters[parameterName] = value
+		}
+	}
 	if firstRequestString(parameters, semantic.FieldTargetType, semantic.FieldEntityType, semantic.FieldNodeType, semantic.FieldType) != "" {
 		return
 	}
@@ -208,6 +224,8 @@ func normalizeLightModuleTarget(parameters map[string]any) {
 		parameters[semantic.FieldTargetType] = "area"
 	case firstRequestString(parameters, semantic.FieldGroupID, semantic.FieldMeshGroupID) != "":
 		parameters[semantic.FieldTargetType] = "group"
+	case firstRequestString(parameters, semantic.FieldDeviceID, semantic.FieldDeviceName, semantic.FieldGatewayID, semantic.FieldPanelID, semantic.FieldKnobID) != "":
+		parameters[semantic.FieldTargetType] = "device"
 	case firstRequestString(parameters, semantic.FieldRoomID, semantic.FieldTargetRoomID) != "" && firstRequestString(parameters, semantic.FieldDeviceID, semantic.FieldDeviceName, semantic.FieldGatewayID, semantic.FieldPanelID, semantic.FieldKnobID) == "":
 		parameters[semantic.FieldTargetType] = "room"
 	}

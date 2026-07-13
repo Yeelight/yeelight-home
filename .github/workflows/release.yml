@@ -195,7 +195,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: "~> 2"
+          version: "v2.15.2"
           args: release --clean ${{ env.GORELEASER_SKIP_ARGS }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

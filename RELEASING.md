@@ -7,7 +7,7 @@ This document is for maintainers.
 `yeelight-home` is developed under the monorepo path:
 
 ```text
-yeelight-smart-home/runtime
+yeelight-home
 ```
 
 The public repository is:

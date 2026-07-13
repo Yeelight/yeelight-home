@@ -21,8 +21,9 @@
 ## Repository Layout Policy
 
 - `Yeelight/yeelight-home` is the public Runtime source and release repository.
-- The monorepo remains the source of truth. Do not put a nested `.git` repository under `yeelight-smart-home/runtime`.
-- Runtime-only source is exported by `scripts/export-runtime-public.sh`.
+- The monorepo keeps the same source at the top-level `yeelight-home/` directory; no `yeelight-smart-home/runtime` compatibility directory or source copy exists.
+- `yeelight-home/` may be initialized as a nested Git working tree for GitHub while the outer GitLab repository continues to track its files. Nested `.git` metadata remains local and is ignored by the outer repository.
+- `yeelight-smart-home/scripts/export-runtime-public.sh` remains as a compatibility entry point for validation and mirroring.
 - `Yeelight/homebrew-tap` is a conventional shared Homebrew tap. It is not a runtime source repo, should stay small, and should contain only package manager metadata generated or reviewed for release.
 - `Yeelight/scoop-bucket` is a conventional shared Scoop bucket. Scoop can live in one consolidated Yeelight bucket repository; it does not need one repository per app.
 - Winget does not need a Yeelight organization repository. Publication happens through `microsoft/winget-pkgs`; any fork is only a PR workspace.
@@ -42,6 +43,7 @@ Reasoning:
 - It still does not remove external gates: Winget review, AUR account/SSH, Snapcraft credentials, Docker Hub credentials, and Homebrew/Scoop write tokens are still required.
 - The public workflow automatically skips channels whose secrets are not configured, so optional channels do not block core GitHub Release assets, checksums, install scripts, npm wrapper assets and Linux package assets.
 - GoReleaser v2.16 marks Homebrew formula generation as deprecated. New automation still updates the Formula compatibility path because many users install with `brew install Yeelight/tap/yeelight-home`; it also publishes the Cask path for the recommended newer Homebrew metadata model.
+- While Formula compatibility remains supported, workflows pin GoReleaser `v2.15.2`; GoReleaser 2.17 treats the retained `brews` configuration as a failed check. Upgrade only when the Formula channel is intentionally removed or migrated.
 
 Scope:
 
@@ -68,7 +70,7 @@ Do not create extra Yeelight organization repositories for Winget, Snap, Docker,
 GoReleaser configuration lives at:
 
 ```text
-runtime/.goreleaser.yaml
+.goreleaser.yaml
 ```
 
 The exported public repo includes:

@@ -156,6 +156,21 @@ func TestModuleCommandLightBrightnessAdjustSupportsRoomScope(t *testing.T) {
 	}
 }
 
+func TestBuildModuleRequestLightDeviceFlagCreatesDeviceTarget(t *testing.T) {
+	flags, err := parseFlags([]string{"--device-id", "992001", "--brightness", "50"})
+	if err != nil {
+		t.Fatalf("parseFlags error: %v", err)
+	}
+	request, err := buildModuleRequest("light", "brightness", moduleCommands["light"]["brightness"], flags)
+	if err != nil {
+		t.Fatalf("buildModuleRequest error: %v", err)
+	}
+	target := entityGetTargetFromRequest(request)
+	if target.entityType != "device" || target.id != "992001" {
+		t.Fatalf("target = %#v", target)
+	}
+}
+
 func TestModuleCommandReturnsAuthRequiredWithoutToken(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

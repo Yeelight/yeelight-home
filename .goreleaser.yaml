@@ -85,7 +85,7 @@ nfpms:
     homepage: https://github.com/Yeelight/yeelight-home
     maintainer: Yeelight <support@yeelight.com>
     description: Local Yeelight Home Runtime CLI.
-    license: Proprietary
+    license: Apache-2.0
     formats:
       - deb
       - rpm
@@ -106,7 +106,7 @@ brews:
     directory: Formula
     homepage: https://github.com/Yeelight/yeelight-home
     description: Local Yeelight Home Runtime CLI.
-    license: Proprietary
+    license: Apache-2.0
     test: |
       assert_match "yeelight-home #{version}", shell_output("#{bin}/yeelight-home version")
 
@@ -125,7 +125,7 @@ homebrew_casks:
     directory: Casks
     homepage: https://github.com/Yeelight/yeelight-home
     description: Local Yeelight Home Runtime CLI.
-    license: Proprietary
+    license: Apache-2.0
     hooks:
       post:
         install: |
@@ -146,7 +146,7 @@ scoops:
     directory: bucket
     homepage: https://github.com/Yeelight/yeelight-home
     description: Local Yeelight Home Runtime CLI.
-    license: Proprietary
+    license: Apache-2.0
 
 winget:
   - name: yeelight-home
@@ -156,7 +156,7 @@ winget:
     package_identifier: Yeelight.yeelight-home
     publisher: Yeelight
     package_name: Yeelight Home
-    license: Proprietary
+    license: Apache-2.0
     homepage: https://github.com/Yeelight/yeelight-home
     short_description: Local Yeelight Home Runtime CLI.
     description: Local Runtime CLI used by Yeelight smart-home Skills.
@@ -221,7 +221,7 @@ snapcrafts:
     grade: stable
     confinement: strict
     base: core22
-    license: Proprietary
+    license: Apache-2.0
     publish: true
     apps:
       yeelight-home:
@@ -238,7 +238,7 @@ aurs:
     skip_upload: "{{ if eq (index .Env \"AUR_PUBLISH_ENABLED\") \"1\" }}false{{ else }}true{{ end }}"
     homepage: https://github.com/Yeelight/yeelight-home
     description: Local Yeelight Home Runtime CLI.
-    license: Proprietary
+    license: Apache-2.0
     maintainers:
       - Yeelight <support@yeelight.com>
     private_key: "{{ if index .Env \"AUR_KEY\" }}{{ .Env.AUR_KEY }}{{ else }}disabled{{ end }}"

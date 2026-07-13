@@ -109,6 +109,11 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 			return printCommandHelp(stdout, stderr, "profile")
 		}
 		return app.runProfile(args[1:], stdout, stderr)
+	case "release":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "release")
+		}
+		return runRelease(args[1:], stdout, stderr)
 	default:
 		if _, ok := moduleCommands[args[0]]; ok {
 			if hasSubcommandHelp(args[1:]) {
