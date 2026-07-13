@@ -11,11 +11,15 @@ import (
 
 func stateQueryResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, state api.StateQueryResult) contract.Response {
 	result := map[string]any{
-		semantic.FieldRegion:     entities.Region,
-		semantic.FieldHouseID:    entities.HouseID,
+		semantic.FieldRegion:     firstNonEmptyString(entities.Region, state.Region),
+		semantic.FieldHouseID:    firstNonEmptyString(entities.HouseID, state.HouseID),
 		semantic.FieldEntity:     entitySummaryMap(entity),
 		semantic.FieldSource:     state.Source,
 		semantic.FieldQueryScope: state.QueryScope,
+	}
+	if state.NodeType != "" {
+		result[semantic.FieldNodeType] = state.NodeType
+		result[semantic.FieldNodeID] = state.NodeID
 	}
 	if state.PropertyName != "" {
 		result[semantic.FieldProperty] = semantic.PropertyName(state.PropertyName)
@@ -30,7 +34,7 @@ func stateQueryResponse(request contract.Request, entities api.EntityListResult,
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     fmt.Sprintf("已读取 %s 的当前状态。", entity.Name),
+		UserMessage:     fmt.Sprintf("已读取 %s 的当前状态。", stateQueryEntityName(entity, state)),
 		Result:          result,
 		Warnings:        entities.Warnings,
 		TraceID:         "state-query-readonly",
@@ -53,12 +57,12 @@ func stateQueryClarificationResponse(request contract.Request, reason string, ta
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "clarification_required",
-		UserMessage:     "请明确要查询状态的设备。",
+		UserMessage:     "请明确要查询状态的对象。",
 		Clarification: map[string]any{
 			semantic.FieldReason:               reason,
 			semantic.FieldTarget:               target.toMap(),
 			semantic.FieldCandidates:           preview,
-			semantic.FieldSupportedEntityTypes: []string{"device"},
+			semantic.FieldSupportedEntityTypes: []string{"home", "room", "area", "group", "device"},
 		},
 		Warnings: []string{},
 		TraceID:  "state-query-clarification",
@@ -67,6 +71,26 @@ func stateQueryClarificationResponse(request contract.Request, reason string, ta
 			semantic.FieldCacheHits: 0,
 		},
 	}
+}
+
+func stateQueryEntityName(entity api.EntitySummary, state api.StateQueryResult) string {
+	if strings.TrimSpace(entity.Name) != "" {
+		return entity.Name
+	}
+	switch state.NodeType {
+	case "home":
+		return "全屋"
+	case "room":
+		return "房间"
+	case "area":
+		return "区域"
+	case "group":
+		return "灯组"
+	}
+	if state.NodeID != "" {
+		return state.NodeID
+	}
+	return entity.ID
 }
 
 func stateQuerySensitivePropertyResponse(request contract.Request, property string) contract.Response {

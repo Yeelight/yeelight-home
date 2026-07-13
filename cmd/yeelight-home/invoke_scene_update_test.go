@@ -83,6 +83,44 @@ func TestInvokeSceneUpdateAcceptsSemanticActionAliases(t *testing.T) {
 	}
 }
 
+func TestInvokeSceneUpdatePreservesOpaqueCustomActionFromEditablePayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writeSceneUpdateSeedList(writer, request)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-scene-update-secret", "client-scene-update-1", "200171")
+
+	input := `{"contractVersion":"1.0","requestId":"req-scene-update-custom","locale":"zh-CN","utterance":"保留情景厂商动作","intent":"scene.update","parameters":{"houseId":"200171","sceneId":"scene-1","name":"回家灯光","actions":[{"targetType":"device","targetId":"50018330","targetName":"主灯","rank":0,"custom":{"vendorMode":"slow-breathe","transition":12}}]}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "invoke-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	preview := response["result"].(map[string]any)["preview"].(map[string]any)["payloadPreview"].(map[string]any)
+	action := preview["actions"].([]any)[0].(map[string]any)
+	custom, ok := action["custom"].(map[string]any)
+	if !ok {
+		t.Fatalf("public preview did not preserve custom action: %#v", action)
+	}
+	if custom["vendorMode"] != "slow-breathe" || custom["transition"] != float64(12) {
+		t.Fatalf("custom = %#v", custom)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if strings.Contains(string(encoded), `"params"`) || strings.Contains(string(encoded), `"resId"`) {
+		t.Fatalf("preview leaked internal action fields: %s", string(encoded))
+	}
+}
+
 func TestInvokeSceneUpdateResolvesSceneByCurrentName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")

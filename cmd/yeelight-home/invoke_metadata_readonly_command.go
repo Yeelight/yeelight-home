@@ -103,6 +103,10 @@ func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contrac
 		result, err = client.RunHomeMemberCurrentGet(ctx, readonlyRequest)
 	case "device.detail.get":
 		result, err = client.RunDeviceDetailGet(ctx, readonlyRequest)
+	case "device.complex.get":
+		result, err = client.RunDeviceComplexGet(ctx, readonlyRequest)
+	case "device.shadow.get":
+		result, err = client.RunDeviceShadowGet(ctx, readonlyRequest)
 	case "device.attr.list":
 		result, err = client.RunDeviceAttrList(ctx, readonlyRequest)
 	case "device.list":
@@ -115,8 +119,12 @@ func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contrac
 		result, err = client.RunRoomSearch(ctx, readonlyRequest)
 	case "area.detail.get":
 		result, err = client.RunAreaDetailGet(ctx, readonlyRequest)
+	case "area.list":
+		result, err = client.RunAreaList(ctx, readonlyRequest)
 	case "home.detail.get":
 		result, err = client.RunHomeDetailGet(ctx, readonlyRequest)
+	case "home.property.get":
+		result, err = client.RunHomePropertyGet(ctx, readonlyRequest)
 	case "home.stat.get":
 		result, err = client.RunHomeStatGet(ctx, readonlyRequest)
 	case "geo_area.children.list":
@@ -131,6 +139,8 @@ func (app *app) invokeMetadataCloudReadonly(ctx context.Context, request contrac
 		result, err = client.RunGroupSearch(ctx, readonlyRequest)
 	case "group.detail.get":
 		result, err = client.RunGroupDetailGet(ctx, readonlyRequest)
+	case "group.complex.get":
+		result, err = client.RunGroupComplexGet(ctx, readonlyRequest)
 	case "scene.detail.get":
 		result, err = client.RunSceneDetailGet(ctx, readonlyRequest)
 	case "scene.list":

@@ -439,16 +439,21 @@ func (target entityGetTarget) toMap() map[string]any {
 }
 
 func entityGetTargetFromRequest(request contract.Request) entityGetTarget {
-	targetEntityType := firstRequestString(request.Parameters, semantic.FieldEntityType, semantic.FieldType)
+	targetEntityType := firstRequestString(request.Parameters, semantic.FieldEntityType, semantic.FieldTargetType, semantic.FieldNodeType, semantic.FieldType)
 	if targetEntityType == "" {
 		targetEntityType = entityTypeFromIntent(request.Intent)
 	}
+	if targetEntityType == "" {
+		targetEntityType = entityTypeFromTargetParameters(request.Parameters)
+	}
 	targetID := firstRequestString(request.Parameters, entityIDKeysForType(targetEntityType)...)
+	targetID = firstNonEmptyString(targetID, firstRequestString(request.Parameters, semantic.FieldTargetID, semantic.FieldNodeID))
 	roomID := firstRequestString(request.Parameters, semantic.FieldTargetRoomID, semantic.FieldRoomID)
 	if targetEntityType == "room" {
 		targetID = firstNonEmptyString(targetID, roomID)
 	}
 	targetName := firstRequestString(request.Parameters, entityNameKeysForType(targetEntityType)...)
+	targetName = firstNonEmptyString(targetName, firstRequestString(request.Parameters, semantic.FieldTargetName))
 	roomName := firstRequestString(request.Parameters, semantic.FieldTargetRoomName, semantic.FieldRoomName)
 	if targetEntityType == "room" {
 		targetName = firstNonEmptyString(targetName, roomName)
@@ -567,21 +572,23 @@ func entityTypeFromIntent(intent string) string {
 func entityNameKeysForType(entityType string) []string {
 	switch entityType {
 	case "device":
-		return []string{semantic.FieldDeviceName, semantic.FieldPanelName, semantic.FieldKnobName, semantic.FieldEntityName, semantic.FieldName, semantic.FieldGatewayName, semantic.FieldAreaName, semantic.FieldGroupName, semantic.FieldSceneName, semantic.FieldAutomationName}
+		return []string{semantic.FieldDeviceName, semantic.FieldPanelName, semantic.FieldKnobName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName, semantic.FieldGatewayName, semantic.FieldAreaName, semantic.FieldGroupName, semantic.FieldSceneName, semantic.FieldAutomationName}
 	case "area":
-		return []string{semantic.FieldAreaName, semantic.FieldEntityName, semantic.FieldName}
+		return []string{semantic.FieldAreaName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName}
 	case "group":
-		return []string{semantic.FieldGroupName, semantic.FieldEntityName, semantic.FieldName}
+		return []string{semantic.FieldGroupName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName}
 	case "scene":
 		return []string{semantic.FieldSceneName, semantic.FieldEntityName, semantic.FieldName}
 	case "automation":
 		return []string{semantic.FieldAutomationName, semantic.FieldEntityName, semantic.FieldName}
 	case "gateway":
-		return []string{semantic.FieldGatewayName, semantic.FieldEntityName, semantic.FieldName, semantic.FieldDeviceName}
+		return []string{semantic.FieldGatewayName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName, semantic.FieldDeviceName}
 	case "room":
-		return []string{semantic.FieldRoomName, semantic.FieldTargetRoomName, semantic.FieldEntityName, semantic.FieldName}
+		return []string{semantic.FieldRoomName, semantic.FieldTargetRoomName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName}
+	case "home":
+		return []string{semantic.FieldHomeName, semantic.FieldHouseName, semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldName}
 	default:
-		return []string{semantic.FieldEntityName, semantic.FieldDeviceName, semantic.FieldAreaName, semantic.FieldGroupName, semantic.FieldSceneName, semantic.FieldAutomationName, semantic.FieldGatewayName, semantic.FieldName}
+		return []string{semantic.FieldEntityName, semantic.FieldTargetName, semantic.FieldDeviceName, semantic.FieldAreaName, semantic.FieldGroupName, semantic.FieldSceneName, semantic.FieldAutomationName, semantic.FieldGatewayName, semantic.FieldName}
 	}
 }
 
@@ -601,23 +608,30 @@ func entityIDKeysForType(entityType string) []string {
 		return []string{semantic.FieldGatewayID, semantic.FieldDeviceID, semantic.FieldEntityID, semantic.FieldID}
 	case "room":
 		return []string{semantic.FieldRoomID, semantic.FieldEntityID, semantic.FieldID}
+	case "home":
+		return []string{semantic.FieldHouseID, semantic.FieldEntityID, semantic.FieldID}
 	default:
 		return []string{semantic.FieldEntityID, semantic.FieldDeviceID, semantic.FieldAreaID, semantic.FieldGroupID, semantic.FieldSceneID, semantic.FieldAutomationID, semantic.FieldGatewayID, semantic.FieldID}
 	}
 }
 
 func entityTypeFromTargetParameters(parameters map[string]any) string {
+	hasNamedDeviceTarget := firstRequestString(parameters, semantic.FieldDeviceName, semantic.FieldGatewayName, semantic.FieldPanelName, semantic.FieldKnobName) != ""
 	for _, candidate := range []struct {
 		keys       []string
 		entityType string
 	}{
 		{[]string{semantic.FieldDeviceID, semantic.FieldGatewayID}, "device"},
+		{[]string{semantic.FieldRoomID, semantic.FieldTargetRoomID}, "room"},
 		{[]string{semantic.FieldAreaID}, "area"},
 		{[]string{semantic.FieldGroupID}, "group"},
 		{[]string{semantic.FieldSceneID}, "scene"},
 		{[]string{semantic.FieldAutomationID}, "automation"},
 	} {
 		for _, key := range candidate.keys {
+			if candidate.entityType == "room" && hasNamedDeviceTarget {
+				continue
+			}
 			if firstRequestString(parameters, key) != "" {
 				return candidate.entityType
 			}
@@ -667,6 +681,9 @@ func entityRoomMatches(target entityGetTarget, entity api.EntitySummary, entitie
 	if strings.TrimSpace(target.roomID) == "" && strings.TrimSpace(target.roomName) == "" {
 		return true
 	}
+	if isWholeHomeScopeName(target.roomName) {
+		return true
+	}
 	if entity.Type == "room" {
 		if target.roomID != "" {
 			return entity.ID == target.roomID
@@ -678,6 +695,15 @@ func entityRoomMatches(target entityGetTarget, entity api.EntitySummary, entitie
 	}
 	roomID := roomIDByName(target.roomName, entities)
 	return roomID != "" && entity.RoomID == roomID
+}
+
+func isWholeHomeScopeName(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "全屋", "整屋", "全家", "whole", "whole home", "home":
+		return true
+	default:
+		return false
+	}
 }
 
 func roomIDByName(roomName string, entities []api.EntitySummary) string {

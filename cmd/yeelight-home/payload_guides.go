@@ -18,6 +18,8 @@ func payloadGuideForIntent(intent string) map[string]any {
 		return groupCreatePayloadGuide()
 	case "group.update":
 		return groupUpdatePayloadGuide()
+	case "group.members.update":
+		return groupMembersPayloadGuide()
 	case "room.rename":
 		return roomRenamePayloadGuide()
 	case "device.rename":
@@ -40,6 +42,30 @@ func payloadGuideForIntent(intent string) map[string]any {
 		return lightColorTemperatureAdjustPayloadGuide()
 	case "light.color.set":
 		return lightColorSetPayloadGuide()
+	case "device.property.set":
+		return devicePropertySetPayloadGuide()
+	case "node.property.set":
+		return nodePropertySetPayloadGuide()
+	case "node.property.toggle":
+		return nodePropertyTogglePayloadGuide()
+	case "node.action.execute":
+		return nodeActionExecutePayloadGuide()
+	case "lighting.flow.execute":
+		return lightingFlowExecutePayloadGuide()
+	case "node.properties.set":
+		return nodePropertiesSetPayloadGuide()
+	case "node.property.batch_set":
+		return nodePropertyBatchSetPayloadGuide()
+	case "state.batch.query":
+		return stateBatchQueryPayloadGuide()
+	case "home.property.set":
+		return homePropertySetPayloadGuide()
+	case "home.property.get":
+		return homePropertyGetPayloadGuide()
+	case "panel.click":
+		return panelClickPayloadGuide()
+	case "sensor.event.write":
+		return sensorEventWritePayloadGuide()
 	case "lighting.design.import", "device.slot.create":
 		return lightingDesignImportPayloadGuide()
 	case "panel.button.configure":
@@ -94,6 +120,168 @@ func payloadGuideForIntent(intent string) map[string]any {
 		return recommendationFeedbackPayloadGuide()
 	default:
 		return nil
+	}
+}
+
+func nodePropertyTogglePayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:    "required unless supplied by selected profile",
+			semantic.FieldNodeType:   "required scope type: home, room, area, group, or device",
+			semantic.FieldNodeID:     "required installed node id; for home, houseId can be used",
+			semantic.FieldTargetType: "optional alias for nodeType",
+			semantic.FieldTargetID:   "optional alias for nodeId",
+			semantic.FieldProperty:   "required boolean writable property name such as power",
+			semantic.FieldPayload:    "optional extra endpoint payload",
+			semantic.FieldDuration:   "optional control duration when supported by the property",
+			semantic.FieldDelay:      "optional delayed control value when supported by the property",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldNodeType: "room", semantic.FieldNodeID: "401398", semantic.FieldProperty: "power"},
+		},
+		semantic.FieldNextStep: "Use node.property.toggle only when the UI already knows the exact node and boolean property. Ordinary on/off should prefer light.power.set.",
+	}
+}
+
+func nodeActionExecutePayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:    "required unless supplied by selected profile",
+			semantic.FieldNodeType:   "required scope type: home, room, area, group, or device",
+			semantic.FieldNodeID:     "required installed node id",
+			semantic.FieldActionName: "required actionName from capability evidence",
+			semantic.FieldPayload:    "optional action payload object",
+			semantic.FieldDuration:   "optional duration when the action supports it",
+			semantic.FieldDelay:      "optional delay when the action supports it",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldNodeType: "device", semantic.FieldNodeID: "50018330", semantic.FieldActionName: "set_mode", semantic.FieldPayload: map[string]any{semantic.FieldMode: "auto"}},
+		},
+		semantic.FieldNextStep: "Use actionName from device.complex.get, group.complex.get, entity.capabilities, or thing schema evidence. Do not invent action names from UI labels.",
+	}
+}
+
+func lightingFlowExecutePayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:  "required unless supplied by selected profile",
+			semantic.FieldNodeType: "required scope type: home, room, area, group, or device",
+			semantic.FieldNodeID:   "required installed node id",
+			semantic.FieldFlow:     "required flow payload supported by the selected light capability",
+			semantic.FieldPayload:  "optional alias body when the flow object must be passed as endpoint payload",
+			semantic.FieldDuration: "optional duration",
+			semantic.FieldDelay:    "optional delay",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldNodeType: "group", semantic.FieldNodeID: "8001", semantic.FieldFlow: map[string]any{"mode": "rainbow", semantic.FieldDuration: 30}},
+		},
+		semantic.FieldNextStep: "Use lighting.flow.execute as an advanced lighting effect capability only after the selected node exposes compatible flow support.",
+	}
+}
+
+func nodePropertiesSetPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:    "required unless supplied by selected profile",
+			semantic.FieldNodeType:   "required scope type: home, room, area, group, or device",
+			semantic.FieldNodeID:     "required installed node id",
+			semantic.FieldProperties: "required object of writable propertyName:value pairs",
+			semantic.FieldSet:        "accepted alias for properties",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldNodeType: "room", semantic.FieldNodeID: "401398", semantic.FieldProperties: map[string]any{semantic.FieldPower: true, semantic.FieldBrightness: 80}},
+		},
+		semantic.FieldNextStep: "Only include properties the target exposes as writable. Runtime filters sensitive fields but does not infer missing values.",
+	}
+}
+
+func nodePropertyBatchSetPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:  "required unless supplied by selected profile",
+			semantic.FieldNodeType: "required shared node type for all targets",
+			semantic.FieldNodeIDs:  "required array of installed node ids; ids/deviceIds/roomIds/areaIds/groupIds are accepted aliases",
+			semantic.FieldProperty: "required writable property name",
+			semantic.FieldValue:    "required property value applied to all nodes",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldNodeType: "device", semantic.FieldNodeIDs: []any{"50018330", "50018331"}, semantic.FieldProperty: "power", semantic.FieldValue: false},
+		},
+		semantic.FieldNextStep: "Use batch-set when the caller has exact ids for several nodes of the same nodeType. For mixed entity types, call operation.batch.configure or several direct controls.",
+	}
+}
+
+func stateBatchQueryPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:    "required for non-device scope nodes unless supplied by selected profile",
+			semantic.FieldItems:      "optional array of {nodeType,nodeId,property|properties}; preferred for mixed targets",
+			semantic.FieldNodeType:   "optional shared node type when nodeIds are used",
+			semantic.FieldNodeIDs:    "optional array of ids for shared nodeType",
+			semantic.FieldDeviceIDs:  "optional array of device ids",
+			semantic.FieldProperty:   "optional single property name",
+			semantic.FieldProperties: "optional selected property list",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldItems: []any{
+				map[string]any{semantic.FieldNodeType: "device", semantic.FieldNodeID: "50018330", semantic.FieldProperty: "power"},
+				map[string]any{semantic.FieldNodeType: "room", semantic.FieldNodeID: "401398", semantic.FieldProperties: []any{semantic.FieldPower, semantic.FieldBrightness}},
+			}},
+		},
+		semantic.FieldNextStep: "Use exact ids. This is a fan-out read helper; it should not be used as a write preflight when the UI already has current entity state.",
+	}
+}
+
+func homePropertyGetPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID: "required unless supplied by selected profile",
+		},
+		semantic.FieldExamples: []any{map[string]any{semantic.FieldHouseID: "200171"}},
+		semantic.FieldNextStep: "Home properties are advanced family metadata. Present only user-understandable fields in generated apps.",
+	}
+}
+
+func homePropertySetPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:    "required unless supplied by selected profile",
+			semantic.FieldProperties: "required object of home metadata fields to write",
+			semantic.FieldPayload:    "accepted alias for properties",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldHouseID: "200171", semantic.FieldProperties: map[string]any{semantic.FieldDisplayName: "我的家"}},
+		},
+		semantic.FieldNextStep: "Use only after the product meaning of each property key is known. Do not expose raw metadata editing to ordinary generated-app users.",
+	}
+}
+
+func panelClickPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldPanelID:  "required panel/device resource id; deviceId/targetId/id accepted aliases",
+			semantic.FieldPayload:  "optional click payload supported by the panel endpoint",
+			semantic.FieldButtonID: "optional when the endpoint payload needs a button id",
+			semantic.FieldEventID:  "optional when the endpoint payload needs an event id",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldPanelID: "50018330", semantic.FieldPayload: map[string]any{semantic.FieldButtonEventID: "101"}},
+		},
+		semantic.FieldNextStep: "panel.click simulates hardware click/test behavior. Runtime supports it, but production user templates should default to panel button configuration and scene execution instead.",
+	}
+}
+
+func sensorEventWritePayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldOperation: "create, update, delete/remove, or test",
+			semantic.FieldEventID:   "required for update/delete",
+			semantic.FieldPayload:   "required sensor event payload for create/update/test",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{semantic.FieldOperation: "update", semantic.FieldEventID: "9001", semantic.FieldPayload: map[string]any{semantic.FieldName: "人在触发"}},
+		},
+		semantic.FieldNextStep: "sensor.event.write edits sensor-event configuration. Keep it separate from automation.create/update, which owns user automation rules.",
 	}
 }
 
@@ -263,8 +451,18 @@ func lightPowerSetPayloadGuide() map[string]any {
 	return map[string]any{
 		semantic.FieldPayloadShape: map[string]any{
 			semantic.FieldHouseID:    "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldNodeType:   "optional scope type: home, room, area, group, or device; use with nodeId for direct scope control",
+			semantic.FieldNodeID:     "optional installed node id; for home, houseId is used as the node id",
+			semantic.FieldTargetType: "optional alias for nodeType or entityType",
+			semantic.FieldTargetID:   "optional alias for nodeId or entityId",
+			semantic.FieldEntityType: "optional target entity type: home, room, area, group, or device",
 			semantic.FieldDeviceID:   "optional device id from Runtime evidence; prefer natural target when unique",
 			semantic.FieldDeviceName: "optional device name when the target is unique or qualified by roomName",
+			semantic.FieldAreaID:     "optional area id for direct area light control",
+			semantic.FieldAreaName:   "optional area name for natural area targeting",
+			semantic.FieldGroupID:    "optional group id for direct light group control",
+			semantic.FieldGroupName:  "optional group name for natural group targeting",
+			semantic.FieldRoomID:     "optional room id for direct room light control",
 			semantic.FieldRoomName:   "optional room qualifier for duplicate device names",
 			semantic.FieldPower:      "required boolean power value; true turns on, false turns off",
 			semantic.FieldValue:      "optional alias for power; accepts boolean or on/off wording",
@@ -276,7 +474,7 @@ func lightPowerSetPayloadGuide() map[string]any {
 				semantic.FieldPower:      true,
 			},
 		},
-		semantic.FieldNextStep: "Use light.power.set for direct light on/off. Pass roomName plus deviceName for natural targeting, or a Runtime-returned deviceId when disambiguating.",
+		semantic.FieldNextStep: "Use light.power.set for direct light on/off. It supports home, room, area, group, and device targets; pass nodeType+nodeId when the UI already has exact ids.",
 	}
 }
 
@@ -284,8 +482,18 @@ func lightBrightnessSetPayloadGuide() map[string]any {
 	return map[string]any{
 		semantic.FieldPayloadShape: map[string]any{
 			semantic.FieldHouseID:    "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldNodeType:   "optional scope type: home, room, area, group, or device; use with nodeId for direct scope control",
+			semantic.FieldNodeID:     "optional installed node id; for home, houseId is used as the node id",
+			semantic.FieldTargetType: "optional alias for nodeType or entityType",
+			semantic.FieldTargetID:   "optional alias for nodeId or entityId",
+			semantic.FieldEntityType: "optional target entity type: home, room, area, group, or device",
 			semantic.FieldDeviceID:   "optional device id from Runtime evidence; prefer natural target when unique",
 			semantic.FieldDeviceName: "optional device name when the target is unique or qualified by roomName",
+			semantic.FieldAreaID:     "optional area id for direct area light control",
+			semantic.FieldAreaName:   "optional area name for natural area targeting",
+			semantic.FieldGroupID:    "optional group id for direct light group control",
+			semantic.FieldGroupName:  "optional group name for natural group targeting",
+			semantic.FieldRoomID:     "optional room id for direct room light control",
 			semantic.FieldRoomName:   "optional room qualifier for duplicate device names",
 			semantic.FieldBrightness: "required brightness integer 1..100",
 			semantic.FieldValue:      "optional alias for brightness integer 1..100",
@@ -297,7 +505,7 @@ func lightBrightnessSetPayloadGuide() map[string]any {
 				semantic.FieldBrightness: 60,
 			},
 		},
-		semantic.FieldNextStep: "Use light.brightness.set for direct brightness changes. Do not use behavior.execute for ordinary brightness control.",
+		semantic.FieldNextStep: "Use light.brightness.set for direct brightness changes. It supports home, room, area, group, and device targets when the target supports brightness.",
 	}
 }
 
@@ -305,9 +513,19 @@ func lightBrightnessAdjustPayloadGuide() map[string]any {
 	return map[string]any{
 		semantic.FieldPayloadShape: map[string]any{
 			semantic.FieldHouseID:    "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldNodeType:   "optional scope type: home, room, area, group, or device; use with nodeId for direct scope control",
+			semantic.FieldNodeID:     "optional installed node id; for home, houseId is used as the node id",
+			semantic.FieldTargetType: "optional alias for nodeType or entityType",
+			semantic.FieldTargetID:   "optional alias for nodeId or entityId",
+			semantic.FieldEntityType: "optional target entity type: home, room, area, group, or device",
 			semantic.FieldDeviceID:   "optional device id from Runtime evidence; prefer natural target when unique",
 			semantic.FieldDeviceName: "optional device name when the target is unique or qualified by roomName",
-			semantic.FieldRoomName:   "optional room qualifier for duplicate device names",
+			semantic.FieldAreaID:     "optional area id for direct area light adjustment",
+			semantic.FieldAreaName:   "optional area name for natural area targeting",
+			semantic.FieldGroupID:    "optional group id for direct light group adjustment",
+			semantic.FieldGroupName:  "optional group name for natural group targeting",
+			semantic.FieldRoomID:     "optional room id for direct room light adjustment",
+			semantic.FieldRoomName:   "optional room qualifier or room scope name",
 			semantic.FieldDelta:      "required signed brightness delta such as 10 or -10",
 			semantic.FieldStep:       "optional alias for delta",
 			semantic.FieldValue:      "optional alias for delta",
@@ -318,8 +536,13 @@ func lightBrightnessAdjustPayloadGuide() map[string]any {
 				semantic.FieldDeviceName: "主灯",
 				semantic.FieldDelta:      -10,
 			},
+			map[string]any{
+				semantic.FieldTargetType: "room",
+				semantic.FieldTargetID:   "room-1",
+				semantic.FieldDelta:      -10,
+			},
 		},
-		semantic.FieldNextStep: "Use light.brightness.adjust for relative brightness changes. Use light.brightness.set when the user gives an absolute target value.",
+		semantic.FieldNextStep: "Use light.brightness.adjust for relative brightness changes. It supports home, room, area, group, and device targets when the target supports brightness. Use light.brightness.set when the user gives an absolute target value.",
 	}
 }
 
@@ -327,8 +550,18 @@ func lightColorTemperatureSetPayloadGuide() map[string]any {
 	return map[string]any{
 		semantic.FieldPayloadShape: map[string]any{
 			semantic.FieldHouseID:          "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldNodeType:         "optional scope type: home, room, area, group, or device; use with nodeId for direct scope control",
+			semantic.FieldNodeID:           "optional installed node id; for home, houseId is used as the node id",
+			semantic.FieldTargetType:       "optional alias for nodeType or entityType",
+			semantic.FieldTargetID:         "optional alias for nodeId or entityId",
+			semantic.FieldEntityType:       "optional target entity type: home, room, area, group, or device",
 			semantic.FieldDeviceID:         "optional device id from Runtime evidence; prefer natural target when unique",
 			semantic.FieldDeviceName:       "optional device name when the target is unique or qualified by roomName",
+			semantic.FieldAreaID:           "optional area id for direct area light control",
+			semantic.FieldAreaName:         "optional area name for natural area targeting",
+			semantic.FieldGroupID:          "optional group id for direct light group control",
+			semantic.FieldGroupName:        "optional group name for natural group targeting",
+			semantic.FieldRoomID:           "optional room id for direct room light control",
 			semantic.FieldRoomName:         "optional room qualifier for duplicate device names",
 			semantic.FieldColorTemperature: "required color temperature integer 2700..6500",
 			semantic.FieldValue:            "optional alias for color temperature integer 2700..6500",
@@ -340,7 +573,7 @@ func lightColorTemperatureSetPayloadGuide() map[string]any {
 				semantic.FieldColorTemperature: 3000,
 			},
 		},
-		semantic.FieldNextStep: "Use light.color_temperature.set for direct color-temperature changes. Lower values are warmer; higher values are cooler.",
+		semantic.FieldNextStep: "Use light.color_temperature.set for direct color-temperature changes. It supports home, room, area, group, and device targets when the target supports color temperature.",
 	}
 }
 
@@ -348,9 +581,19 @@ func lightColorTemperatureAdjustPayloadGuide() map[string]any {
 	return map[string]any{
 		semantic.FieldPayloadShape: map[string]any{
 			semantic.FieldHouseID:    "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldNodeType:   "optional scope type: home, room, area, group, or device; use with nodeId for direct scope control",
+			semantic.FieldNodeID:     "optional installed node id; for home, houseId is used as the node id",
+			semantic.FieldTargetType: "optional alias for nodeType or entityType",
+			semantic.FieldTargetID:   "optional alias for nodeId or entityId",
+			semantic.FieldEntityType: "optional target entity type: home, room, area, group, or device",
 			semantic.FieldDeviceID:   "optional device id from Runtime evidence; prefer natural target when unique",
 			semantic.FieldDeviceName: "optional device name when the target is unique or qualified by roomName",
-			semantic.FieldRoomName:   "optional room qualifier for duplicate device names",
+			semantic.FieldAreaID:     "optional area id for direct area color-temperature adjustment",
+			semantic.FieldAreaName:   "optional area name for natural area targeting",
+			semantic.FieldGroupID:    "optional group id for direct light group color-temperature adjustment",
+			semantic.FieldGroupName:  "optional group name for natural group targeting",
+			semantic.FieldRoomID:     "optional room id for direct room color-temperature adjustment",
+			semantic.FieldRoomName:   "optional room qualifier or room scope name",
 			semantic.FieldDelta:      "required signed color-temperature delta such as 300 or -300",
 			semantic.FieldStep:       "optional alias for delta",
 			semantic.FieldValue:      "optional alias for delta",
@@ -361,8 +604,13 @@ func lightColorTemperatureAdjustPayloadGuide() map[string]any {
 				semantic.FieldDeviceName: "吸顶灯",
 				semantic.FieldDelta:      -300,
 			},
+			map[string]any{
+				semantic.FieldTargetType: "group",
+				semantic.FieldTargetID:   "group-1",
+				semantic.FieldDelta:      -300,
+			},
 		},
-		semantic.FieldNextStep: "Use light.color_temperature.adjust for relative warmer/cooler changes. Use light.color_temperature.set for an absolute Kelvin target.",
+		semantic.FieldNextStep: "Use light.color_temperature.adjust for relative warmer/cooler changes. It supports home, room, area, group, and device targets when the target supports color temperature. Use light.color_temperature.set for an absolute Kelvin target.",
 	}
 }
 
@@ -370,8 +618,18 @@ func lightColorSetPayloadGuide() map[string]any {
 	return map[string]any{
 		semantic.FieldPayloadShape: map[string]any{
 			semantic.FieldHouseID:    "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldNodeType:   "optional scope type: home, room, area, group, or device; use with nodeId for direct scope control",
+			semantic.FieldNodeID:     "optional installed node id; for home, houseId is used as the node id",
+			semantic.FieldTargetType: "optional alias for nodeType or entityType",
+			semantic.FieldTargetID:   "optional alias for nodeId or entityId",
+			semantic.FieldEntityType: "optional target entity type: home, room, area, group, or device",
 			semantic.FieldDeviceID:   "optional device id from Runtime evidence; prefer natural target when unique",
 			semantic.FieldDeviceName: "optional device name when the target is unique or qualified by roomName",
+			semantic.FieldAreaID:     "optional area id for direct area light control",
+			semantic.FieldAreaName:   "optional area name for natural area targeting",
+			semantic.FieldGroupID:    "optional group id for direct light group control",
+			semantic.FieldGroupName:  "optional group name for natural group targeting",
+			semantic.FieldRoomID:     "optional room id for direct room light control",
 			semantic.FieldRoomName:   "optional room qualifier for duplicate device names",
 			semantic.FieldColor:      "required RGB integer 0..16777215, hex string, or object with red/green/blue 0..255",
 			semantic.FieldHex:        "optional rrggbb or #rrggbb color string",
@@ -393,7 +651,88 @@ func lightColorSetPayloadGuide() map[string]any {
 				semantic.FieldHex:        "#ff88aa",
 			},
 		},
-		semantic.FieldNextStep: "Use light.color.set only for RGB-capable lights. Prefer color.red/green/blue for natural RGB requests; hex and RGB integer are also accepted.",
+		semantic.FieldNextStep: "Use light.color.set only for RGB-capable targets. It supports home, room, area, group, and device targets when the target supports color.",
+	}
+}
+
+func devicePropertySetPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:    "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldDeviceID:   "optional device id from Runtime evidence; prefer natural target when unique",
+			semantic.FieldDeviceName: "optional device name when the target is unique or qualified by roomName",
+			semantic.FieldRoomName:   "optional room qualifier for duplicate device names",
+			semantic.FieldProperty:   "required public Runtime property name or known alias, such as targetPosition, targetRotaryAngle, airConditionerPower, airConditionerTargetTemperature, airConditionerMode, airConditionerFanSpeed, switchPower, volume, or height",
+			semantic.FieldValue:      "required explicit value to write. Use boolean for power-like properties, integer for percent/temperature/mode/fan/angle properties, and string only when the Runtime property is string-valued. Sensitive properties are blocked.",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{
+				semantic.FieldRoomName:   "客厅",
+				semantic.FieldDeviceName: "南向梦幻帘",
+				semantic.FieldProperty:   "targetPosition",
+				semantic.FieldValue:      50,
+			},
+			map[string]any{
+				semantic.FieldRoomName:   "主卧",
+				semantic.FieldDeviceName: "空调",
+				semantic.FieldProperty:   "airConditionerTargetTemperature",
+				semantic.FieldValue:      26,
+			},
+			map[string]any{
+				semantic.FieldDeviceName: "玄关开关",
+				semantic.FieldProperty:   "switchPower",
+				semantic.FieldValue:      true,
+			},
+		},
+		semantic.FieldNextStep: "Use device.property.set only when the UI or Runtime evidence already has a concrete writable property and explicit value. Do not use it for scenes, automations, sensitive credentials, or vague mood requests.",
+	}
+}
+
+func nodePropertySetPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:    "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldNodeType:   "required unless targets[] or entityType supplies the scope type: home, room, area, group, or device",
+			semantic.FieldNodeID:     "required unless the target can be resolved by name; for home, houseId is used as the node id",
+			semantic.FieldTargetType: "optional alias for nodeType",
+			semantic.FieldTargetID:   "optional alias for nodeId",
+			semantic.FieldEntityType: "optional alias for nodeType",
+			semantic.FieldEntityID:   "optional alias for nodeId",
+			semantic.FieldRoomID:     "optional room id for room scope",
+			semantic.FieldRoomName:   "optional room name for natural room targeting",
+			semantic.FieldAreaID:     "optional area id for area scope",
+			semantic.FieldAreaName:   "optional area name for natural area targeting",
+			semantic.FieldGroupID:    "optional group id for group scope",
+			semantic.FieldGroupName:  "optional group name for natural group targeting",
+			semantic.FieldDeviceID:   "optional device id for device scope",
+			semantic.FieldDeviceName: "optional device name for natural device targeting",
+			semantic.FieldProperty:   "required writable property id or Runtime property alias, such as p, l, ct, c, targetPosition, targetRotaryAngle, switchPower, volume, or height",
+			semantic.FieldValue:      "required explicit value to write. Sensitive properties are blocked.",
+			semantic.FieldDuration:   "optional transition duration when the target property supports it",
+			semantic.FieldDelay:      "optional delayed execution when the target property supports it",
+			semantic.FieldIndex:      "optional sub-device index when the target property supports it",
+			semantic.FieldCategory:   "optional property category when the target property supports it",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{
+				semantic.FieldNodeType: "home",
+				semantic.FieldProperty: "p",
+				semantic.FieldValue:    true,
+			},
+			map[string]any{
+				semantic.FieldNodeType: "room",
+				semantic.FieldNodeID:   "room-1",
+				semantic.FieldProperty: "l",
+				semantic.FieldValue:    70,
+			},
+			map[string]any{
+				semantic.FieldTargetType: "area",
+				semantic.FieldTargetID:   "area-1",
+				semantic.FieldProperty:   "ct",
+				semantic.FieldValue:      3500,
+			},
+		},
+		semantic.FieldNextStep: "Use node.property.set when the UI already knows it is controlling a whole home, room, area, group, or device node. Prefer light.* set intents for ordinary light p/l/ct/c controls when the UI wants semantic light wording.",
 	}
 }
 
@@ -555,7 +894,35 @@ func groupUpdatePayloadGuide() map[string]any {
 				semantic.FieldTargetRoomName: "客厅",
 			},
 		},
-		semantic.FieldNextStep: "Use group.update for group name, description, icon, or room assignment only. Do not send member changes here; create a new group or wait for member-edit support when membership must change.",
+		semantic.FieldNextStep: "Use group.update for group name, description, icon, or room assignment only. Use group.members.update when membership must change.",
+	}
+}
+
+func groupMembersPayloadGuide() map[string]any {
+	return map[string]any{
+		semantic.FieldPayloadShape: map[string]any{
+			semantic.FieldHouseID:           "required unless supplied by selected profile, --house-id, or homeRef",
+			semantic.FieldGroupID:           "required unless groupName/currentName uniquely resolves the group",
+			semantic.FieldGroupName:         "optional current group name for unique target resolution",
+			semantic.FieldDeviceIDs:         "optional complete target member device id list; Runtime computes add/remove from current group detail",
+			semantic.FieldDeviceNames:       "optional complete target member device name list; Runtime resolves unique names and computes add/remove",
+			semantic.FieldAddDeviceIDs:      "optional device ids to add",
+			semantic.FieldAddDeviceNames:    "optional unique device names to add",
+			semantic.FieldRemoveDeviceIDs:   "optional device ids to remove",
+			semantic.FieldRemoveDeviceNames: "optional unique device names to remove",
+		},
+		semantic.FieldExamples: []any{
+			map[string]any{
+				semantic.FieldGroupID:   "4767",
+				semantic.FieldDeviceIDs: []any{"50018330", "50018331", "50018332"},
+			},
+			map[string]any{
+				semantic.FieldGroupName:         "客厅格栅灯组",
+				semantic.FieldAddDeviceNames:    []any{"餐边柜灯"},
+				semantic.FieldRemoveDeviceNames: []any{"旧灯带"},
+			},
+		},
+		semantic.FieldNextStep: "For normal editing UIs, send the complete selected deviceIds or deviceNames list. Runtime will read current group detail, compute the delta, write addDeviceList/removeDeviceList, and verify by group detail.",
 	}
 }
 

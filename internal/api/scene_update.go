@@ -224,13 +224,23 @@ func sceneUpdateMatches(detail map[string]any, payload map[string]any) bool {
 	if len(detail) == 0 {
 		return false
 	}
-	expectedName := strings.TrimSpace(stringFromAny(payload[semantic.FieldName]))
-	if expectedName != "" && firstAnyString(detail, semantic.FieldName, semantic.FieldSceneName) != expectedName {
-		return false
+	for _, field := range []struct {
+		expected []string
+		actual   []string
+	}{
+		{expected: []string{semantic.FieldName, semantic.FieldSceneName}, actual: []string{semantic.FieldName, semantic.FieldSceneName}},
+		{expected: semantic.DescriptionFields(), actual: semantic.DescriptionFields()},
+		{expected: []string{semantic.FieldIcon}, actual: []string{semantic.FieldIcon}},
+		{expected: []string{semantic.FieldRoomID}, actual: []string{semantic.FieldRoomID}},
+	} {
+		expected := firstAnyString(payload, field.expected...)
+		if expected != "" && firstAnyString(detail, field.actual...) != expected {
+			return false
+		}
 	}
 	if expectedDetails, ok := payload[semantic.FieldDetails]; ok {
 		expectedDetails = normalizeSceneUpdateDetails(expectedDetails)
-		return sceneUpdateRowsContainExpected(detail[semantic.FieldDetails], expectedDetails)
+		return sceneUpdateRowsMatchExpected(detail[semantic.FieldDetails], expectedDetails)
 	}
 	return true
 }
@@ -239,13 +249,13 @@ func sceneIDFromDetail(detail map[string]any) string {
 	return firstAnyString(detail, semantic.FieldSceneID, semantic.FieldID)
 }
 
-func sceneUpdateRowsContainExpected(actual any, expected any) bool {
+func sceneUpdateRowsMatchExpected(actual any, expected any) bool {
 	expectedRows := sceneUpdateRowsFromData(expected)
 	if len(expectedRows) == 0 {
 		return false
 	}
 	actualRows := sceneUpdateRowsFromData(actual)
-	if len(actualRows) == 0 {
+	if len(actualRows) != len(expectedRows) {
 		return false
 	}
 	for _, expectedRow := range expectedRows {

@@ -18,6 +18,8 @@ func (app *app) previewDirectWriteIntent(ctx context.Context, request contract.R
 		return app.previewLightPropertySet(ctx, request, endpoint, profile, region, houseID, authorization, clientID, lightColorTemperatureSpec())
 	case "light.color.set":
 		return app.previewLightPropertySet(ctx, request, endpoint, profile, region, houseID, authorization, clientID, lightColorSpec())
+	case "device.property.set":
+		return app.previewDevicePropertySet(ctx, request, endpoint, profile, region, houseID, authorization, clientID)
 	case "lighting.experience.apply":
 		action, ok := explicitExperienceAction(request)
 		if !ok {
@@ -48,6 +50,40 @@ func (app *app) previewDirectWriteIntent(ctx context.Context, request contract.R
 	default:
 		return contract.Response{}, false, nil
 	}
+}
+
+func (app *app) previewDevicePropertySet(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, bool, error) {
+	target := entityGetTargetFromRequest(request)
+	if target.id == "" && target.name == "" {
+		return devicePropertySetClarificationResponse(request, "missing_target", target, nil, 0), true, nil
+	}
+	propertyID := devicePropertySetPropertyName(request)
+	if propertyID == "" {
+		return devicePropertySetClarificationResponse(request, "missing_property", target, nil, 0), true, nil
+	}
+	if semantic.PropertySensitive(propertyID) {
+		return devicePropertySetSensitivePropertyResponse(request, propertyID), true, nil
+	}
+	value, ok := request.Parameters[semantic.FieldValue]
+	if !ok {
+		return devicePropertySetClarificationResponse(request, "missing_value", target, nil, 0), true, nil
+	}
+	if requestHouseID := requestHouseID(request); requestHouseID != "" {
+		houseID = requestHouseID
+	}
+	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
+	if err != nil {
+		return contract.Response{}, true, err
+	}
+	if response, handled := directPreviewEntityClarification(request, resolved, target, "device", devicePropertySetClarificationResponse); handled {
+		return response, true, nil
+	}
+	return directWritePreviewResponse(request, resolved.Entities, resolved.Match, map[string]any{
+		semantic.FieldIntent:   request.Intent,
+		semantic.FieldProperty: semantic.PropertyName(propertyID),
+		semantic.FieldValue:    value,
+		semantic.FieldCommand:  "set",
+	}), true, nil
 }
 
 func (app *app) previewLightPropertySet(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec lightPropertySpec) (contract.Response, bool, error) {

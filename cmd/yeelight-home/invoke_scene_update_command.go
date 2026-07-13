@@ -163,6 +163,7 @@ func sceneUpdateAcceptedFields() []string {
 		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetID),
 		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldTargetName),
 		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldSet),
+		semanticParameterArrayPath(semantic.FieldActions, semantic.FieldCustom),
 	)
 }
 

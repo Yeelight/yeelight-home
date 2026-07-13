@@ -38,6 +38,7 @@ var propertyMappings = []PropertyMapping{
 	{ID: "ve", PublicName: "ventilation", Description: "换气档位：0: 关闭, 1: 低档, 2: 中档, 3: 高档", ValueType: "enum", Aliases: []string{"换气档位：0: 关闭, 1: 低档, 2: 中档, 3: 高档"}},
 	{ID: "fa", PublicName: "fan", Description: "风扇档位：0: 关闭, 1: 低档, 2: 中档, 3: 高档", ValueType: "enum", Aliases: []string{"风扇档位：0: 关闭, 1: 低档, 2: 中档, 3: 高档"}},
 	{ID: "he", PublicName: "heat", Description: "加热档位：0: 关闭, 1: 低档, 2: 中档, 3: 高档", ValueType: "enum", Aliases: []string{"加热档位：0: 关闭, 1: 低档, 2: 中档, 3: 高档"}},
+	{ID: "h", PublicName: "humidity", Description: "当前湿度", ValueType: "int", Aliases: []string{"humidity", "current humidity", "湿度", "当前湿度", "当前湿度 （湿度传感器）"}},
 	{ID: "t", PublicName: "currentTemperature", Description: "当前温度", ValueType: "int", Aliases: []string{"temperature", "current temperature", "温度", "当前温度", "当前温度 （温度传感器）"}},
 	{ID: "tgt", PublicName: "targetTemperature", Description: "目标温度", ValueType: "int", Aliases: []string{"target temperature", "目标温度"}},
 	{ID: "mppm", PublicName: "musicPlayerPlayMode", Description: "音乐播放器播放模式", ValueType: "int", Aliases: []string{"music player play mode", "音乐播放器播放模式"}},

@@ -37,7 +37,7 @@ func TestInvokeSceneExecuteRunsScene(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-scene-secret", "client-scene-1", "house-1")
 
-	input := `{"contractVersion":"1.0","requestId":"req-scene-1","locale":"zh-CN","utterance":"执行晚安","intent":"scene.execute","targets":[{"entityType":"scene","id":"scene-1"}]}`
+	input := `{"contractVersion":"1.0","requestId":"req-scene-1","locale":"zh-CN","utterance":"执行晚安","intent":"scene.execute","targets":[{"entityType":"scene","id":"scene-1"}],"parameters":{"roomName":"全屋"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -70,6 +70,61 @@ func TestInvokeSceneExecuteRunsScene(t *testing.T) {
 	entity, ok := result["entity"].(map[string]any)
 	if !ok || entity["id"] != "scene-1" || entity["type"] != "scene" {
 		t.Fatalf("entity = %#v", result["entity"])
+	}
+}
+
+func TestInvokeSceneExecuteUsesDocumentedFallbackWhenOpenControlHasNoGateway(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"scene-1","name":"晚安"}]}}`))
+		case "/apis/iot/v1/open/control/house/house-1/control/w/scenes/scene-1":
+			_, _ = writer.Write([]byte(`{"success":false,"code":1611,"message":"当前情景无有效网关"}`))
+		case "/apis/iot/v1/controll/device/w/scene/scene-1":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-scene-fallback-secret", "client-scene-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-scene-fallback","locale":"zh-CN","utterance":"执行晚安","intent":"scene.execute","targets":[{"entityType":"scene","id":"scene-1"}]}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "token-scene-fallback-secret") || strings.Contains(stderr.String(), "token-scene-fallback-secret") {
+		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "scene-execute-command" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["source"] != "control_device_scene_endpoint" {
+		t.Fatalf("result = %#v", result)
+	}
+	if _, ok := result["rawShape"]; ok {
+		t.Fatalf("scene.execute public result leaked rawShape: %#v", result)
+	}
+	if len(gotCalls) != 8 {
+		t.Fatalf("gotCalls = %#v", gotCalls)
 	}
 }
 

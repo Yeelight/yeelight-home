@@ -20,7 +20,7 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 		case "/apis/iot/v2/thing/manage/house/1001/group/r/info/2/5":
 			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":21,"houseId":1001,"name":"一楼","roomId":10,"componentId":2,"secret":"not-allowed"},{"id":22,"houseId":1001,"name":"二楼","roomId":12,"componentId":2,"secret":"not-allowed"}]}}`))
 		case "/apis/iot/v2/thing/manage/house/1001/group/22/r/info":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":22,"houseId":1001,"name":"二楼","details":[{"deviceId":"device-1"}],"localToken":"not-allowed"}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"id":22,"houseId":1001,"name":"二楼","desc":"全屋二楼照明","icon":"layers","roomId":12,"cid":5,"details":[{"deviceId":"device-1"}],"localToken":"not-allowed"}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -73,6 +73,10 @@ func TestGroupReadonlyAdaptersReturnRedactedProjection(t *testing.T) {
 	first := search.Data.(map[string]any)["groups"].([]any)[0].(map[string]any)
 	if first["id"] != "22" || first["name"] != "二楼" {
 		t.Fatalf("first group = %#v", first)
+	}
+	detailData := detail.Data.(map[string]any)["detail"].(map[string]any)
+	if detailData["description"] != "全屋二楼照明" || detailData["icon"] != "layers" || detailData["roomId"] != "12" || detailData["componentId"] != "5" {
+		t.Fatalf("detail metadata = %#v", detailData)
 	}
 }
 

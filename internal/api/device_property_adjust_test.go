@@ -79,3 +79,67 @@ func TestDevicePropertyAdjustClientReportsBusinessFailureWithoutTokenLeak(t *tes
 		t.Fatalf("token leaked in error: %v", err)
 	}
 }
+
+func TestNodePropertyAdjustClientAdjustsRoomProperty(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.Method != http.MethodPost || request.URL.Path != "/apis/iot/v1/controll/device/1/room-1/w/properties/l/adjust" {
+			http.NotFound(writer, request)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+	}))
+	defer server.Close()
+
+	client := NewNodePropertyAdjustClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.Run(context.Background(), NodePropertyAdjustRequest{
+		HouseID:      "house-1",
+		NodeType:     "room",
+		NodeID:       "room-1",
+		PropertyName: "l",
+		Value:        -10,
+		Credentials: NodePropertyAdjustCredentials{
+			Authorization: "control-secret-token",
+			ClientID:      "client-control-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if gotBody["value"] != float64(-10) {
+		t.Fatalf("body = %#v", gotBody)
+	}
+	if result.Region != "dev" || result.HouseID != "house-1" || result.NodeType != "room" || result.NodeTypeID != "1" || result.NodeID != "room-1" || result.PropertyName != "l" || result.Command != "adjust" || result.Source != "node_property_adjust_endpoint" || result.APICalls != 1 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestNodePropertyAdjustClientReportsBusinessFailureWithoutTokenLeak(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"success":false,"code":"40021","message":"invalid node adjust","data":null}`))
+	}))
+	defer server.Close()
+
+	client := NewNodePropertyAdjustClient(Endpoint{Region: "dev", BaseURL: server.URL}, server.Client())
+	_, err := client.Run(context.Background(), NodePropertyAdjustRequest{
+		NodeType:     "room",
+		NodeID:       "room-1",
+		PropertyName: "l",
+		Value:        -10,
+		Credentials:  NodePropertyAdjustCredentials{Authorization: "control-secret-token"},
+	})
+	if err == nil {
+		t.Fatal("expected business failure")
+	}
+	if !strings.Contains(err.Error(), "code=40021") || !strings.Contains(err.Error(), "message=invalid node adjust") {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(err.Error(), "control-secret-token") {
+		t.Fatalf("token leaked in error: %v", err)
+	}
+}

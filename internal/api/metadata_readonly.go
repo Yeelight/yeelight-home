@@ -453,11 +453,33 @@ func projectKnobDetail(data any) map[string]any {
 	if actions, ok := mapListFromAny(firstCloudAny(item, semantic.FieldActions, semantic.FieldDetails)); ok {
 		publicActions := make([]any, 0, len(actions))
 		for _, action := range actions {
-			publicActions = append(publicActions, semantic.ToPublicAction(action))
+			publicActions = append(publicActions, projectKnobAction(action))
 		}
 		detail[semantic.FieldActions] = publicActions
 	}
 	return detail
+}
+
+func projectKnobAction(action map[string]any) map[string]any {
+	public := semantic.ToPublicAction(action)
+	copyPanelAnyFields(
+		public,
+		action,
+		semantic.FieldID,
+		semantic.FieldIndex,
+		semantic.FieldConfigType,
+		semantic.FieldMode,
+		semantic.FieldModel,
+		semantic.FieldAlias,
+	)
+	if sensitivity := firstCloudAny(
+		action,
+		semantic.FieldSensitivity,
+		semantic.InternalField(semantic.DomainKnob, semantic.FieldSensitivity),
+	); sensitivity != nil {
+		public[semantic.FieldSensitivity] = sanitizeCloudData(sensitivity)
+	}
+	return public
 }
 
 func (client MetadataReadonlyClient) RunHomeSortList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {

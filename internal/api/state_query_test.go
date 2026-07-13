@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -132,6 +133,78 @@ func TestStateQueryClientReadsSingleProperty(t *testing.T) {
 	}
 	if len(result.Properties) != 0 {
 		t.Fatalf("properties = %#v", result.Properties)
+	}
+}
+
+func TestStateQueryClientReadsRoomNodePropertyThroughOpenControl(t *testing.T) {
+	var gotAuthorization string
+	var gotClientID string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotAuthorization = request.Header.Get("Authorization")
+		gotClientID = request.Header.Get("Client-Id")
+		writer.Header().Set("Content-Type", "application/json")
+		if request.Method != http.MethodPost || request.URL.Path != "/apis/iot/v1/open/control/house/house-1/control/1/room-1/r/properties/p" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":true}`))
+	}))
+	defer server.Close()
+
+	client := NewStateQueryClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.Run(context.Background(), StateQueryRequest{
+		HouseID:      "house-1",
+		NodeType:     "room",
+		NodeID:       "room-1",
+		PropertyName: "p",
+		Credentials: StateQueryCredentials{
+			Authorization: "state-secret-token",
+			ClientID:      "client-state-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if gotAuthorization != "Bearer state-secret-token" || gotClientID != "client-state-1" {
+		t.Fatalf("headers authorization=%q clientId=%q", gotAuthorization, gotClientID)
+	}
+	if result.QueryScope != "single_property" || result.NodeType != "room" || result.NodeTypeID != "1" || result.NodeID != "room-1" || result.Value != true || result.Source != "open_control_node_properties_endpoint" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestStateQueryClientReadsAreaNodeSelectedPropertiesThroughOpenControl(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.Method != http.MethodPost || request.URL.Path != "/apis/iot/v1/open/control/house/house-1/control/3/area-1/r/properties" {
+			http.NotFound(writer, request)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body error: %v", err)
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":[{"propName":"p","value":true},{"propName":"l","value":68}]}`))
+	}))
+	defer server.Close()
+
+	client := NewStateQueryClient(Endpoint{Region: "dev", BaseURL: server.URL + "/apis/iot"}, server.Client())
+	result, err := client.Run(context.Background(), StateQueryRequest{
+		HouseID:     "house-1",
+		NodeType:    "area",
+		NodeID:      "area-1",
+		PropertySet: []string{"p", "l", "p", ""},
+		Credentials: StateQueryCredentials{Authorization: "state-secret-token"},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	propNames, ok := gotBody["propNames"].([]any)
+	if !ok || len(propNames) != 2 || propNames[0] != "p" || propNames[1] != "l" {
+		t.Fatalf("body = %#v", gotBody)
+	}
+	if result.QueryScope != "selected_properties" || result.NodeType != "area" || result.NodeTypeID != "3" || result.Properties["p"] != true || result.Properties["l"] != float64(68) {
+		t.Fatalf("result = %#v", result)
 	}
 }
 

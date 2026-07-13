@@ -399,6 +399,10 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.member.current.get", "已读取当前家庭成员的脱敏只读信息。"))
 	case "device.detail.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.detail.get", "已读取设备详情的安全摘要。"))
+	case "device.complex.get":
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.complex.get", "已读取设备可控详情。"))
+	case "device.shadow.get":
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.shadow.get", "已读取设备当前影子状态。"))
 	case "device.attr.list":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("device.attr.list", "已读取设备属性的安全摘要。"))
 	case "device.list":
@@ -411,8 +415,12 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("room.search", "已搜索家庭房间候选。"))
 	case "area.detail.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("area.detail.get", "已读取区域详情的安全摘要。"))
+	case "area.list":
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("area.list", "已读取家庭区域列表。"))
 	case "home.detail.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.detail.get", "已读取家庭详情的安全摘要。"))
+	case "home.property.get":
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.property.get", "已读取家庭属性。"))
 	case "home.stat.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("home.stat.get", "已读取家庭统计的安全摘要。"))
 	case "geo_area.children.list":
@@ -427,6 +435,8 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.search", "已搜索设备组候选。"))
 	case "group.detail.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.detail.get", "已读取设备组详情的安全摘要。"))
+	case "group.complex.get":
+		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("group.complex.get", "已读取设备组可控详情。"))
 	case "scene.detail.get":
 		return app.invokeMetadataCloudReadonly(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, metadataDetailReadonlySpec("scene.detail.get", "已读取情景详情的安全摘要。"))
 	case "scene.list":
@@ -581,11 +591,32 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return entityCapabilitiesResponse(request, entities, match), nil
 	case "state.query":
 		target := entityGetTargetFromRequest(request)
-		if target.id == "" && target.name == "" {
-			return stateQueryClarificationResponse(request, "missing_target", target, nil, 0), nil
-		}
 		if requestHouseID := requestHouseID(request); requestHouseID != "" {
 			houseID = requestHouseID
+		}
+		propertyID := stateQueryPropertyName(request)
+		if propertyID != "" && semantic.PropertySensitive(propertyID) {
+			return stateQuerySensitivePropertyResponse(request, propertyID), nil
+		}
+		if direct, ok := directNodePropertyTarget(request, houseID, target); ok && direct.entityType != "device" {
+			state, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
+				HouseID:      houseID,
+				NodeType:     direct.entityType,
+				NodeID:       direct.nodeID,
+				PropertyName: propertyID,
+				Credentials: api.StateQueryCredentials{
+					Authorization: accessToken,
+					ClientID:      clientID,
+				},
+			})
+			if err != nil {
+				return contract.Response{}, err
+			}
+			entities := api.EntityListResult{Region: endpoint.Region, HouseID: houseID, Warnings: []string{}}
+			return stateQueryResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), state), nil
+		}
+		if target.id == "" && target.name == "" {
+			return stateQueryClarificationResponse(request, "missing_target", target, nil, 0), nil
 		}
 		resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, accessToken, clientID, target)
 		if err != nil {
@@ -601,11 +632,23 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 			return stateQueryClarificationResponse(request, "ambiguous_target", target, candidates, entityListAPICalls(entities)), nil
 		}
 		if match.Type != "device" {
-			return stateQueryClarificationResponse(request, "target_not_device", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
-		}
-		propertyID := stateQueryPropertyName(request)
-		if propertyID != "" && semantic.PropertySensitive(propertyID) {
-			return stateQuerySensitivePropertyResponse(request, propertyID), nil
+			if !nodePropertySetEntityTypeSupported(match.Type) {
+				return stateQueryClarificationResponse(request, "target_not_supported_node", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
+			}
+			state, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
+				HouseID:      houseID,
+				NodeType:     match.Type,
+				NodeID:       match.ID,
+				PropertyName: propertyID,
+				Credentials: api.StateQueryCredentials{
+					Authorization: accessToken,
+					ClientID:      clientID,
+				},
+			})
+			if err != nil {
+				return contract.Response{}, err
+			}
+			return stateQueryResponse(request, entities, match, state), nil
 		}
 		propertySet := []string{}
 		if propertyID == "" {
@@ -649,6 +692,28 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return app.invokeLightPropertyAdjust(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightColorTemperatureAdjustSpec())
 	case "light.color.set":
 		return app.invokeLightPropertySet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID, lightColorSpec())
+	case "device.property.set":
+		return app.invokeDevicePropertySet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "node.property.set":
+		return app.invokeNodePropertySet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "node.property.toggle":
+		return app.invokeNodePropertyToggle(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "node.action.execute":
+		return app.invokeNodeActionExecute(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "lighting.flow.execute":
+		return app.invokeLightingFlowExecute(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "node.properties.set":
+		return app.invokeNodePropertiesSet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "node.property.batch_set":
+		return app.invokeNodePropertyBatchSet(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "state.batch.query":
+		return app.invokeStateBatchQuery(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "home.property.set":
+		return app.invokeHomePropertySet(ctx, request, endpoint, houseID, accessToken, clientID)
+	case "panel.click":
+		return app.invokePanelClick(ctx, request, endpoint, accessToken, clientID)
+	case "sensor.event.write":
+		return app.invokeSensorEventWrite(ctx, request, endpoint, accessToken, clientID)
 	case "lighting.experience.apply":
 		return app.invokeLightingExperienceApply(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "diagnose.device":
@@ -749,6 +814,8 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 		return app.prepareHomeSpaceConfiguration(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "room.rename", "room.update", "area.update", "device.rename", "device.move", "group.update":
 		return app.prepareSpaceOrganization(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
+	case "group.members.update":
+		return app.prepareGroupMembersUpdate(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "device.move_room.batch":
 		return app.prepareSpaceBatchOrganization(ctx, request, endpoint, profile, region, houseID, accessToken, clientID)
 	case "device.remove", "gateway.delete", "home.delete":

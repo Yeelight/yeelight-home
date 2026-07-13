@@ -20,7 +20,7 @@ func TestDeviceListReadonlyReturnsRedactedProjection(t *testing.T) {
 			http.NotFound(writer, request)
 			return
 		}
-		_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"deviceId":31,"did":9001,"pid":101,"type":1,"name":"主灯","alias":"客厅主灯","img":"light.png","houseId":1001,"roomId":10,"capability":"p,l,ct","localToken":"not-allowed","mac":"AA:BB:CC:DD","deviceKey":"secret-key","shadow":{"p":true},"attr":{"secret":"nope"}},{"deviceId":32,"name":"网关","type":0,"deviceIds":[31],"roomIds":[10,11]}],"meshgroups":[{"meshGroupId":41,"name":"筒灯组","deviceIds":[31,33],"secret":"nope"}]}}`))
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"devices":[{"deviceId":31,"did":9001,"pid":101,"type":1,"name":"主灯","alias":"客厅主灯","img":"light.png","houseId":1001,"roomId":10,"capability":"p,l,ct","online":false,"localToken":"not-allowed","mac":"AA:BB:CC:DD","deviceKey":"secret-key","shadow":{"p":true},"attr":{"secret":"nope"}},{"deviceId":32,"name":"网关","type":0,"deviceIds":[31],"roomIds":[10,11]}],"meshgroups":[{"meshGroupId":41,"name":"筒灯组","deviceIds":[31,33],"secret":"nope"}]}}`))
 	}))
 	defer server.Close()
 
@@ -52,6 +52,9 @@ func TestDeviceListReadonlyReturnsRedactedProjection(t *testing.T) {
 	first := devices[0].(map[string]any)
 	if first[semantic.FieldID] != "31" || first[semantic.FieldName] != "主灯" || first[semantic.FieldRoomID] != "10" || first[semantic.FieldCapability] != "p,l,ct" {
 		t.Fatalf("first device = %#v", first)
+	}
+	if online, ok := first[semantic.FieldOnline].(bool); !ok || online {
+		t.Fatalf("first device online = %#v, device = %#v", first[semantic.FieldOnline], first)
 	}
 	gateway := devices[1].(map[string]any)
 	if gateway[semantic.FieldChildDeviceCount] != 1 {

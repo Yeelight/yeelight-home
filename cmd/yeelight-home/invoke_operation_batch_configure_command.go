@@ -270,6 +270,7 @@ func operationBatchConfigureAllowedIntent(intent string) bool {
 		"entity.rename.batch",
 		"group.create",
 		"group.update",
+		"group.members.update",
 		"scene.create",
 		"scene.update",
 		"automation.create",

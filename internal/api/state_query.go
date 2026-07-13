@@ -15,6 +15,9 @@ type StateQueryCredentials struct {
 }
 
 type StateQueryRequest struct {
+	HouseID      string
+	NodeType     string
+	NodeID       string
 	DeviceID     string
 	PropertyName string
 	PropertySet  []string
@@ -23,6 +26,10 @@ type StateQueryRequest struct {
 
 type StateQueryResult struct {
 	Region       string         `json:"region"`
+	HouseID      string         `json:"houseId,omitempty"`
+	NodeType     string         `json:"nodeType,omitempty"`
+	NodeTypeID   string         `json:"nodeTypeId,omitempty"`
+	NodeID       string         `json:"nodeId,omitempty"`
 	DeviceID     string         `json:"deviceId"`
 	PropertyName string         `json:"propertyName,omitempty"`
 	QueryScope   string         `json:"queryScope"`
@@ -47,7 +54,15 @@ func NewStateQueryClient(endpoint Endpoint, client *http.Client) StateQueryClien
 }
 
 func (client StateQueryClient) Run(ctx context.Context, request StateQueryRequest) (StateQueryResult, error) {
+	nodeType := NormalizeNodeType(request.NodeType)
+	nodeID := strings.TrimSpace(request.NodeID)
+	if nodeType != "" && nodeType != "device" {
+		return client.runNode(ctx, request, nodeType, nodeID)
+	}
 	deviceID := strings.TrimSpace(request.DeviceID)
+	if deviceID == "" && nodeType == "device" {
+		deviceID = nodeID
+	}
 	propertyName := strings.TrimSpace(request.PropertyName)
 	if deviceID == "" {
 		return StateQueryResult{}, fmt.Errorf("device id is required")
@@ -85,6 +100,63 @@ func (client StateQueryClient) Run(ctx context.Context, request StateQueryReques
 		PropertyName: propertyName,
 		QueryScope:   queryScope,
 		Source:       "device_properties_endpoint",
+		RawShape:     stateDataShape(data),
+		APICalls:     1,
+	}
+	if propertyName == "" {
+		result.Properties = projectStateProperties(data)
+		return result, nil
+	}
+	result.Value = data
+	return result, nil
+}
+
+func (client StateQueryClient) runNode(ctx context.Context, request StateQueryRequest, nodeType string, nodeID string) (StateQueryResult, error) {
+	houseID := strings.TrimSpace(request.HouseID)
+	nodeTypeID, ok := NodeTypeID(nodeType)
+	propertyName := strings.TrimSpace(request.PropertyName)
+	if houseID == "" {
+		return StateQueryResult{}, fmt.Errorf("house id is required")
+	}
+	if !ok {
+		return StateQueryResult{}, fmt.Errorf("unsupported node type %q", nodeType)
+	}
+	if nodeID == "" {
+		return StateQueryResult{}, fmt.Errorf("node id is required")
+	}
+	if propertyName != "" && isSensitiveCloudField(propertyName) {
+		return StateQueryResult{}, fmt.Errorf("node state query refused sensitive property: %s", propertyName)
+	}
+	body := map[string]any{}
+	path := "/v1/open/control/house/" + url.PathEscape(houseID) + "/control/" + url.PathEscape(nodeTypeID) + "/" + url.PathEscape(nodeID) + "/r/properties"
+	queryScope := "all_properties"
+	if propertyName != "" {
+		path += "/" + url.PathEscape(propertyName)
+		queryScope = "single_property"
+	} else if propertySet := compactStringSet(request.PropertySet); len(propertySet) > 0 {
+		body["propNames"] = propertySet
+		queryScope = "selected_properties"
+	}
+	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+path, body, requestCredentials{
+		Authorization: request.Credentials.Authorization,
+		ClientID:      request.Credentials.ClientID,
+	})
+	if err != nil {
+		return StateQueryResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return StateQueryResult{}, fmt.Errorf("node state query returned non-success business response: code=%s message=%s dataType=%s", responseScalar(response, "code"), responseScalar(response, "message", "msg"), responseDataType(response))
+	}
+	data := response["data"]
+	result := StateQueryResult{
+		Region:       client.endpoint.Region,
+		HouseID:      houseID,
+		NodeType:     nodeType,
+		NodeTypeID:   nodeTypeID,
+		NodeID:       nodeID,
+		PropertyName: propertyName,
+		QueryScope:   queryScope,
+		Source:       "open_control_node_properties_endpoint",
 		RawShape:     stateDataShape(data),
 		APICalls:     1,
 	}
@@ -155,9 +227,40 @@ func projectStateProperties(data any) map[string]any {
 			return filterStateProperties(nested)
 		}
 		return filterStateProperties(typed)
+	case []any:
+		return filterStatePropertyRows(typed)
 	default:
 		return map[string]any{}
 	}
+}
+
+func filterStatePropertyRows(rows []any) map[string]any {
+	result := map[string]any{}
+	for _, row := range rows {
+		item, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		property := firstAnyString(item, "propertyName", "propName", "property", "name", "code", "id")
+		if property == "" || isSensitiveCloudField(property) {
+			continue
+		}
+		value, ok := firstStatePropertyRowValue(item)
+		if !ok {
+			continue
+		}
+		result[property] = value
+	}
+	return result
+}
+
+func firstStatePropertyRowValue(item map[string]any) (any, bool) {
+	for _, key := range []string{"value", "val", "propertyValue", "data"} {
+		if value, ok := item[key]; ok {
+			return value, true
+		}
+	}
+	return nil, false
 }
 
 func filterStateProperties(properties map[string]any) map[string]any {

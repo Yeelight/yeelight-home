@@ -29,6 +29,8 @@ func (app *app) buildOperationBatchStepPreparedPayload(ctx context.Context, requ
 		return operationBatchHomeSpacePayload(request, houseID, entities)
 	case request.Intent == "room.rename" || request.Intent == "room.update" || request.Intent == "area.update" || request.Intent == "device.rename" || request.Intent == "device.move" || request.Intent == "group.update":
 		return operationBatchSpaceOrganizationPayload(request, houseID, entities)
+	case request.Intent == "group.members.update":
+		return operationBatchGroupMembersUpdatePayload(ctx, request, endpoint, houseID, authorization, clientID, entities)
 	case request.Intent == "device.move_room.batch":
 		return operationBatchSpaceBatchPayload(request, houseID, entities)
 	case request.Intent == "scene.update":
@@ -137,6 +139,11 @@ func operationBatchSpaceOrganizationPayload(request contract.Request, houseID st
 		return nil, nil, "", nil, 0, reason, nil
 	}
 	return payload, preconditions, summary, spaceOrganizationPreview(request.Intent, payload, entities), 0, "", nil
+}
+
+func operationBatchGroupMembersUpdatePayload(ctx context.Context, request contract.Request, endpoint api.Endpoint, houseID string, authorization string, clientID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {
+	payload, preconditions, summary, preview, calls, reason := buildGroupMembersUpdatePayload(ctx, request, endpoint, houseID, authorization, clientID, entities)
+	return payload, preconditions, summary, preview, calls, reason, nil
 }
 
 func operationBatchSpaceBatchPayload(request contract.Request, houseID string, entities api.EntityListResult) (map[string]any, []string, string, map[string]any, int, string, error) {

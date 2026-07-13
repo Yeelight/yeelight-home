@@ -223,6 +223,8 @@ func (app *app) executePreparedExecution(ctx context.Context, request contract.R
 		return app.executeEntityBatchRename(ctx, request, endpoint, record, authorization, clientID)
 	case "group.update":
 		return app.executeSpaceOrganization(ctx, request, endpoint, record, authorization, clientID, api.SpaceOrganizationGroupUpdate)
+	case "group.members.update":
+		return app.executeGroupMembersUpdate(ctx, request, endpoint, record, authorization, clientID)
 	case "room.delete":
 		return app.executeMetadataDelete(ctx, request, endpoint, record, authorization, clientID, api.MetadataDeleteRoom)
 	case "area.delete":

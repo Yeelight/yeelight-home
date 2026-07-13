@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func TestInvokeSceneTestDelegatesToSceneExecute(t *testing.T) {
@@ -184,19 +186,14 @@ func TestInvokeLightingExperienceApplyRequiresExplicitAction(t *testing.T) {
 	}
 }
 
-func TestInvokeLightingExperienceApplyRequiresDeviceTarget(t *testing.T) {
+func TestInvokeLightingExperienceApplySupportsRoomNodeTarget(t *testing.T) {
+	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
-		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
-		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"}]}}`))
-		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100",
-			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
-			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
-			"/apis/iot/v1/automations/r/list":
-			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v1/open/control/house/house-1/control/1/room-1/w/properties/l":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -216,11 +213,14 @@ func TestInvokeLightingExperienceApplyRequiresDeviceTarget(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["status"] != "clarification_required" {
+	if response["status"] != "success" || response["traceId"] != "lighting-experience-apply-command" {
 		t.Fatalf("response = %#v", response)
 	}
-	clarification := response["clarification"].(map[string]any)
-	if clarification["reason"] != "target_not_device" {
-		t.Fatalf("clarification = %#v", clarification)
+	if len(gotCalls) != 1 {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	result := response["result"].(map[string]any)
+	if result[semantic.FieldNodeType] != "room" || result[semantic.FieldNodeID] != "room-1" {
+		t.Fatalf("result = %#v", result)
 	}
 }

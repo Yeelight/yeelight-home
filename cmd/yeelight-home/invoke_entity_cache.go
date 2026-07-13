@@ -133,6 +133,7 @@ func intentAffectsTopologyCache(intent string) bool {
 		"entity.rename.batch",
 		"group.create",
 		"group.update",
+		"group.members.update",
 		"group.delete",
 		"group.batch_delete",
 		"scene.create",

@@ -62,6 +62,14 @@ func moduleActionFlagHelp(resource string, action string, spec moduleCommandSpec
 	if spec.TargetName {
 		lines = append(lines, "  --name <name>")
 	}
+	if strings.HasPrefix(spec.Intent, "light.") {
+		lines = append(lines, "  --device-id <id>")
+		lines = append(lines, "  --room-id <id>")
+		lines = append(lines, "  --area-id <id>")
+		lines = append(lines, "  --group-id <id>")
+		lines = append(lines, "  --target-type <device|room|area|group|home>")
+		lines = append(lines, "  --node-type <device|room|area|group|home> --node-id <id>")
+	}
 	switch spec.Intent {
 	case "light.brightness.set":
 		lines = append(lines, "  --brightness <1-100>")
@@ -114,6 +122,8 @@ func moduleActionFlagHelp(resource string, action string, spec moduleCommandSpec
 		lines = append(lines, "  --params-json <json>   Use roomId or unique roomName/currentName, plus addAreaIds/addAreaNames or removeAreaIds/removeAreaNames.")
 	case "area.update":
 		lines = append(lines, "  --params-json <json>   Use areaId or unique areaName/currentName, plus mutable fields such as name, parentId, or complete roomIds[].")
+	case "group.members.update":
+		lines = append(lines, "  --params-json <json>   Use groupId or unique groupName, plus complete deviceIds[]/deviceNames[] or add/remove device lists.")
 	case "device.move_room.batch":
 		lines = append(lines, "  --params-json <json>   Requires items[] with deviceId and roomId, or an object map of deviceId to roomId.")
 	case "entity.rename.batch":
@@ -134,11 +144,11 @@ func moduleActionFlagHelp(resource string, action string, spec moduleCommandSpec
 func moduleActionExamples(resource string, action string, spec moduleCommandSpec) string {
 	switch spec.Intent {
 	case "light.power.set":
-		return fmt.Sprintf("  yeelight-home %s %s --device-id <id> --json\n", resource, action)
+		return fmt.Sprintf("  yeelight-home %s %s --device-id <id> --json\n  yeelight-home %s %s --room-id <id> --json\n", resource, action, resource, action)
 	case "light.brightness.set":
-		return "  yeelight-home light brightness --device-id <id> --brightness 60 --json\n"
+		return "  yeelight-home light brightness --device-id <id> --brightness 60 --json\n  yeelight-home light brightness --room-id <id> --brightness 60 --json\n"
 	case "light.color_temperature.set":
-		return "  yeelight-home light color-temperature --device-id <id> --color-temperature 4000 --json\n"
+		return "  yeelight-home light color-temperature --device-id <id> --color-temperature 4000 --json\n  yeelight-home light color-temperature --group-id <id> --color-temperature 4000 --json\n"
 	case "scene.execute":
 		return "  yeelight-home scene execute --scene-id <id> --json\n"
 	case "automation.enable":
@@ -201,6 +211,8 @@ func moduleActionExamples(resource string, action string, spec moduleCommandSpec
 		return "  yeelight-home room batch-delete --house-id <id> --params-json '{\"items\":[{\"roomId\":\"401398\"},{\"name\":\"临时房间\"}]}' --json\n"
 	case "group.create":
 		return "  yeelight-home group create --house-id <id> --params-json '{\"name\":\"客厅格栅灯组\",\"roomName\":\"客厅\",\"groupCapability\":\"light\",\"deviceNames\":[\"左侧格栅灯\",\"右侧格栅灯\"]}' --json\n"
+	case "group.members.update":
+		return "  yeelight-home group members --group-id <id> --params-json '{\"deviceIds\":[\"50018330\",\"50018331\"]}' --json\n  yeelight-home group members --group-id <id> --params-json '{\"addDeviceNames\":[\"餐边柜灯\"],\"removeDeviceNames\":[\"旧灯带\"]}' --json\n"
 	case "area.update":
 		return "  yeelight-home area update --area-id <id> --params-json '{\"name\":\"公共区\",\"roomIds\":[\"401398\",\"401399\"]}' --json\n"
 	case "area.batch_delete", "group.batch_delete", "scene.batch_delete", "automation.batch_delete":

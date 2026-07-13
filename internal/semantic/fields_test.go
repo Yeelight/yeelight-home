@@ -49,6 +49,7 @@ func TestProductIdentityUsesCapabilityPID(t *testing.T) {
 
 func TestPropertyRegistryMapsCommonProAbbreviations(t *testing.T) {
 	tests := map[string]string{
+		"h":    "humidity",
 		"m":    FieldMode,
 		"o":    FieldOnline,
 		"mv":   "motionDetected",
@@ -87,7 +88,7 @@ func TestPropertyRegistryMapsCommonProAbbreviations(t *testing.T) {
 func TestPropertyCatalogDoesNotExposeKnownInternalIDsAsPublicNames(t *testing.T) {
 	forbidden := map[string]bool{
 		"p": true, "l": true, "ct": true, "c": true, "m": true, "o": true,
-		"mv": true, "oc": true, "dc": true, "act": true, "alm": true,
+		"h": true, "mv": true, "oc": true, "dc": true, "act": true, "alm": true,
 		"dt": true, "pi": true, "pe": true, "hk": true, "mfl": true,
 		"dver": true, "dpt": true, "pf": true, "ddt": true, "gtin": true,
 		"mock": true, "mimac": true, "ctRdy": true, "runSpeedRdy": true,
@@ -192,6 +193,29 @@ func TestNormalizeActionRejectsInternalOnlyActionShape(t *testing.T) {
 	}
 }
 
+func TestNormalizeSceneActionsPreservesOpaqueCustomParams(t *testing.T) {
+	rows, ok := NormalizeSceneActions([]any{map[string]any{
+		FieldTargetType: "device",
+		FieldTargetID:   "50018330",
+		FieldTargetName: "主灯",
+		FieldRank:       1,
+		FieldCustom: map[string]any{
+			"vendorMode": "slow-breathe",
+			"transition": 12,
+		},
+	}})
+	if !ok || len(rows) != 1 {
+		t.Fatalf("rows = %#v, ok = %v", rows, ok)
+	}
+	params, ok := rows[0][InternalActionParamsField()].(map[string]any)
+	if !ok || params["vendorMode"] != "slow-breathe" || params["transition"] != 12 {
+		t.Fatalf("opaque custom params were not preserved: %#v", rows[0])
+	}
+	if _, leaked := params[FieldCustom]; leaked {
+		t.Fatalf("custom wrapper must not leak into cloud params: %#v", params)
+	}
+}
+
 func TestToPublicConditionMapsInternalPropertyToStandardName(t *testing.T) {
 	condition := ToPublicCondition(map[string]any{
 		"typeId":  2,
@@ -209,6 +233,24 @@ func TestToPublicConditionMapsInternalPropertyToStandardName(t *testing.T) {
 		t.Fatalf("target fields = %#v", condition)
 	}
 	for _, internal := range []string{"typeId", "resId", "resName", "prop"} {
+		if _, ok := condition[internal]; ok {
+			t.Fatalf("internal condition field %q leaked: %#v", internal, condition)
+		}
+	}
+}
+
+func TestToPublicConditionCanonicalizesPublicPropertyAlias(t *testing.T) {
+	condition := ToPublicCondition(map[string]any{
+		"type":     "fact_change",
+		"typeId":   2,
+		"resId":    992006,
+		"property": "p",
+		"value":    true,
+	})
+	if condition[FieldProperty] != FieldPower {
+		t.Fatalf("property = %#v, condition = %#v", condition[FieldProperty], condition)
+	}
+	for _, internal := range []string{"type", "typeId", "resId"} {
 		if _, ok := condition[internal]; ok {
 			t.Fatalf("internal condition field %q leaked: %#v", internal, condition)
 		}

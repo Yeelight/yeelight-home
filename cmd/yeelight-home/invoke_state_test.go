@@ -252,19 +252,14 @@ func TestInvokeStateQuerySkippedPropertiesArePublicOnly(t *testing.T) {
 	}
 }
 
-func TestInvokeStateQueryRequiresDeviceTarget(t *testing.T) {
+func TestInvokeStateQueryReadsRoomNodeTarget(t *testing.T) {
+	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
-		case "/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[]}}`))
-		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100":
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"room-1","name":"客厅"}]}}`))
-		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100",
-			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
-			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
-			"/apis/iot/v1/automations/r/list":
-			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v1/open/control/house/house-1/control/1/room-1/r/properties/p":
+			_, _ = writer.Write([]byte(`{"success":true,"data":true}`))
 		default:
 			http.NotFound(writer, request)
 		}
@@ -273,7 +268,7 @@ func TestInvokeStateQueryRequiresDeviceTarget(t *testing.T) {
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-state-secret", "client-state-1", "house-1")
 
-	input := `{"contractVersion":"1.0","requestId":"req-state-room","locale":"zh-CN","utterance":"客厅现在什么状态","intent":"state.query","targets":[{"entityType":"room","id":"room-1"}]}`
+	input := `{"contractVersion":"1.0","requestId":"req-state-room","locale":"zh-CN","utterance":"客厅开着吗","intent":"state.query","targets":[{"entityType":"room","id":"room-1","name":"客厅"}],"parameters":{"property":"power"}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -284,11 +279,14 @@ func TestInvokeStateQueryRequiresDeviceTarget(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
 		t.Fatalf("invalid json response: %v", err)
 	}
-	if response["status"] != "clarification_required" || response["traceId"] != "state-query-clarification" {
+	if response["status"] != "success" || response["traceId"] != "state-query-readonly" {
 		t.Fatalf("response = %#v", response)
 	}
-	clarification, ok := response["clarification"].(map[string]any)
-	if !ok || clarification["reason"] != "target_not_device" {
-		t.Fatalf("clarification = %#v", response["clarification"])
+	if len(gotCalls) != 1 || gotCalls[0] != "POST /apis/iot/v1/open/control/house/house-1/control/1/room-1/r/properties/p" {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	result := response["result"].(map[string]any)
+	if result["nodeType"] != "room" || result["nodeId"] != "room-1" || result["property"] != "power" || result["value"] != true {
+		t.Fatalf("result = %#v", result)
 	}
 }

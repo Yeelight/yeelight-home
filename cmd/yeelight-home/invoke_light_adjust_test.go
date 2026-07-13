@@ -131,6 +131,89 @@ func TestInvokeLightColorTemperatureAdjustReadsAdjustsAndVerifiesDeviceProperty(
 	}
 }
 
+func TestInvokeLightBrightnessAdjustSupportsDirectRoomNode(t *testing.T) {
+	var gotCalls []string
+	var adjustBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/controll/device/1/room-1/w/properties/l/adjust" {
+			http.NotFound(writer, request)
+			return
+		}
+		if err := json.NewDecoder(request.Body).Decode(&adjustBody); err != nil {
+			t.Fatalf("decode adjust body: %v", err)
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-secret", "client-light-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-room-brightness-adjust","locale":"zh-CN","utterance":"客厅暗一点","intent":"light.brightness.adjust","parameters":{"houseId":"house-1","nodeType":"room","nodeId":"room-1","roomName":"客厅","delta":-10}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(gotCalls) != 1 {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	if adjustBody["value"] != float64(-10) {
+		t.Fatalf("adjustBody = %#v", adjustBody)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "light-brightness-adjust-command" {
+		t.Fatalf("response = %#v", response)
+	}
+	result, ok := response["result"].(map[string]any)
+	if !ok || result["nodeType"] != "room" || result["nodeId"] != "room-1" || result["property"] != "brightness" || result["delta"] != float64(-10) || result["verified"] != false {
+		t.Fatalf("result = %#v", response["result"])
+	}
+}
+
+func TestInvokeLightColorTemperatureAdjustSupportsHomeScope(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotPath = request.URL.Path
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/controll/device/5/house-1/w/properties/ct/adjust" {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-secret", "client-light-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-home-ct-adjust","locale":"zh-CN","utterance":"全屋色温暖一点","intent":"light.color_temperature.adjust","parameters":{"houseId":"house-1","nodeType":"home","delta":-100}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if gotPath != "/apis/iot/v1/controll/device/5/house-1/w/properties/ct/adjust" {
+		t.Fatalf("gotPath = %q", gotPath)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "light-color-temperature-adjust-command" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["nodeType"] != "home" || result["nodeId"] != "house-1" || result["property"] != "colorTemperature" || result["delta"] != float64(-100) {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestInvokeLightBrightnessAdjustReportsVerificationMismatch(t *testing.T) {
 	stateReadCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

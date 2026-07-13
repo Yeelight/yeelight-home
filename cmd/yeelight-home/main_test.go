@@ -111,8 +111,8 @@ func TestCompletionCommandPrintsShellScripts(t *testing.T) {
 		forbidOutput []string
 		wantCode     int
 	}{
-		{name: "bash", args: []string{"completion", "bash"}, wantOutput: "device) COMPREPLY=( $(compgen -W \"attrs capabilities detail", forbidOutput: []string{" dev ", " release "}},
-		{name: "zsh", args: []string{"completion", "zsh"}, wantOutput: "device) local -a actions; actions=('attrs' 'capabilities' 'detail'", forbidOutput: []string{"'dev'", "'release'"}},
+		{name: "bash", args: []string{"completion", "bash"}, wantOutput: "device) COMPREPLY=( $(compgen -W \"attrs capabilities complex detail", forbidOutput: []string{" dev ", " release "}},
+		{name: "zsh", args: []string{"completion", "zsh"}, wantOutput: "device) local -a actions; actions=('attrs' 'capabilities' 'complex' 'detail'", forbidOutput: []string{"'dev'", "'release'"}},
 		{name: "fish", args: []string{"completion", "fish"}, wantOutput: "complete -c yeelight-home", forbidOutput: []string{" -a dev\n", " -a release\n"}},
 		{name: "powershell", args: []string{"completion", "powershell"}, wantOutput: "Register-ArgumentCompleter", forbidOutput: []string{"'dev'", "'release'"}},
 		{name: "unsupported shell", args: []string{"completion", "tcsh"}, wantCode: exitInvalidInput},
@@ -674,6 +674,73 @@ func TestIntentExplainLightingExperienceApplyShowsExplicitActionFields(t *testin
 		t.Fatalf("payload shape = %#v", shape)
 	}
 	if !strings.Contains(response[semantic.FieldNextStep].(string), "does not invent") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentExplainDevicePropertySetShowsExplicitPropertyFields(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "device.property.set", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldDeviceID),
+		semantic.ParameterPath(semantic.FieldDeviceName),
+		semantic.ParameterPath(semantic.FieldRoomName),
+		semantic.ParameterPath(semantic.FieldProperty),
+		semantic.ParameterPath(semantic.FieldValue),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	guide := response[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldProperty] == nil || shape[semantic.FieldValue] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "concrete writable property") {
+		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
+	}
+}
+
+func TestIntentExplainNodePropertySetShowsNodeControlFields(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"intent", "explain", "--intent", "node.property.set", "--json"}, strings.NewReader(""), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	fields := response[semantic.FieldAcceptedFields].([]any)
+	for _, field := range []string{
+		semantic.ParameterPath(semantic.FieldNodeType),
+		semantic.ParameterPath(semantic.FieldNodeID),
+		semantic.ParameterPath(semantic.FieldTargetType),
+		semantic.ParameterPath(semantic.FieldTargetID),
+		semantic.ParameterPath(semantic.FieldProperty),
+		semantic.ParameterPath(semantic.FieldValue),
+	} {
+		if !containsAnyString(fields, field) {
+			t.Fatalf("acceptedFields should include %s: %#v", field, fields)
+		}
+	}
+	guide := response[semantic.FieldPayloadGuide].(map[string]any)
+	shape := guide[semantic.FieldPayloadShape].(map[string]any)
+	if shape[semantic.FieldNodeType] == nil || shape[semantic.FieldNodeID] == nil || shape[semantic.FieldProperty] == nil || shape[semantic.FieldValue] == nil {
+		t.Fatalf("payload shape = %#v", shape)
+	}
+	if !strings.Contains(response[semantic.FieldNextStep].(string), "whole home, room, area, group, or device") {
 		t.Fatalf("nextStep = %#v", response[semantic.FieldNextStep])
 	}
 }

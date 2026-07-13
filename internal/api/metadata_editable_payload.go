@@ -242,6 +242,10 @@ func putAutomationConditions(target map[string]any, value any) {
 		}
 	}
 	if len(conditions) > 0 {
+		conditionType := strings.ToLower(strings.TrimSpace(stringFromAny(mapped[semantic.FieldConditionType])))
+		if conditionType == "and" || conditionType == "or" {
+			target[semantic.FieldConditionType] = conditionType
+		}
 		target[semantic.FieldConditions] = conditions
 	}
 }

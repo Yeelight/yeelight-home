@@ -25,7 +25,7 @@ The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-
 | Area | Examples |
 | --- | --- |
 | Home topology | homes, rooms, areas, groups, gateways, panels, knobs, sensors, unified entities |
-| Device control | light power, brightness, color temperature, RGB color, state query |
+| Device and scope control | light power, brightness, relative brightness/color-temperature adjustment, RGB color, node property set/read for home, room, area, group, and device targets |
 | Organization writes | room/device naming, room movement, favorites, home sorting, panel/knob configuration |
 | Scenes and automations | list, detail, execute, create/update/delete, enable/disable, verification |
 | Product knowledge | `product.pedia.search`, manuals and FAQ candidates, thing-model schema and product definitions |

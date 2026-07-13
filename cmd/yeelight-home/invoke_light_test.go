@@ -655,3 +655,253 @@ func TestInvokeLightColorSetRequiresColorValue(t *testing.T) {
 		t.Fatalf("clarification = %#v", response["clarification"])
 	}
 }
+
+func TestInvokeNodePropertySetWritesRoomNodeDirectly(t *testing.T) {
+	var gotCalls []string
+	var writeBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/open/control/house/house-1/control/1/room-1/w/properties/l":
+			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
+				t.Fatalf("decode write body: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-node-secret", "client-node-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-node-room-brightness","locale":"zh-CN","utterance":"把客厅亮度设到 70","intent":"node.property.set","parameters":{"nodeType":"room","nodeId":"room-1","property":"brightness","value":70}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "token-node-secret") || strings.Contains(stderr.String(), "token-node-secret") {
+		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if len(gotCalls) != 1 {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	if _, ok := writeBody["command"]; ok || writeBody["value"] != float64(70) {
+		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "node-property-set-command" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result[semantic.FieldNodeType] != "room" || result[semantic.FieldNodeID] != "room-1" || result[semantic.FieldProperty] != "brightness" || result[semantic.FieldVerified] != false {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeLightBrightnessSetWritesRoomNodeDirectly(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/open/control/house/house-1/control/1/room-1/w/properties/l":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-secret", "client-light-room-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-light-room-node","locale":"zh-CN","utterance":"把客厅亮度设到 70","intent":"light.brightness.set","targets":[{"entityType":"room","id":"room-1","name":"客厅"}],"parameters":{"brightness":70}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(gotCalls) != 1 {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "light-brightness-set-command" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result[semantic.FieldNodeType] != "room" || result[semantic.FieldNodeID] != "room-1" || result[semantic.FieldProperty] != "brightness" || result[semantic.FieldVerified] != false {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeLightPowerSetWritesHomeNodeDirectly(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v1/open/control/house/house-1/control/5/house-1/w/properties/p":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-secret", "client-light-home-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-light-home-node","locale":"zh-CN","utterance":"关闭全屋灯","intent":"light.power.set","parameters":{"targetType":"home","power":false}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if len(gotCalls) != 1 {
+		t.Fatalf("gotCalls = %#v", gotCalls)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "light-power-set-command" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result[semantic.FieldNodeType] != "home" || result[semantic.FieldNodeID] != "house-1" || result[semantic.FieldProperty] != "power" || result[semantic.FieldVerified] != false {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestInvokeDevicePropertySetWritesPublicPropertyAndVerifies(t *testing.T) {
+	var writeBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"curtain-1","name":"南向梦幻帘","roomId":"room-1","online":true}]}}`))
+		case "/apis/iot/v1/controll/device/2/curtain-1/w/properties/tp":
+			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
+				t.Fatalf("decode write body: %v", err)
+			}
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"result":"ok"}}`))
+		case "/apis/iot/v1/controll/device/curtain-1/r/properties/tp":
+			_, _ = writer.Write([]byte(`{"success":true,"data":50}`))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-device-secret", "client-device-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-device-property-set","locale":"zh-CN","utterance":"把南向梦幻帘开到一半","intent":"device.property.set","targets":[{"entityType":"device","id":"curtain-1"}],"parameters":{"property":"targetPosition","value":50}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "token-device-secret") || strings.Contains(stderr.String(), "token-device-secret") {
+		t.Fatalf("token leaked: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if _, ok := writeBody["command"]; ok || writeBody["value"] != float64(50) {
+		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "success" || response["traceId"] != "device-property-set-command" {
+		t.Fatalf("response = %#v", response)
+	}
+	result, ok := response["result"].(map[string]any)
+	if !ok || result["verified"] != true || result["verifiedValue"] != float64(50) || result["property"] != "targetPosition" {
+		t.Fatalf("result = %#v", response["result"])
+	}
+}
+
+func TestInvokeDevicePropertySetDryRunPreviewsWithoutWriting(t *testing.T) {
+	var gotCalls []string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/apis/iot/v2/thing/manage/house/house-1/room/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/area/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/group/r/info/1/100",
+			"/apis/iot/v2/thing/manage/house/house-1/scene/r/info/1/100",
+			"/apis/iot/v1/automations/r/list":
+			_, _ = writer.Write([]byte(`{"success":true,"data":[]}`))
+		case "/apis/iot/v2/thing/manage/house/house-1/device/r/info/1/100":
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"rows":[{"id":"curtain-1","name":"南向梦幻帘","roomId":"room-1","online":true}]}}`))
+		case "/apis/iot/v1/controll/device/2/curtain-1/w/properties/tp",
+			"/apis/iot/v1/controll/device/curtain-1/r/properties/tp":
+			t.Fatalf("dry-run must not call write or verification API: %s", request.URL.Path)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-device-secret", "client-device-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-device-property-preview","locale":"zh-CN","utterance":"把南向梦幻帘开到一半","intent":"device.property.set","targets":[{"entityType":"device","id":"curtain-1"}],"parameters":{"property":"targetPosition","value":50}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--preview-only"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "direct-write-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	if result["dryRun"] != true || result["persistentWrites"] != false {
+		t.Fatalf("result = %#v", result)
+	}
+	planned := result["planned"].(map[string]any)
+	if planned["intent"] != "device.property.set" || planned["property"] != "targetPosition" || planned["value"] != float64(50) {
+		t.Fatalf("planned = %#v", planned)
+	}
+	for _, call := range gotCalls {
+		if strings.Contains(call, "/w/properties/tp") || strings.Contains(call, "/r/properties/tp") {
+			t.Fatalf("dry-run should not call control/state endpoints, gotCalls=%#v", gotCalls)
+		}
+	}
+}
+
+func TestInvokeDevicePropertySetBlocksSensitiveProperty(t *testing.T) {
+	app := newInvokeTestApp(t, "Bearer token-device-secret", "client-device-1", "house-1")
+	input := `{"contractVersion":"1.0","requestId":"req-device-property-sensitive","locale":"zh-CN","utterance":"设置 WiFi 密码","intent":"device.property.set","targets":[{"entityType":"device","id":"gateway-1"}],"parameters":{"property":"wiFiPassword","value":"secret"}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatalf("invalid json response: %v", err)
+	}
+	if response["status"] != "blocked" || response["traceId"] != "device-property-set-sensitive-property" {
+		t.Fatalf("response = %#v", response)
+	}
+}

@@ -470,38 +470,10 @@ func semanticActionPreviewList(value any) any {
 }
 
 func semanticActionPreview(item map[string]any) map[string]any {
-	preview := map[string]any{}
-	if typeID, ok := valueInt(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetType)]); ok {
-		preview[semantic.FieldTargetType] = semanticTypeName(typeID)
-	}
-	if id := valueIDString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetID)]); id != "" {
-		preview[semantic.FieldTargetID] = id
-	}
-	if tempID := valueIDString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetKey)]); tempID != "" {
-		preview[semantic.FieldTargetKey] = tempID
-	}
-	if name := requestString(item[semantic.InternalField(semantic.DomainAction, semantic.FieldTargetName)]); name != "" {
-		preview[semantic.FieldTargetName] = name
-	}
-	for _, key := range []string{
-		semantic.FieldRank,
-		semantic.InternalField(semantic.DomainAction, semantic.FieldSubIndex),
-		semantic.FieldAction,
-		semantic.FieldRoomID,
-		semantic.FieldStartTime,
-		semantic.FieldEndTime,
-	} {
-		if value, ok := item[key]; ok {
-			previewKey := key
-			if key == semantic.InternalField(semantic.DomainAction, semantic.FieldSubIndex) {
-				previewKey = semantic.FieldSubIndex
-			}
-			preview[previewKey] = value
-		}
-	}
-	if params, ok := item[semantic.InternalActionParamsField()]; ok {
-		if params := semanticParamsPreview(params); params != nil {
-			preview[semantic.FieldSet] = params
+	preview := semantic.ToPublicAction(item)
+	for _, key := range []string{semantic.FieldTargetID, semantic.FieldTargetKey} {
+		if value, ok := preview[key]; ok {
+			preview[key] = valueIDString(value)
 		}
 	}
 	return preview
@@ -1118,6 +1090,38 @@ func spaceOrganizationExecuteResponse(request contract.Request, record operation
 		},
 		Warnings: []string{},
 		TraceID:  "space-organization-execute",
+		Metrics: map[string]any{
+			semantic.FieldAPICalls:  result.APICalls,
+			semantic.FieldCacheHits: 0,
+		},
+	}, result.VerifiedEntities)
+}
+
+func groupMembersExecuteResponse(request contract.Request, record operation.Prepared, result api.GroupMembersResult) contract.Response {
+	return responseWithVerifiedTopology(contract.Response{
+		ContractVersion: contract.Version,
+		RequestID:       request.RequestID,
+		Status:          "success",
+		UserMessage:     "已更新设备组成员，并通过设备组详情回读验证。",
+		Result: map[string]any{
+			semantic.FieldRegion:          result.Region,
+			semantic.FieldHouseID:         result.HouseID,
+			semantic.FieldCapability:      result.Capability,
+			semantic.FieldGroupID:         result.GroupID,
+			semantic.FieldName:            result.Name,
+			semantic.FieldAddDeviceIDs:    result.AddedDeviceIDs,
+			semantic.FieldRemoveDeviceIDs: result.RemovedDeviceIDs,
+			semantic.FieldDeviceIDs:       result.CurrentDeviceIDs,
+			semantic.FieldDeviceCount:     len(result.CurrentDeviceIDs),
+			semantic.FieldVerified:        result.Verified,
+			semantic.FieldVerifiedBy:      result.VerifiedBy,
+		},
+		Execution: map[string]any{
+			semantic.FieldIntent: record.Intent,
+			semantic.FieldStatus: "executed",
+		},
+		Warnings: result.Warnings,
+		TraceID:  "group-members-update-execute",
 		Metrics: map[string]any{
 			semantic.FieldAPICalls:  result.APICalls,
 			semantic.FieldCacheHits: 0,

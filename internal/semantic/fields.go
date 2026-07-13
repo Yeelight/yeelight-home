@@ -128,6 +128,7 @@ const (
 	FieldCurrentName                      = "currentName"
 	FieldNewName                          = "newName"
 	FieldAction                           = "action"
+	FieldActionName                       = "actionName"
 	FieldConditionType                    = "conditionType"
 	FieldConditions                       = "conditions"
 	FieldConditionKind                    = "conditionKind"
@@ -246,6 +247,7 @@ const (
 	FieldButtonEventID                    = "buttonEventId"
 	FieldButtonEvent                      = "buttonEvent"
 	FieldButtonEvents                     = "buttonEvents"
+	FieldButtonID                         = "buttonId"
 	FieldButtonType                       = "buttonType"
 	FieldButtons                          = "buttons"
 	FieldKeyValue                         = "keyValue"
@@ -276,6 +278,12 @@ const (
 	FieldRemoveAreaIDs                    = "removeAreaIds"
 	FieldAddAreaNames                     = "addAreaNames"
 	FieldRemoveAreaNames                  = "removeAreaNames"
+	FieldAddDeviceIDs                     = "addDeviceIds"
+	FieldRemoveDeviceIDs                  = "removeDeviceIds"
+	FieldAddDeviceNames                   = "addDeviceNames"
+	FieldRemoveDeviceNames                = "removeDeviceNames"
+	FieldAddDeviceList                    = "addDeviceList"
+	FieldRemoveDeviceList                 = "removeDeviceList"
 	FieldRoomIDs                          = "roomIds"
 	FieldRoomNames                        = "roomNames"
 	FieldDeviceIDs                        = "deviceIds"
@@ -305,6 +313,7 @@ const (
 	FieldMeshGroupID                      = "meshgroupId"
 	FieldMultiField                       = "multiField"
 	FieldNodeID                           = "nodeId"
+	FieldNodeIDs                          = "nodeIds"
 	FieldNodeType                         = "nodeType"
 	FieldPageNo                           = "pageNo"
 	FieldPageSize                         = "pageSize"
@@ -846,6 +855,7 @@ var fieldMappings = []FieldMapping{
 	{Domain: DomainCommon, Public: FieldCurrentName, Internal: FieldCurrentName},
 	{Domain: DomainCommon, Public: FieldNewName, Internal: FieldNewName},
 	{Domain: DomainCommon, Public: FieldAction, Internal: FieldAction},
+	{Domain: DomainCommon, Public: FieldActionName, Internal: FieldActionName},
 	{Domain: DomainCommon, Public: FieldConditionType, Internal: FieldConditionType},
 	{Domain: DomainCommon, Public: FieldConditions, Internal: FieldConditions},
 	{Domain: DomainCommon, Public: FieldConditionKind, Internal: FieldConditionKind},
@@ -956,6 +966,7 @@ var fieldMappings = []FieldMapping{
 	{Domain: DomainCommon, Public: FieldMeshGroupID, Internal: FieldMeshGroupID},
 	{Domain: DomainCommon, Public: FieldMultiField, Internal: FieldMultiField},
 	{Domain: DomainCommon, Public: FieldNodeID, Internal: FieldNodeID},
+	{Domain: DomainCommon, Public: FieldNodeIDs, Internal: FieldNodeIDs},
 	{Domain: DomainCommon, Public: FieldNodeType, Internal: FieldNodeType},
 	{Domain: DomainCommon, Public: FieldPageNo, Internal: FieldPageNo},
 	{Domain: DomainCommon, Public: FieldPageSize, Internal: FieldPageSize},
@@ -1281,6 +1292,7 @@ var fieldMappings = []FieldMapping{
 	{Domain: DomainPanel, Public: FieldButtonEvent, Internal: FieldButtonEvent},
 	{Domain: DomainPanel, Public: FieldButtonEventID, Internal: FieldButtonEventID},
 	{Domain: DomainPanel, Public: FieldButtonEvents, Internal: FieldButtonEvents},
+	{Domain: DomainPanel, Public: FieldButtonID, Internal: FieldButtonID},
 	{Domain: DomainPanel, Public: FieldButtonType, Internal: FieldButtonType},
 	{Domain: DomainPanel, Public: FieldActions, Internal: FieldDetails},
 	{Domain: DomainPanel, Public: FieldAlias, Internal: FieldAlias},

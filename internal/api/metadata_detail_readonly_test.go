@@ -286,3 +286,87 @@ func TestAutomationDetailGetReturnsEditablePayload(t *testing.T) {
 		t.Fatalf("data = %#v", data)
 	}
 }
+
+func TestAutomationDetailGetPreservesGroupedConditionType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"id":"auto-2","name":"空气质量提醒","startTime":"07:00:00","endTime":"22:00:00","repeatType":3,"version":3,"params":"{\"type\":\"or\",\"conditions\":[{\"type\":\"fact\",\"typeId\":2,\"resId\":992405,\"property\":\"pm25\",\"operation\":\"gt\",\"value\":75},{\"type\":\"fact\",\"typeId\":2,\"resId\":992405,\"property\":\"co2\",\"operation\":\"gt\",\"value\":1200}]}","actions":[{"typeId":2,"resId":992502,"resName":"主卧床头面板","rank":0,"params":"{\"set\":{\"p\":true}}"}]}}`))
+	}))
+	defer server.Close()
+
+	client := NewMetadataReadonlyClient(Endpoint{Region: "dev", BaseURL: server.URL}, server.Client())
+	result, err := client.RunAutomationDetailGet(context.Background(), MetadataReadonlyRequest{
+		HouseID: "200171",
+		Parameters: map[string]any{
+			semantic.FieldAutomationID: "auto-2",
+		},
+		Credentials: MetadataReadonlyCredentials{Authorization: "Bearer secret"},
+	})
+	if err != nil {
+		t.Fatalf("RunAutomationDetailGet error = %v", err)
+	}
+	data := result.Data.(map[string]any)
+	for _, key := range []string{semantic.FieldDetail, semantic.FieldEditablePayload} {
+		value := data[key].(map[string]any)
+		if value[semantic.FieldConditionType] != "or" || len(value[semantic.FieldConditions].([]any)) != 2 {
+			t.Fatalf("%s = %#v", key, value)
+		}
+	}
+}
+
+func TestProjectKnobDetailPreservesEditableActionFields(t *testing.T) {
+	detail := projectKnobDetail(map[string]any{
+		"id":         "992601",
+		"name":       "书房旋钮",
+		"localToken": "not-allowed",
+		"details": []any{
+			map[string]any{
+				"id":         "detail-1",
+				"index":      1,
+				"configType": "device",
+				"mode":       "brightness",
+				"model":      "continuous",
+				"alias":      "阅读灯亮度",
+				"sens":       5,
+				"typeId":     2,
+				"resId":      "992003",
+				"resName":    "书房阅读灯",
+				"localToken": "not-allowed",
+			},
+		},
+	})
+
+	actions := detail[semantic.FieldActions].([]any)
+	if len(actions) != 1 {
+		t.Fatalf("actions = %#v", actions)
+	}
+	action := actions[0].(map[string]any)
+	for key, expected := range map[string]any{
+		semantic.FieldID:          "detail-1",
+		semantic.FieldIndex:       1,
+		semantic.FieldConfigType:  "device",
+		semantic.FieldMode:        "brightness",
+		semantic.FieldModel:       "continuous",
+		semantic.FieldAlias:       "阅读灯亮度",
+		semantic.FieldSensitivity: 5,
+		semantic.FieldTargetType:  "device",
+		semantic.FieldTargetID:    "992003",
+		semantic.FieldTargetName:  "书房阅读灯",
+	} {
+		if action[key] != expected {
+			t.Fatalf("action[%s] = %#v, want %#v; action=%#v", key, action[key], expected, action)
+		}
+	}
+	for _, forbidden := range []string{"typeId", "resId", "resName", "sens", "localToken"} {
+		if _, ok := action[forbidden]; ok {
+			t.Fatalf("knob action leaked internal field %q: %#v", forbidden, action)
+		}
+	}
+	encoded, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("marshal detail: %v", err)
+	}
+	if strings.Contains(string(encoded), "not-allowed") || strings.Contains(string(encoded), "localToken") {
+		t.Fatalf("knob detail leaked sensitive data: %s", encoded)
+	}
+}

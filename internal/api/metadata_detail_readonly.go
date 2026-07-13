@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/semantic"
@@ -33,6 +34,90 @@ func (client MetadataReadonlyClient) RunDeviceDetailGet(ctx context.Context, req
 		Capability: "device.detail.get",
 		Data: map[string]any{
 			semantic.FieldDetail: projectDeviceDetail(response["data"], deviceID),
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
+}
+
+func (client MetadataReadonlyClient) RunDeviceComplexGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
+	houseID := strings.TrimSpace(request.HouseID)
+	if houseID == "" {
+		return metadataReadonlyMissingContext(client.endpoint.Region, "device.complex.get", "house_context_missing"), nil
+	}
+	deviceID := strings.TrimSpace(firstNonEmpty(request.DeviceID, stringFromAny(request.Parameters[semantic.FieldDeviceID]), stringFromAny(request.Parameters[semantic.FieldID]), stringFromAny(request.Parameters[semantic.FieldEntityID])))
+	if deviceID == "" {
+		result := metadataReadonlyMissingContext(client.endpoint.Region, "device.complex.get", "device_context_missing")
+		result.HouseID = houseID
+		return result, nil
+	}
+	response, err := client.call(ctx, http.MethodGet, "/v2/thing/manage/house/"+pathSegment(houseID)+"/device/"+pathSegment(deviceID)+"/r/complex", nil, request.Credentials)
+	if err != nil {
+		var statusErr HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			return metadataReadonlyAuthBoundaryResult(client.endpoint.Region, houseID, deviceID, "device.complex.get", statusErr.StatusCode), nil
+		}
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, houseID, deviceID, "device.complex.get", response), nil
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		DeviceID:   deviceID,
+		Capability: "device.complex.get",
+		Data: map[string]any{
+			semantic.FieldDetail: projectDeviceComplexDetail(response["data"], deviceID),
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
+}
+
+func (client MetadataReadonlyClient) RunDeviceShadowGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
+	nodeType := apiNodeTypeForShadow(firstNonEmpty(
+		stringFromAny(request.Parameters[semantic.FieldNodeType]),
+		stringFromAny(request.Parameters[semantic.FieldTargetType]),
+		stringFromAny(request.Parameters[semantic.FieldEntityType]),
+		stringFromAny(request.Parameters[semantic.FieldType]),
+	))
+	resID := strings.TrimSpace(firstNonEmpty(
+		request.DeviceID,
+		stringFromAny(request.Parameters["resId"]),
+		stringFromAny(request.Parameters[semantic.FieldDeviceID]),
+		stringFromAny(request.Parameters[semantic.FieldNodeID]),
+		stringFromAny(request.Parameters[semantic.FieldTargetID]),
+		stringFromAny(request.Parameters[semantic.FieldID]),
+		stringFromAny(request.Parameters[semantic.FieldEntityID]),
+	))
+	if resID == "" {
+		return metadataReadonlyMissingContext(client.endpoint.Region, "device.shadow.get", "device_context_missing"), nil
+	}
+	query := url.Values{}
+	query.Set("resId", resID)
+	query.Set("nodeType", nodeType)
+	response, err := client.call(ctx, http.MethodGet, "/v1/resourceShadow/get?"+query.Encode(), nil, request.Credentials)
+	if err != nil {
+		var statusErr HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			return metadataReadonlyAuthBoundaryResult(client.endpoint.Region, request.HouseID, resID, "device.shadow.get", statusErr.StatusCode), nil
+		}
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, request.HouseID, resID, "device.shadow.get", response), nil
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    strings.TrimSpace(request.HouseID),
+		DeviceID:   resID,
+		Capability: "device.shadow.get",
+		Data: map[string]any{
+			semantic.FieldProperties: projectDeviceShadow(response["data"]),
+			semantic.FieldDetail:     sanitizeCloudData(response["data"]),
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,
@@ -240,6 +325,33 @@ func (client MetadataReadonlyClient) RunAreaDetailGet(ctx context.Context, reque
 	}, nil
 }
 
+func (client MetadataReadonlyClient) RunAreaList(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
+	houseID := strings.TrimSpace(request.HouseID)
+	if houseID == "" {
+		return metadataReadonlyMissingContext(client.endpoint.Region, "area.list", "house_context_missing"), nil
+	}
+	pageNo := positiveInt(request.Parameters[semantic.FieldPageNo], 1)
+	pageSize := positiveInt(firstNonNil(request.Parameters[semantic.FieldPageSize], request.Parameters[semantic.FieldLimit]), 100)
+	response, err := client.call(ctx, http.MethodGet, fmt.Sprintf("/v2/thing/manage/house/%s/area/r/info/%d/%d", pathSegment(houseID), pageNo, pageSize), nil, request.Credentials)
+	if err != nil {
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return MetadataReadonlyResult{}, metadataReadonlyBusinessError("area list", response)
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		Capability: "area.list",
+		Data: map[string]any{
+			semantic.FieldAreas: projectAreaRows(response["data"]),
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
+}
+
 func (client MetadataReadonlyClient) RunHomeDetailGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
 	houseID := strings.TrimSpace(request.HouseID)
 	if houseID == "" {
@@ -301,6 +413,14 @@ func copyHomeDetailString(output map[string]any, outputKey string, input map[str
 			return
 		}
 	}
+}
+
+func (client MetadataReadonlyClient) RunHomePropertyGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
+	houseID := strings.TrimSpace(request.HouseID)
+	if houseID == "" {
+		return metadataReadonlyMissingContext(client.endpoint.Region, "home.property.get", "house_context_missing"), nil
+	}
+	return client.readPath(ctx, request, "home.property.get", "/v2/house/r/"+pathSegment(houseID)+"/properties", http.MethodGet, nil, map[string]any{semantic.FieldProperties: nil})
 }
 
 func (client MetadataReadonlyClient) RunHomeStatGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
@@ -433,6 +553,41 @@ func (client MetadataReadonlyClient) RunGroupDetailGet(ctx context.Context, requ
 		Capability: "group.detail.get",
 		Data: map[string]any{
 			semantic.FieldDetail: projectGroupDetail(response["data"], groupID),
+		},
+		RawShape: responseDataType(response),
+		APICalls: 1,
+		Warnings: []string{},
+	}, nil
+}
+
+func (client MetadataReadonlyClient) RunGroupComplexGet(ctx context.Context, request MetadataReadonlyRequest) (MetadataReadonlyResult, error) {
+	houseID := strings.TrimSpace(request.HouseID)
+	if houseID == "" {
+		return metadataReadonlyMissingContext(client.endpoint.Region, "group.complex.get", "house_context_missing"), nil
+	}
+	groupID := strings.TrimSpace(firstNonEmpty(stringFromAny(request.Parameters[semantic.FieldGroupID]), stringFromAny(request.Parameters[semantic.FieldID]), stringFromAny(request.Parameters[semantic.FieldEntityID])))
+	if groupID == "" {
+		result := metadataReadonlyMissingContext(client.endpoint.Region, "group.complex.get", "group_context_missing")
+		result.HouseID = houseID
+		return result, nil
+	}
+	response, err := client.call(ctx, http.MethodGet, "/v2/thing/manage/house/"+pathSegment(houseID)+"/group/"+pathSegment(groupID)+"/r/complex", nil, request.Credentials)
+	if err != nil {
+		var statusErr HTTPStatusError
+		if errors.As(err, &statusErr) && (statusErr.StatusCode == http.StatusUnauthorized || statusErr.StatusCode == http.StatusForbidden) {
+			return metadataReadonlyAuthBoundaryResult(client.endpoint.Region, houseID, request.DeviceID, "group.complex.get", statusErr.StatusCode), nil
+		}
+		return MetadataReadonlyResult{}, err
+	}
+	if !isBusinessOK(response) {
+		return metadataReadonlyPartialBusinessResult(client.endpoint.Region, houseID, request.DeviceID, "group.complex.get", response), nil
+	}
+	return MetadataReadonlyResult{
+		Region:     client.endpoint.Region,
+		HouseID:    houseID,
+		Capability: "group.complex.get",
+		Data: map[string]any{
+			semantic.FieldDetail: projectGroupComplexDetail(response["data"], groupID),
 		},
 		RawShape: responseDataType(response),
 		APICalls: 1,
@@ -844,6 +999,29 @@ func projectAreaDetail(data any, fallbackAreaID string) map[string]any {
 	return compactMap(area)
 }
 
+func projectAreaRows(data any) []any {
+	rows := rowsFromData(data)
+	areas := make([]any, 0, len(rows))
+	for _, row := range rows {
+		item, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		area := map[string]any{}
+		copyResponseStringMappings(area, item, semantic.AreaSummaryMappings())
+		if ids := stringListFromAny(item[semantic.FieldRoomIDs]); len(ids) > 0 {
+			area[semantic.FieldRoomIDs] = ids
+			if area[semantic.FieldRoomCount] == nil {
+				area[semantic.FieldRoomCount] = len(ids)
+			}
+		}
+		if len(area) > 0 {
+			areas = append(areas, compactMap(area))
+		}
+	}
+	return areas
+}
+
 func projectAreaDetailRoomRows(item map[string]any) []any {
 	rows := nestedRowsFromData(firstNonNil(item[semantic.FieldRooms], item["roomList"]), semantic.FieldRooms, "roomList")
 	rooms := make([]any, 0, len(rows))
@@ -868,6 +1046,15 @@ func projectAreaDetailRoomRows(item map[string]any) []any {
 		}
 	}
 	return rooms
+}
+
+func apiNodeTypeForShadow(value string) string {
+	nodeType := NormalizeNodeType(value)
+	nodeTypeID, ok := NodeTypeID(nodeType)
+	if !ok {
+		return nodeTypeDevice
+	}
+	return nodeTypeID
 }
 
 func stringListFromAny(value any) []string {
@@ -930,11 +1117,48 @@ func projectGroupDetail(data any, fallbackGroupID string) map[string]any {
 	if group[semantic.FieldID] == nil && strings.TrimSpace(fallbackGroupID) != "" {
 		group[semantic.FieldID] = strings.TrimSpace(fallbackGroupID)
 	}
+	if description := firstAnyString(item, semantic.FieldDescription, "desc"); description != "" {
+		group[semantic.FieldDescription] = description
+	}
+	if roomID := firstAnyString(item, semantic.FieldRoomID); roomID != "" {
+		group[semantic.FieldRoomID] = roomID
+	}
+	if componentID := firstAnyString(item, semantic.FieldComponentID, "cid", semantic.FieldProductComponentID); componentID != "" {
+		group[semantic.FieldComponentID] = componentID
+	}
 	if configs := projectConfigRows(firstNonNil(item[semantic.FieldConfigs], item["configs"])); len(configs) > 0 {
 		group[semantic.FieldConfigs] = configs
 		group[semantic.FieldConfigCount] = len(configs)
 	}
 	if devices := projectDeviceRows(map[string]any{semantic.FieldDevices: firstNonNil(item[semantic.FieldDevices], item["deviceList"])}); len(devices) > 0 {
+		group[semantic.FieldDevices] = devices
+		group[semantic.FieldDeviceCount] = len(devices)
+	}
+	return compactMap(group)
+}
+
+func projectGroupComplexDetail(data any, fallbackGroupID string) map[string]any {
+	item, _ := data.(map[string]any)
+	if detail, ok := item[semantic.FieldDetail].(map[string]any); ok {
+		item = detail
+	}
+	group := projectGroupDetail(item, fallbackGroupID)
+	if item == nil {
+		return compactMap(group)
+	}
+	copyOptionalPublicScalar(group, item, semantic.FieldDescription, semantic.FieldIcon, semantic.FieldImage, semantic.FieldCategory, semantic.FieldRoomID, semantic.FieldHouseID)
+	if cid := firstCloudAny(item, "cid", "categoryId", semantic.FieldProductCategoryID); cid != nil {
+		group[semantic.FieldProductCategoryID] = sanitizeCloudData(cid)
+	}
+	if properties := projectComplexPropertyRows(firstNonNil(item[semantic.FieldProperties], item["propertyList"], item["propertiesList"]), true); len(properties) > 0 {
+		group[semantic.FieldProperties] = properties
+		group["propertyCount"] = len(properties)
+	}
+	if actions := projectComplexActionRows(firstNonNil(item[semantic.FieldSupportActions], item[semantic.FieldActions], item["actionList"])); len(actions) > 0 {
+		group[semantic.FieldSupportActions] = actions
+		group["actionCount"] = len(actions)
+	}
+	if devices := projectComplexDeviceRows(firstNonNil(item[semantic.FieldDevices], item["deviceList"], item["members"])); len(devices) > 0 {
 		group[semantic.FieldDevices] = devices
 		group[semantic.FieldDeviceCount] = len(devices)
 	}
@@ -951,8 +1175,18 @@ func projectConfigRows(data any) []any {
 		}
 		config := map[string]any{}
 		copyResponseStringMappings(config, source, semantic.ConfigSummaryMappings())
+		if property := publicPropertyNameFromRow(source); property != "" {
+			config[semantic.FieldProperty] = property
+		}
 		if value := source[semantic.FieldValue]; value != nil {
-			config[semantic.FieldValue] = value
+			config[semantic.FieldValue] = sanitizeCloudData(value)
+		}
+		copyOptionalPublicScalar(config, source, semantic.FieldUnit, semantic.FieldType, semantic.FieldIndex, semantic.FieldSubIndex, semantic.FieldCategory)
+		if valueRange := sanitizeCloudData(firstCloudAny(source, semantic.FieldValueRange, "range")); valueRange != nil {
+			config[semantic.FieldValueRange] = valueRange
+		}
+		if valueList := sanitizeCloudData(firstCloudAny(source, semantic.FieldValueList, "values")); valueList != nil {
+			config[semantic.FieldValueList] = valueList
 		}
 		if len(config) > 0 {
 			configs = append(configs, compactMap(config))
@@ -994,6 +1228,9 @@ func projectDeviceRows(data any) []any {
 		}
 		device := map[string]any{}
 		copyResponseStringMappings(device, item, semantic.DeviceSummaryMappings())
+		if online, ok := boolFromAny(firstCloudAny(item, semantic.EntitySummaryOnlineFields()...)); ok {
+			device[semantic.FieldOnline] = online
+		}
 		if ids := stringListFromAny(item["roomIds"]); len(ids) > 0 {
 			device[semantic.FieldRoomIDs] = ids
 		}
@@ -1040,6 +1277,70 @@ func projectDeviceDetail(data any, fallbackDeviceID string) map[string]any {
 	return detail
 }
 
+func projectDeviceComplexDetail(data any, fallbackDeviceID string) map[string]any {
+	item, _ := data.(map[string]any)
+	if detail, ok := item[semantic.FieldDetail].(map[string]any); ok {
+		item = detail
+	}
+	detail := map[string]any{}
+	if item != nil {
+		if devices := projectDeviceRows(item); len(devices) > 0 {
+			if summary, ok := devices[0].(map[string]any); ok {
+				for key, value := range summary {
+					detail[key] = value
+				}
+			}
+		}
+		delete(detail, semantic.FieldDeviceIdentifier)
+		copyOptionalPublicScalar(detail, item,
+			semantic.FieldDescription,
+			semantic.FieldIcon,
+			semantic.FieldImage,
+			semantic.FieldCategory,
+			semantic.FieldType,
+			semantic.FieldTypeName,
+			semantic.FieldConnectType,
+			semantic.FieldRoomID,
+			semantic.FieldHouseID,
+			semantic.FieldGatewayDeviceID,
+			semantic.FieldCapabilityProductID,
+			semantic.FieldProductCategoryID,
+			semantic.FieldComponentID,
+			semantic.FieldOnline,
+			semantic.FieldBind,
+			semantic.FieldVirtual,
+		)
+		if properties := projectComplexControlPropertyRows(item); len(properties) > 0 {
+			detail[semantic.FieldProperties] = properties
+			detail["propertyCount"] = len(properties)
+		}
+		if configs := projectConfigRows(firstNonNil(item[semantic.FieldConfigs], item["configs"])); len(configs) > 0 {
+			detail[semantic.FieldConfigs] = configs
+			detail[semantic.FieldConfigCount] = len(configs)
+		}
+		if actions := projectComplexActionRows(firstNonNil(item[semantic.FieldSupportActions], item[semantic.FieldActions], item["actionList"])); len(actions) > 0 {
+			detail[semantic.FieldSupportActions] = actions
+			detail["actionCount"] = len(actions)
+		}
+		if subDevices := projectComplexDeviceRows(firstNonNil(item["subDevices"], item["subDeviceList"], item["children"]), item); len(subDevices) > 0 {
+			detail["subDevices"] = subDevices
+			detail[semantic.FieldChildDeviceCount] = len(subDevices)
+		}
+		if state := projectDeviceShadow(item["shadow"]); len(state) > 0 {
+			detail[semantic.FieldCurrent] = state
+		}
+		if attrs := projectDeviceAttributes(item[semantic.FieldAttributes]); len(attrs) > 0 {
+			detail[semantic.FieldAttributes] = attrs
+		} else if attrs := projectDeviceAttributes(item["attr"]); len(attrs) > 0 {
+			detail[semantic.FieldAttributes] = attrs
+		}
+	}
+	if detail[semantic.FieldID] == nil && strings.TrimSpace(fallbackDeviceID) != "" {
+		detail[semantic.FieldID] = strings.TrimSpace(fallbackDeviceID)
+	}
+	return compactMap(detail)
+}
+
 func removeDeviceDetailInternalFields(detail map[string]any) {
 	for _, key := range []string{
 		semantic.FieldDeviceIdentifier,
@@ -1053,6 +1354,463 @@ func removeDeviceDetailInternalFields(detail map[string]any) {
 		semantic.FieldRoomRank,
 	} {
 		delete(detail, key)
+	}
+}
+
+func projectComplexDeviceRows(data any, parents ...map[string]any) []any {
+	rows := complexRowsFromData(data, semantic.FieldDevices, "deviceList", "subDevices", "subDeviceList", "children", "members")
+	devices := make([]any, 0, len(rows))
+	var parent map[string]any
+	if len(parents) > 0 {
+		parent = parents[0]
+	}
+	for _, row := range rows {
+		source, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		controlSource := inheritComplexControlContext(parent, source)
+		device := map[string]any{}
+		copyResponseStringMappings(device, source, semantic.DeviceSummaryMappings())
+		delete(device, semantic.FieldDeviceIdentifier)
+		copyOptionalPublicScalar(device,
+			source,
+			semantic.FieldDescription,
+			semantic.FieldIcon,
+			semantic.FieldImage,
+			semantic.FieldCategory,
+			semantic.FieldType,
+			semantic.FieldTypeName,
+			semantic.FieldConnectType,
+			semantic.FieldRoomID,
+			semantic.FieldHouseID,
+			semantic.FieldGatewayDeviceID,
+			semantic.FieldCapabilityProductID,
+			semantic.FieldProductCategoryID,
+			semantic.FieldComponentID,
+			semantic.FieldIndex,
+			semantic.FieldSubIndex,
+			semantic.FieldOnline,
+			semantic.FieldBind,
+			semantic.FieldVirtual,
+		)
+		promoteComplexComponentIndex(device, source)
+		if properties := projectComplexControlPropertyRows(controlSource); len(properties) > 0 {
+			device[semantic.FieldProperties] = properties
+			device["propertyCount"] = len(properties)
+		}
+		if configs := projectConfigRows(firstNonNil(source[semantic.FieldConfigs], source["configs"])); len(configs) > 0 {
+			device[semantic.FieldConfigs] = configs
+			device[semantic.FieldConfigCount] = len(configs)
+		}
+		if actions := projectComplexActionRows(firstNonNil(source[semantic.FieldSupportActions], source[semantic.FieldActions], source["actionList"])); len(actions) > 0 {
+			device[semantic.FieldSupportActions] = actions
+			device["actionCount"] = len(actions)
+		}
+		if len(device) > 0 {
+			devices = append(devices, compactMap(device))
+		}
+	}
+	return devices
+}
+
+func inheritComplexControlContext(parent map[string]any, source map[string]any) map[string]any {
+	if len(parent) == 0 {
+		return source
+	}
+	merged := make(map[string]any, len(parent)+len(source))
+	for key, value := range parent {
+		merged[key] = value
+	}
+	for key, value := range source {
+		merged[key] = value
+	}
+	if inheritedConfigs := inheritedComplexConfigs(parent, source); len(inheritedConfigs) > 0 {
+		merged[semantic.FieldConfigs] = inheritedConfigs
+		merged["configs"] = inheritedConfigs
+	}
+	return merged
+}
+
+func inheritedComplexConfigs(parent map[string]any, source map[string]any) []any {
+	parentConfigs := complexRowsFromData(firstNonNil(parent[semantic.FieldConfigs], parent["configs"]), semantic.FieldConfigs, "configs", "rows", "list")
+	sourceConfigs := complexRowsFromData(firstNonNil(source[semantic.FieldConfigs], source["configs"]), semantic.FieldConfigs, "configs", "rows", "list")
+	if len(parentConfigs) == 0 {
+		return sourceConfigs
+	}
+	if len(sourceConfigs) == 0 {
+		return parentConfigs
+	}
+	merged := make([]any, 0, len(sourceConfigs)+len(parentConfigs))
+	merged = append(merged, sourceConfigs...)
+	merged = append(merged, parentConfigs...)
+	return merged
+}
+
+func promoteComplexComponentIndex(target map[string]any, source map[string]any) {
+	componentID := firstAnyString(source, append([]string{semantic.FieldComponentID}, semantic.ComponentIDFields()...)...)
+	if componentID == "" {
+		return
+	}
+	if target[semantic.FieldComponentID] == nil {
+		target[semantic.FieldComponentID] = componentID
+	}
+	if target[semantic.FieldIndex] == nil {
+		target[semantic.FieldIndex] = componentID
+	}
+}
+
+func projectComplexPropertyRows(data any, writableDefault bool) []any {
+	rows := complexPropertyRowsFromData(data)
+	properties := make([]any, 0, len(rows))
+	for _, row := range rows {
+		source, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		property := projectComplexPropertyRow(source, writableDefault)
+		if len(property) > 0 {
+			properties = append(properties, property)
+		}
+	}
+	return properties
+}
+
+func projectComplexControlPropertyRows(source map[string]any) []any {
+	properties := projectComplexPropertyRows(firstNonNil(source[semantic.FieldProperties], source["propertyList"], source["propertiesList"]), true)
+	return normalizeComplexUserWritableProperties(source, properties)
+}
+
+func normalizeComplexUserWritableProperties(source map[string]any, properties []any) []any {
+	category := normalizedComplexDeviceCategory(source)
+	blockProtocolLightWrites := complexProtocolLightWritesBlocked(source)
+	for _, row := range properties {
+		property, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		propertyName := stringFromAny(property[semantic.FieldProperty])
+		if propertyName == "" {
+			continue
+		}
+		if blockProtocolLightWrites && complexLightControlProperty(propertyName) {
+			markComplexPropertyReadOnly(property)
+			continue
+		}
+		if !complexPropertyUserWritable(category, propertyName) {
+			markComplexPropertyReadOnly(property)
+		}
+	}
+	return properties
+}
+
+func markComplexPropertyReadOnly(property map[string]any) {
+	property["writable"] = false
+}
+
+func normalizedComplexDeviceCategory(source map[string]any) string {
+	category := firstAnyString(source, semantic.FieldCategory, "productCategory", "deviceCategory", "componentCategory", "component")
+	category = strings.ToLower(strings.TrimSpace(category))
+	category = strings.NewReplacer("-", "_", " ", "_").Replace(category)
+	return category
+}
+
+func complexPropertyUserWritable(category string, propertyName string) bool {
+	property := strings.TrimSpace(propertyName)
+	if property == "" {
+		return false
+	}
+	switch category {
+	case "light", "dali_light", "knx_light":
+		return stringInSet(property, semantic.FieldPower, semantic.FieldBrightness, semantic.FieldColorTemperature, semantic.FieldColor, "angle")
+	case "curtain", "curtain_motor", "dream_curtain", "shade", "blind":
+		return stringInSet(property, "targetPosition", "targetRotaryAngle", "curtainAngle", "runSpeed", "reverse", "calibration")
+	case "relay_switch", "switch_relay", "wireless_switch", "switch":
+		return stringInSet(property, semantic.FieldSwitchPower, semantic.FieldPower, "backlightPower", "relayPower", "smartSwitch")
+	case "temp_control", "air_conditioner", "fresh_air", "floor_heating", "bath_heater", "thermostat":
+		return stringInSet(property, "airConditionerPower", "airConditionerTargetTemperature", "airConditionerMode", "airConditionerFanSpeed", "rfhPower", "rfhTargetTemperature", "vmcPower", "vmcFan", "bathHeatMode", "fan", "heat", "ventilation", "targetTemperature")
+	case "contact_sensor", "human_sensor", "motion_sensor", "presence_sensor", "light_sensor", "illuminance_sensor", "radar_sensor", "gateway", "scene_panel", "panel_screen", "screen_panel", "knob_switch", "rotary_switch", "dali_knob":
+		return false
+	}
+	return stringInSet(property, semantic.FieldPower, semantic.FieldBrightness, semantic.FieldColorTemperature, semantic.FieldColor, semantic.FieldSwitchPower, "targetPosition", "targetRotaryAngle", "airConditionerPower", "airConditionerTargetTemperature", "airConditionerMode", "airConditionerFanSpeed")
+}
+
+func complexProtocolLightWritesBlocked(source map[string]any) bool {
+	if !complexSourceLooksLikeLight(source) {
+		return false
+	}
+	productID := stringFromAny(firstCloudAny(source, semantic.FieldCapabilityProductID, "capabilityPid", "capabilityPID", "capabilityProductID", "productId", "productID", "pid"))
+	name := strings.ToLower(firstAnyString(source, semantic.FieldName, semantic.FieldAlias))
+	if stringInSet(productID, "17000002", "17000003", "17000004", "17000015", "17000023", "17000024", "17000025", "17000026", "17000027") {
+		return true
+	}
+	if (strings.Contains(name, "dali") || strings.Contains(name, "knx")) && (strings.Contains(name, "灯") || strings.HasPrefix(name, "light-") || strings.HasPrefix(name, "light_")) {
+		return true
+	}
+	return complexSourceHasConfigProperty(source,
+		"adr_sw_ctl", "adr_sw_sts",
+		"adr_lit_ctl", "adr_lit_sts",
+		"adr_bri_ctl", "adr_bri_sts",
+		"adr_ct_ctl", "adr_ct_sts",
+		"adr_rgb_ctl", "adr_rgb_sts",
+		"daliSwitchType", "daliDeviceType", "daliVersion",
+		"knxSwitchType", "knxDeviceType", "knxVersion",
+	)
+}
+
+func complexSourceLooksLikeLight(source map[string]any) bool {
+	category := normalizedComplexDeviceCategory(source)
+	if stringInSet(category, "light", "dali_light", "knx_light") {
+		return true
+	}
+	name := strings.ToLower(firstAnyString(source, semantic.FieldName, semantic.FieldAlias, semantic.FieldTypeName, semantic.FieldType))
+	return strings.HasPrefix(name, "light-") || strings.HasPrefix(name, "light_") || strings.Contains(name, "灯")
+}
+
+func complexLightControlProperty(propertyName string) bool {
+	return stringInSet(strings.TrimSpace(propertyName), semantic.FieldPower, semantic.FieldBrightness, semantic.FieldColorTemperature, semantic.FieldColor, "angle")
+}
+
+func complexPropertyListHasAny(properties []any, names ...string) bool {
+	for _, name := range names {
+		if complexPropertyListHas(properties, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func complexPropertyListHas(properties []any, name string) bool {
+	for _, row := range properties {
+		property, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		if stringFromAny(property[semantic.FieldProperty]) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func complexSourceHasConfigProperty(source map[string]any, names ...string) bool {
+	wanted := map[string]bool{}
+	for _, name := range names {
+		wanted[strings.ToLower(strings.TrimSpace(name))] = true
+	}
+	for _, row := range complexRowsFromData(firstNonNil(source[semantic.FieldConfigs], source["configs"]), semantic.FieldConfigs, "configs", "rows", "list") {
+		item, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		propertyName := strings.ToLower(strings.TrimSpace(publicPropertyNameFromRow(item)))
+		if wanted[propertyName] {
+			return true
+		}
+	}
+	return false
+}
+
+func stringInSet(value string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if value == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func complexPropertyRowsFromData(data any) []any {
+	switch typed := data.(type) {
+	case nil:
+		return nil
+	case []any:
+		return typed
+	case map[string]any:
+		for _, key := range []string{semantic.FieldProperties, "propertyList", "propertiesList", "rows", "list"} {
+			if rows, ok := typed[key].([]any); ok {
+				return rows
+			}
+		}
+		if looksLikePropertyRow(typed) {
+			return []any{typed}
+		}
+		rows := make([]any, 0, len(typed))
+		for key, value := range typed {
+			if propertyID, ok := semantic.PropertyID(key); ok && !semantic.PropertySensitive(propertyID) {
+				rows = append(rows, map[string]any{
+					semantic.FieldProperty: semantic.PropertyName(propertyID),
+					semantic.FieldValue:    sanitizeCloudData(value),
+					"writable":             true,
+				})
+			}
+		}
+		return rows
+	default:
+		return nil
+	}
+}
+
+func looksLikePropertyRow(item map[string]any) bool {
+	if publicPropertyNameFromRow(item) != "" {
+		return true
+	}
+	for _, key := range []string{semantic.FieldAccess, semantic.FieldFormat, semantic.FieldValueRange, semantic.FieldValueList, semantic.FieldUnit, semantic.FieldOperators} {
+		if _, ok := item[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func projectComplexPropertyRow(source map[string]any, writableDefault bool) map[string]any {
+	propertyName := publicPropertyNameFromRow(source)
+	if propertyName == "" || semantic.PropertySensitive(propertyName) {
+		return nil
+	}
+	property := map[string]any{
+		semantic.FieldProperty: propertyName,
+		"writable":             propertyWritable(source, writableDefault),
+	}
+	copyOptionalPublicScalar(property, source,
+		semantic.FieldName,
+		semantic.FieldDescription,
+		semantic.FieldAccess,
+		semantic.FieldFormat,
+		semantic.FieldUnit,
+		semantic.FieldType,
+		semantic.FieldIndex,
+		semantic.FieldSubIndex,
+		semantic.FieldCategory,
+	)
+	if value := firstCloudAny(source, semantic.FieldValue, "currentValue", "current", "state"); value != nil {
+		property[semantic.FieldValue] = sanitizeCloudData(value)
+	}
+	if valueRange := sanitizeCloudData(firstCloudAny(source, semantic.FieldValueRange, "range")); valueRange != nil {
+		property[semantic.FieldValueRange] = valueRange
+	}
+	if valueList := sanitizeCloudData(firstCloudAny(source, semantic.FieldValueList, "values")); valueList != nil {
+		property[semantic.FieldValueList] = valueList
+	}
+	if operators := sanitizeCloudData(firstCloudAny(source, semantic.FieldOperators, "operatorList")); operators != nil {
+		property[semantic.FieldOperators] = operators
+	}
+	if params := projectComplexPropertyRows(firstNonNil(source[semantic.FieldParameters], source["params"]), false); len(params) > 0 {
+		property[semantic.FieldParameters] = params
+	}
+	return compactMap(property)
+}
+
+func publicPropertyNameFromRow(source map[string]any) string {
+	propertyID := firstAnyString(source, append(append(semantic.PropertyIDFields(), semantic.FieldProperty), semantic.FieldPropertyName)...)
+	if propertyID == "" {
+		return ""
+	}
+	if semantic.PropertySensitive(propertyID) {
+		return ""
+	}
+	return semantic.PropertyName(propertyID)
+}
+
+func propertyWritable(source map[string]any, fallback bool) bool {
+	if explicit, ok := source["writable"].(bool); ok {
+		return explicit
+	}
+	if operatorsValue, ok := firstNonNil(source[semantic.FieldOperators], source["operatorList"]).([]any); ok {
+		for _, operator := range operatorsValue {
+			text := strings.ToLower(strings.TrimSpace(fmt.Sprint(operator)))
+			if text == "set" || text == "adjust" || text == "toggle" || strings.Contains(text, "write") {
+				return true
+			}
+		}
+		if len(operatorsValue) > 0 {
+			return false
+		}
+	}
+	access := source[semantic.FieldAccess]
+	if access == nil {
+		return fallback
+	}
+	switch typed := access.(type) {
+	case string:
+		text := strings.ToLower(strings.TrimSpace(typed))
+		if strings.Contains(text, "write") || strings.Contains(text, "rw") || strings.Contains(text, "set") {
+			return true
+		}
+		if strings.Contains(text, "read") || strings.Contains(text, "ro") {
+			return false
+		}
+		if numeric, ok := parseAccessNumber(text); ok {
+			return numeric&2 != 0
+		}
+	case float64:
+		return int(typed)&2 != 0
+	case int:
+		return typed&2 != 0
+	case int64:
+		return typed&2 != 0
+	}
+	return fallback
+}
+
+func parseAccessNumber(text string) (int, bool) {
+	if text == "" {
+		return 0, false
+	}
+	var numeric int
+	_, err := fmt.Sscanf(text, "%d", &numeric)
+	return numeric, err == nil
+}
+
+func projectComplexActionRows(data any) []any {
+	rows := complexRowsFromData(data, semantic.FieldSupportActions, semantic.FieldActions, "actionList", "rows", "list")
+	actions := make([]any, 0, len(rows))
+	for _, row := range rows {
+		source, ok := row.(map[string]any)
+		if !ok {
+			continue
+		}
+		actionName := firstAnyString(source, semantic.ActionIDFields()...)
+		if actionName == "" || isSensitiveCloudField(strings.ToLower(strings.TrimSpace(actionName))) {
+			continue
+		}
+		action := map[string]any{semantic.FieldActionName: actionName}
+		copyOptionalPublicScalar(action, source, semantic.FieldName, semantic.FieldDescription, semantic.FieldType, semantic.FieldCategory)
+		if params := projectComplexPropertyRows(firstNonNil(source[semantic.FieldParameters], source["params"], source["paramList"]), false); len(params) > 0 {
+			action[semantic.FieldParameters] = params
+		}
+		actions = append(actions, compactMap(action))
+	}
+	return actions
+}
+
+func complexRowsFromData(data any, keys ...string) []any {
+	switch typed := data.(type) {
+	case []any:
+		return typed
+	case map[string]any:
+		for _, key := range keys {
+			if rows, ok := typed[key].([]any); ok {
+				return rows
+			}
+		}
+		return []any{typed}
+	default:
+		return nil
+	}
+}
+
+func copyOptionalPublicScalar(target map[string]any, source map[string]any, keys ...string) {
+	for _, key := range keys {
+		value, ok := source[key]
+		if !ok || value == nil {
+			continue
+		}
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if isSensitiveCloudField(normalized) {
+			continue
+		}
+		target[key] = sanitizeCloudData(value)
 	}
 }
 

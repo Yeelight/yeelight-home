@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -44,7 +45,7 @@ func NormalizePanelActions(value any) ([]any, bool) {
 
 func NormalizePanelAction(source map[string]any) map[string]any {
 	row := NormalizeAction(source, ActionOptions{GroupTypeID: ResourceMeshGroup})
-	for _, key := range []string{FieldID, FieldIndex, FieldConfigType, FieldModel, FieldType, FieldProperty, FieldValue} {
+	for _, key := range []string{FieldID, FieldIndex, FieldConfigType, FieldModel, FieldAlias, FieldType, FieldProperty, FieldValue} {
 		if row[key] == nil {
 			if value, ok := FirstPresent(source, key); ok {
 				row[key] = value
@@ -141,6 +142,13 @@ func NormalizeAction(source map[string]any, options ActionOptions) map[string]an
 }
 
 func ActionParamsFromRow(source map[string]any) (any, bool) {
+	if value, ok := FirstPresent(source, FieldCustom); ok {
+		custom, valid := value.(map[string]any)
+		if !valid || len(custom) == 0 {
+			return nil, false
+		}
+		return deepMap(custom), true
+	}
 	if value, ok := FirstPresent(source, actionAliasConfig.ActionParams...); ok {
 		return NormalizeLightParams(value), true
 	}
@@ -580,6 +588,13 @@ func ToPublicAction(source map[string]any) map[string]any {
 }
 
 func MergePublicActionParams(target map[string]any, value any) {
+	if encoded, ok := value.(string); ok {
+		var decoded map[string]any
+		if json.Unmarshal([]byte(strings.TrimSpace(encoded)), &decoded) != nil {
+			return
+		}
+		value = decoded
+	}
 	params, ok := ToPublicLightParams(value).(map[string]any)
 	if !ok {
 		return
@@ -757,10 +772,10 @@ func ToPublicCondition(source map[string]any) map[string]any {
 			result[FieldTargetType] = name
 		}
 	}
-	if result[FieldProperty] == nil {
-		if value, ok := result[internalProperty]; ok {
-			result[FieldProperty] = PropertyName(String(value))
-		}
+	if value, ok := result[FieldProperty]; ok {
+		result[FieldProperty] = PropertyName(String(value))
+	} else if value, ok := result[internalProperty]; ok {
+		result[FieldProperty] = PropertyName(String(value))
 	}
 	if result[FieldCapabilityProductID] == nil {
 		if value, ok := result[internalProductID]; ok {

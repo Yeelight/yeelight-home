@@ -25,6 +25,7 @@ func KnobDetailWriteFields() []string {
 		FieldConfigType,
 		FieldMode,
 		FieldModel,
+		FieldAlias,
 		InternalField(DomainKnob, FieldTargetID),
 		InternalField(DomainKnob, FieldTargetType),
 		InternalField(DomainPanel, FieldTargetType),

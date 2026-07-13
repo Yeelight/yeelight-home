@@ -34,15 +34,23 @@ type lightAdjustSpec struct {
 
 func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec lightPropertySpec) (contract.Response, error) {
 	target := entityGetTargetFromRequest(request)
-	if target.id == "" && target.name == "" {
-		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
-	}
 	writeValue, expectedValue, ok := spec.resolveValue(request)
 	if !ok {
 		return lightControlClarificationResponse(request, spec.missingReason, target, nil, 0), nil
 	}
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
+	}
+	if direct, ok := directNodePropertyTarget(request, houseID, target); ok && direct.entityType != "device" {
+		execution, err := runNodePropertySet(ctx, endpoint, direct, houseID, spec.propertyID, writeValue, request, authorization, clientID)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		entities := api.EntityListResult{Region: endpoint.Region, HouseID: houseID, Warnings: []string{}}
+		return nodePropertySetResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), execution, expectedValue, 0, semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
+	}
+	if target.id == "" && target.name == "" {
+		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
 	}
 	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
 	if err != nil {
@@ -58,7 +66,20 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 		return lightControlClarificationResponse(request, "ambiguous_target", target, candidates, entityListAPICalls(entities)), nil
 	}
 	if match.Type != "device" {
-		return lightControlClarificationResponse(request, "target_not_device", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
+		if !nodePropertySetEntityTypeSupported(match.Type) {
+			return lightControlClarificationResponse(request, "target_not_supported_node", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
+		}
+		execution, err := runNodePropertySet(ctx, endpoint, nodePropertyTarget{
+			entityType: match.Type,
+			nodeID:     match.ID,
+			name:       match.Name,
+			roomID:     match.RoomID,
+			roomName:   target.roomName,
+		}, houseID, spec.propertyID, writeValue, request, authorization, clientID)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		return nodePropertySetResponse(request, entities, match, execution, expectedValue, entityListAPICalls(entities), semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
 	}
 	execution, err := api.NewDevicePropertySetClient(endpoint, nil).Run(ctx, api.DevicePropertySetRequest{
 		HouseID:      houseID,
@@ -83,15 +104,23 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 
 func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec lightAdjustSpec) (contract.Response, error) {
 	target := entityGetTargetFromRequest(request)
-	if target.id == "" && target.name == "" {
-		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
-	}
 	delta, ok := spec.resolveDelta(request)
 	if !ok {
 		return lightControlClarificationResponse(request, spec.missingReason, target, nil, 0), nil
 	}
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
+	}
+	if direct, ok := directNodePropertyTarget(request, houseID, target); ok && direct.entityType != "device" {
+		execution, err := runNodePropertyAdjust(ctx, endpoint, direct, houseID, spec.propertyID, delta, authorization, clientID)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		entities := api.EntityListResult{Region: endpoint.Region, HouseID: houseID, Warnings: []string{}}
+		return nodePropertyAdjustResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), execution, delta, 0, semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
+	}
+	if target.id == "" && target.name == "" {
+		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
 	}
 	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
 	if err != nil {
@@ -107,7 +136,20 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 		return lightControlClarificationResponse(request, "ambiguous_target", target, candidates, entityListAPICalls(entities)), nil
 	}
 	if match.Type != "device" {
-		return lightControlClarificationResponse(request, "target_not_device", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
+		if !nodePropertySetEntityTypeSupported(match.Type) {
+			return lightControlClarificationResponse(request, "target_not_supported_node", target, []api.EntitySummary{match}, entityListAPICalls(entities)), nil
+		}
+		execution, err := runNodePropertyAdjust(ctx, endpoint, nodePropertyTarget{
+			entityType: match.Type,
+			nodeID:     match.ID,
+			name:       match.Name,
+			roomID:     match.RoomID,
+			roomName:   target.roomName,
+		}, houseID, spec.propertyID, delta, authorization, clientID)
+		if err != nil {
+			return contract.Response{}, err
+		}
+		return nodePropertyAdjustResponse(request, entities, match, execution, delta, entityListAPICalls(entities), semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
 	}
 	before, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
 		DeviceID:     match.ID,

@@ -330,7 +330,7 @@ func TestInvokeKnobConfigureExecutesDirectly(t *testing.T) {
 				_, _ = writer.Write([]byte(`{"success":true,"data":{"details":[{"id":"detail-1","index":1,"mode":"old"}]}}`))
 				return
 			}
-			_, _ = writer.Write([]byte(`{"success":true,"data":{"details":[{"id":"detail-1","index":1,"mode":"scene","resId":"scene-1"}]}}`))
+			_, _ = writer.Write([]byte(`{"success":true,"data":{"details":[{"id":"detail-1","index":1,"mode":"scene","alias":"观影旋钮","resId":"scene-1","resName":"观影"}]}}`))
 		case "/apis/iot/v1/multi-knob/update":
 			if err := json.NewDecoder(request.Body).Decode(&writeBody); err != nil {
 				t.Fatalf("decode write body: %v", err)
@@ -343,7 +343,7 @@ func TestInvokeKnobConfigureExecutesDirectly(t *testing.T) {
 	defer server.Close()
 	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
 	app := newInvokeTestApp(t, "Bearer token-panel-config-secret", "client-panel-config-1", "200171")
-	input := `{"contractVersion":"1.0","requestId":"req-knob-config-execute","locale":"zh-CN","utterance":"配置旋钮第一个子键为情景","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"knob-1","actions":[{"id":"detail-1","index":1,"mode":"scene","targetType":"scene","targetId":"scene-1"}]}}`
+	input := `{"contractVersion":"1.0","requestId":"req-knob-config-execute","locale":"zh-CN","utterance":"配置旋钮第一个子键为情景","intent":"knob.configure","parameters":{"houseId":"200171","deviceId":"knob-1","actions":[{"id":"detail-1","index":1,"mode":"scene","alias":"观影旋钮","targetType":"scene","targetId":"scene-1","targetName":"观影"}]}}`
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := app.run([]string{"invoke", "--stdin"}, strings.NewReader(input), &stdout, &stderr)
@@ -352,6 +352,11 @@ func TestInvokeKnobConfigureExecutesDirectly(t *testing.T) {
 	}
 	if writeBody["id"] != "knob-1" {
 		t.Fatalf("writeBody = %#v", writeBody)
+	}
+	details := writeBody[semantic.FieldDetails].([]any)
+	detail := details[0].(map[string]any)
+	if detail[semantic.FieldAlias] != "观影旋钮" || detail["resName"] != "观影" {
+		t.Fatalf("writeBody details = %#v", writeBody)
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
 	if response["status"] != "success" || response["traceId"] != "panel-configuration-execute" {

@@ -30,6 +30,7 @@ func sceneActionItemShape() map[string]any {
 		semantic.FieldTargetID:   "optional target id from Runtime evidence; omit when targetName uniquely resolves the target",
 		semantic.FieldTargetName: "optional target display name; Runtime resolves unique names within the selected home",
 		semantic.FieldSet:        lightActionParamsShape()[semantic.FieldSet],
+		semantic.FieldCustom:     lightActionParamsShape()[semantic.FieldCustom],
 		semantic.FieldAction:     "optional action mode returned by detail evidence; preserve on update when present",
 		semantic.FieldRank:       "ordering integer; Runtime defaults to 0 when omitted",
 		semantic.FieldSubIndex:   "optional sub-device index",
