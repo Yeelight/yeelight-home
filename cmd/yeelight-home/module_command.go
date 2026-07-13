@@ -232,11 +232,15 @@ func normalizeLightModuleTarget(parameters map[string]any, flags cliFlags) {
 }
 
 func moduleTargets(spec moduleCommandSpec, parameters map[string]any) []map[string]any {
-	if spec.EntityType == "" {
+	entityType := spec.EntityType
+	if entityType == "" {
+		entityType = firstRequestString(parameters, semantic.FieldTargetType, semantic.FieldEntityType, semantic.FieldNodeType, semantic.FieldType)
+	}
+	if entityType == "" {
 		return nil
 	}
-	target := map[string]any{semantic.FieldEntityType: spec.EntityType}
-	for _, key := range moduleTargetIDParameterKeys(spec.EntityType) {
+	target := map[string]any{semantic.FieldEntityType: entityType}
+	for _, key := range moduleTargetIDParameterKeys(entityType) {
 		if value := requestString(parameters[key]); value != "" {
 			target[semantic.FieldID] = value
 			break

@@ -169,6 +169,9 @@ func TestBuildModuleRequestLightDeviceFlagCreatesDeviceTarget(t *testing.T) {
 	if target.entityType != "device" || target.id != "992001" {
 		t.Fatalf("target = %#v", target)
 	}
+	if len(request.Targets) != 1 || request.Targets[0]["entityType"] != "device" || request.Targets[0]["id"] != "992001" {
+		t.Fatalf("request targets = %#v", request.Targets)
+	}
 }
 
 func TestModuleCommandReturnsAuthRequiredWithoutToken(t *testing.T) {
