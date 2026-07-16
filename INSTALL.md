@@ -138,7 +138,7 @@ If Winget cannot find the package yet, use GitHub Releases, Scoop, Homebrew on W
 
 ## npm Wrapper
 
-The npm package is a thin launcher. It downloads the matching GitHub Release binary on install or first run and verifies the checksum.
+The npm package is a thin launcher. It downloads the matching Release binary on install or first run and verifies it against `checksums.txt`. For the official repository, the source order is GitHub, Gitee, then GitCode; a failed or timed-out source is skipped without weakening checksum verification.
 When it launches the downloaded binary, it sets `YEELIGHT_HOME_NPM_WRAPPER_PATH` so `yeelight-home doctor --json` can report `install.npmWrapper` and `install.npmWrapperResolved`. This helps diagnose stale npm wrappers, Homebrew shadows, and host applications using a different `PATH`.
 
 ```sh
@@ -152,6 +152,8 @@ Environment overrides:
 | --- | --- |
 | `YEELIGHT_HOME_REPO` | Release repository, default `Yeelight/yeelight-home`. |
 | `YEELIGHT_HOME_VERSION` | Release tag or `latest`. |
+| `YEELIGHT_HOME_DOWNLOAD_BASE_URL` | Use one explicit Release download base instead of automatic sources. |
+| `YEELIGHT_HOME_DOWNLOAD_TIMEOUT_MS` | Per-request inactivity timeout, from 1000 to 120000 milliseconds. |
 | `YEELIGHT_HOME_NPM_CACHE_DIR` | Binary cache directory. |
 | `YEELIGHT_HOME_NPM_SKIP_INSTALL=1` | Skip binary download during npm install. |
 

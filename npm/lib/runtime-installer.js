@@ -8,6 +8,7 @@ const { spawnSync } = require("node:child_process");
 
 const packageRoot = path.resolve(__dirname, "..", "..");
 const packageInfo = require(path.join(packageRoot, "package.json"));
+const officialRepo = "Yeelight/yeelight-home";
 
 function ensureRuntimeBinary() {
   let target;
@@ -56,12 +57,13 @@ function resolveTarget() {
     throw new Error(`unsupported platform: ${process.platform}/${process.arch}`);
   }
 
-  const repo = process.env.YEELIGHT_HOME_REPO || "Yeelight/yeelight-home";
+  const repo = process.env.YEELIGHT_HOME_REPO || officialRepo;
   const version = process.env.YEELIGHT_HOME_VERSION || `v${packageInfo.version}`;
   const extension = goos === "windows" ? "zip" : "tar.gz";
   const assetName = `yeelight-home-${goos}-${goarch}.${extension}`;
   const releasePath = version === "latest" ? "latest/download" : `download/${version}`;
 
+  const sources = resolveReleaseSources(repo, releasePath);
   return {
     repo,
     version,
@@ -69,9 +71,26 @@ function resolveTarget() {
     goarch,
     assetName,
     binaryName: goos === "windows" ? "yeelight-home.exe" : "yeelight-home",
-    assetUrl: `https://github.com/${repo}/releases/${releasePath}/${assetName}`,
-    checksumsUrl: `https://github.com/${repo}/releases/${releasePath}/checksums.txt`
+    sources: sources.map((source) => ({
+      ...source,
+      assetUrl: `${source.baseUrl}/${assetName}`,
+      checksumsUrl: `${source.baseUrl}/checksums.txt`
+    }))
   };
+}
+
+function resolveReleaseSources(repo, releasePath) {
+  const customBase = (process.env.YEELIGHT_HOME_DOWNLOAD_BASE_URL || "").replace(/\/+$/, "");
+  if (customBase) return [{ name: "custom", baseUrl: customBase }];
+
+  const sources = [{ name: "GitHub", baseUrl: `https://github.com/${repo}/releases/${releasePath}` }];
+  if (repo === officialRepo) {
+    sources.push(
+      { name: "Gitee", baseUrl: `https://gitee.com/yeelight/yeelight-home/releases/${releasePath}` },
+      { name: "GitCode", baseUrl: `https://api.gitcode.com/Yeelight/yeelight-home/releases/${releasePath}` }
+    );
+  }
+  return sources;
 }
 
 function resolveBinaryPath(target) {
@@ -95,9 +114,7 @@ function installRuntime(target, binaryPath) {
   try {
     const assetPath = path.join(workDir, target.assetName);
     const checksumsPath = path.join(workDir, "checksums.txt");
-    downloadFile(target.assetUrl, assetPath);
-    downloadFile(target.checksumsUrl, checksumsPath);
-    verifyChecksum(assetPath, checksumsPath, target.assetName);
+    downloadVerifiedRelease(target, assetPath, checksumsPath);
 
     fs.mkdirSync(path.dirname(binaryPath), { recursive: true });
     if (target.goos === "windows") {
@@ -111,7 +128,25 @@ function installRuntime(target, binaryPath) {
   }
 }
 
+function downloadVerifiedRelease(target, assetPath, checksumsPath) {
+  const failures = [];
+  for (const source of target.sources) {
+    try {
+      fs.rmSync(assetPath, { force: true });
+      fs.rmSync(checksumsPath, { force: true });
+      downloadFile(source.assetUrl, assetPath);
+      downloadFile(source.checksumsUrl, checksumsPath);
+      verifyChecksum(assetPath, checksumsPath, target.assetName);
+      return source.name;
+    } catch (error) {
+      failures.push(`${source.name}: ${error.message}`);
+    }
+  }
+  throw new Error(`all release sources failed (${failures.join("; ")})`);
+}
+
 function downloadFile(url, outputPath) {
+  const timeoutMs = downloadTimeoutMs();
   const response = spawnSync(process.execPath, [
     "-e",
     `
@@ -119,8 +154,9 @@ function downloadFile(url, outputPath) {
       const https = require("node:https");
       const url = process.argv[1];
       const out = process.argv[2];
+      const timeout = Number(process.argv[3]);
       function get(current, redirects) {
-        https.get(current, res => {
+        const request = https.get(current, res => {
           if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
             if (redirects <= 0) throw new Error("too many redirects");
             res.resume();
@@ -134,20 +170,38 @@ function downloadFile(url, outputPath) {
           const file = fs.createWriteStream(out, { mode: 0o600 });
           res.pipe(file);
           file.on("finish", () => file.close(() => process.exit(0)));
+          file.on("error", err => {
+            console.error(err.message);
+            process.exit(1);
+          });
         }).on("error", err => {
           console.error(err.message);
           process.exit(1);
         });
+        request.setTimeout(timeout, () => request.destroy(new Error("download timed out")));
       }
       get(url, 5);
     `,
     url,
-    outputPath
-  ], { stdio: ["ignore", "ignore", "pipe"], encoding: "utf8" });
+    outputPath,
+    String(timeoutMs)
+  ], {
+    stdio: ["ignore", "ignore", "pipe"],
+    encoding: "utf8",
+    timeout: (timeoutMs * 6) + 5000
+  });
 
   if (response.status !== 0) {
     throw new Error((response.stderr || "").trim() || `download failed: ${url}`);
   }
+}
+
+function downloadTimeoutMs() {
+  const value = Number(process.env.YEELIGHT_HOME_DOWNLOAD_TIMEOUT_MS || 15000);
+  if (!Number.isInteger(value) || value < 1000 || value > 120000) {
+    throw new Error("YEELIGHT_HOME_DOWNLOAD_TIMEOUT_MS must be an integer between 1000 and 120000");
+  }
+  return value;
 }
 
 function verifyChecksum(assetPath, checksumsPath, assetName) {
@@ -206,5 +260,6 @@ function extractZip(assetPath, binaryName, binaryPath, workDir) {
 }
 
 module.exports = {
-  ensureRuntimeBinary
+  ensureRuntimeBinary,
+  resolveTarget
 };

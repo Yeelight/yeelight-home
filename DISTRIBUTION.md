@@ -159,7 +159,7 @@ Reusable GitHub credential pattern:
 
 The npm package is a thin installer and launcher:
 
-1. `postinstall` downloads the matching GitHub Release asset for the user's OS and CPU.
+1. `postinstall` downloads the matching Release asset for the user's OS and CPU. Official packages try GitHub first and then the Gitee and GitCode Release mirrors.
 2. The asset checksum is verified against `checksums.txt`.
 3. The binary is cached under the user's local cache directory.
 4. The npm `yeelight-home` binary delegates all arguments to the cached Go Runtime binary.
@@ -168,6 +168,8 @@ Environment overrides:
 
 - `YEELIGHT_HOME_REPO=owner/repo`
 - `YEELIGHT_HOME_VERSION=v0.1.1` or `latest`
+- `YEELIGHT_HOME_DOWNLOAD_BASE_URL=https://mirror.example/releases/download/v0.1.1`
+- `YEELIGHT_HOME_DOWNLOAD_TIMEOUT_MS=15000`
 - `YEELIGHT_HOME_NPM_CACHE_DIR=/custom/cache`
 - `YEELIGHT_HOME_NPM_SKIP_INSTALL=1`
 

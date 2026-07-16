@@ -103,10 +103,9 @@ npm config get registry
 ```
 
 Restore a previously changed global registry with
-`npm config set registry https://registry.npmjs.org/`. The npm wrapper also
-downloads a platform binary; until the documented domestic binary fallback is
-available in the installed version, that second download may still require
-GitHub access.
+`npm config set registry https://registry.npmjs.org/`. The npm wrapper verifies
+the platform binary against `checksums.txt`; for the official repository it
+tries GitHub first, then the official Gitee and GitCode Release mirrors.
 
 Debian, Ubuntu, Fedora, Arch, AUR, Snap, Docker, GHCR, Docker Hub, and Winget channel details are maintained in [INSTALL.md](INSTALL.md) and [DISTRIBUTION.md](DISTRIBUTION.md).
 

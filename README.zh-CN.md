@@ -99,9 +99,9 @@ npm config get registry
 ```
 
 如果以前修改过全局 registry，可用
-`npm config set registry https://registry.npmjs.org/` 恢复官方源。需要注意：
-npm wrapper 还会二次下载当前平台的 Runtime 二进制；在已安装版本尚未提供国内二进制
-回退前，这一步仍可能需要访问 GitHub，不能把 npm 镜像误认为完整的二进制镜像方案。
+`npm config set registry https://registry.npmjs.org/` 恢复官方源。npm wrapper
+会使用 `checksums.txt` 校验二进制；官方仓库默认先尝试 GitHub，失败或超时后自动尝试
+Gitee 和 GitCode 的官方 Release 镜像。
 
 Debian、Ubuntu、Fedora、Arch、Winget、Docker、GHCR、Docker Hub 等渠道见 [INSTALL.md](INSTALL.md) 和 [DISTRIBUTION.md](DISTRIBUTION.md)。
 
