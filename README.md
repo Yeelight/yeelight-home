@@ -2,6 +2,16 @@
 
 Default language: English. Chinese documentation is available in [README.zh-CN.md](README.zh-CN.md).
 
+## Official Repository And Mirrors
+
+[GitHub](https://github.com/Yeelight/yeelight-home) is the canonical source for
+issues, contributions, CI, and releases. Read-only mirrors are available on
+[Gitee](https://gitee.com/yeelight/yeelight-home) and
+[GitCode](https://gitcode.com/Yeelight/yeelight-home) for users who cannot reach
+GitHub reliably, with [GitLab.com](https://gitlab.com/Yeelight/yeelight-home) as
+an additional global fallback. Clone from any reachable source, but report
+issues and contribute changes on GitHub.
+
 `yeelight-home` is the standalone local Runtime CLI for Yeelight smart-home Skills and automation scripts. It runs on the user's machine, keeps credentials local, resolves smart-home requests, executes supported Yeelight home capabilities, and returns redacted structured results.
 
 The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-home` through `YEELIGHT_HOME_BIN` or `PATH` and sends one JSON request to `yeelight-home invoke --stdin`.
@@ -83,6 +93,20 @@ npm wrapper:
 ```sh
 npm install -g yeelight-home
 ```
+
+In mainland China, npmmirror can accelerate the npm package download for a
+single installation:
+
+```sh
+npm install -g yeelight-home --registry=https://registry.npmmirror.com
+npm config get registry
+```
+
+Restore a previously changed global registry with
+`npm config set registry https://registry.npmjs.org/`. The npm wrapper also
+downloads a platform binary; until the documented domestic binary fallback is
+available in the installed version, that second download may still require
+GitHub access.
 
 Debian, Ubuntu, Fedora, Arch, AUR, Snap, Docker, GHCR, Docker Hub, and Winget channel details are maintained in [INSTALL.md](INSTALL.md) and [DISTRIBUTION.md](DISTRIBUTION.md).
 

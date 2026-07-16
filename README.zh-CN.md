@@ -2,6 +2,15 @@
 
 默认文档语言是英文：[README.md](README.md)。本文是中文使用说明。
 
+## 官方仓库与国内镜像
+
+[GitHub](https://github.com/Yeelight/yeelight-home) 是 Issue、贡献、CI 和发布的
+规范源。国内无法稳定访问 GitHub 时，可使用只读的
+[Gitee 镜像](https://gitee.com/yeelight/yeelight-home) 或
+[GitCode 镜像](https://gitcode.com/Yeelight/yeelight-home)；
+[GitLab.com](https://gitlab.com/Yeelight/yeelight-home) 是额外的全球备用源。
+可以从任一可访问平台克隆代码，但请仍在 GitHub 提交 Issue 和贡献修改。
+
 `yeelight-home` 是 Yeelight 智能家居 Skill 和自动化脚本使用的本地 Runtime CLI。它运行在用户自己的电脑或服务器上，本地保存凭据，解析智能家居请求，执行受支持的 Yeelight 家庭能力，并返回经过脱敏的结构化结果。
 
 Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH` 找到公开安装的 `yeelight-home`，然后向 `yeelight-home invoke --stdin` 发送一个 JSON 请求。
@@ -81,6 +90,18 @@ npm wrapper:
 ```sh
 npm install -g yeelight-home
 ```
+
+国内访问 npm 较慢或失败时，可只为本次安装临时使用 npmmirror：
+
+```sh
+npm install -g yeelight-home --registry=https://registry.npmmirror.com
+npm config get registry
+```
+
+如果以前修改过全局 registry，可用
+`npm config set registry https://registry.npmjs.org/` 恢复官方源。需要注意：
+npm wrapper 还会二次下载当前平台的 Runtime 二进制；在已安装版本尚未提供国内二进制
+回退前，这一步仍可能需要访问 GitHub，不能把 npm 镜像误认为完整的二进制镜像方案。
 
 Debian、Ubuntu、Fedora、Arch、Winget、Docker、GHCR、Docker Hub 等渠道见 [INSTALL.md](INSTALL.md) 和 [DISTRIBUTION.md](DISTRIBUTION.md)。
 
