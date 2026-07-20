@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/config"
 	"github.com/yeelight/yeelight-home/internal/semantic"
 	"github.com/yeelight/yeelight-home/internal/storage"
@@ -21,10 +20,9 @@ func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int
 		_, _ = fmt.Fprintf(stderr, "doctor: %v\n", err)
 		return exitInvalidInput
 	}
-	authStatus := auth.StatusFromEnv()
 	status := "ok"
 	warnings := []string{}
-	if !context.TokenPresent && !authStatus.Authenticated {
+	if !context.TokenPresent {
 		status = "warning"
 		warnings = append(warnings, "auth_required")
 	}
@@ -32,9 +30,10 @@ func (app *app) runDoctor(args []string, stdout io.Writer, stderr io.Writer) int
 	response := map[string]any{
 		semantic.FieldStatus:        status,
 		semantic.FieldWarnings:      warnings,
-		semantic.FieldAuthenticated: context.TokenPresent || authStatus.Authenticated,
+		semantic.FieldAuthenticated: context.TokenPresent,
 		semantic.FieldProfile:       context.Profile,
 		semantic.FieldRegion:        context.Region,
+		semantic.FieldBizType:       context.BizType,
 		semantic.FieldHouseID:       context.HouseID,
 		semantic.FieldTokenPresent:  context.TokenPresent,
 		semantic.FieldTokenSource:   context.TokenSource,
@@ -60,6 +59,7 @@ func writeDoctorText(stdout io.Writer, response map[string]any) int {
 	_, _ = fmt.Fprintf(stdout, "Authenticated: %t\n", boolFromDiagnostic(response, semantic.FieldAuthenticated))
 	_, _ = fmt.Fprintf(stdout, "Profile: %s\n", stringFromDiagnostic(response, semantic.FieldProfile))
 	_, _ = fmt.Fprintf(stdout, "Region: %s\n", stringFromDiagnostic(response, semantic.FieldRegion))
+	_, _ = fmt.Fprintf(stdout, "Business type: %s\n", stringFromDiagnostic(response, semantic.FieldBizType))
 	houseID := stringFromDiagnostic(response, semantic.FieldHouseID)
 	if houseID == "" {
 		houseID = "(not selected)"

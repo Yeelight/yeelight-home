@@ -16,10 +16,14 @@ Commands:
   auth       Login, inspect auth status, and manage local tokens
   profile    List, show, activate, and delete profiles
   config     Read and update non-secret profile configuration
+  setup      Install and connect Yeelight AI to an AI client
+  menu       Open the bilingual interactive home console
   completion Generate shell completion scripts
   intent     Explain Runtime intents and complex payload contracts
   explain    Print a machine-readable schema for one Runtime intent
   invoke     Execute one Skill Runtime request from stdin
+  mcp        Serve the same Runtime to local AI clients over stdio
+  lan        Inspect or diagnose the configured home gateway MCP
   api        Run account-scoped API smoke checks
   doctor     Print local installation and auth diagnostics
   version    Print CLI version
@@ -42,6 +46,7 @@ Configuration precedence:
 
 Common examples:
   yeelight-home auth login --qr --region dev
+  yeelight-home setup --mode skill --agent auto --lang zh-CN --plan --json
   yeelight-home auth status
   yeelight-home home list --json --region dev
   yeelight-home home select --house-id <id> --region dev
@@ -58,6 +63,7 @@ Common examples:
   yeelight-home light on --device-id <id> --json
   yeelight-home automation enable --automation-id <id> --json
   yeelight-home invoke --stdin
+  yeelight-home mcp serve --stdio
   yeelight-home doctor
   yeelight-home completion zsh
 `
@@ -127,6 +133,21 @@ var moduleCommandExamples = map[string][]string{
 }
 
 var commandHelpText = map[string]string{
+	"menu": `Usage:
+  yeelight-home menu
+
+Opens the bilingual interactive home console. Choose homes, rooms, devices,
+scenes, and common lighting operations by readable name. A TTY with no command
+opens the same console; non-TTY no-command usage prints deterministic help.
+`,
+	"setup": `Usage:
+	yeelight-home setup [--lang <zh-CN|en-US>] [--mode <skill|mcp|lan>] [--agent <id|id,id|auto|all>] [--mcp-source <local|cloud|gateway>] [--gateway-ip <ip>] [--control-mode <local-preferred|local-only>] [--profile <name>] [--biz-type <0|1>] [--plan] [--yes] [--json]
+
+Guides a beginner through Runtime checks, Yeelight Pro APP QR sign-in, AI client setup, and read-only verification.
+Skill installation delegates client discovery and 70+ integrations to the open Vercel skills CLI. Use --plan to inspect a redacted installation plan without changing files.
+MCP setup uses the local yeelight-home stdio server by default. Use --mcp-source cloud for the lightweight hosted MCP services, or --mode lan --mcp-source gateway only for direct gateway compatibility.
+LAN setup verifies the gateway before reporting success. Use --control-mode local-only to skip cloud sign-in and keep control on the local network.
+`,
 	"api": `Usage:
   yeelight-home api smoke [--json] [--profile <name>] [--region <region>] [--house-id <id>]
 
@@ -138,15 +159,15 @@ Runs account and home-list smoke checks with the active local token.
 Runs account, home-list, and optional house-context smoke checks with the active local token.
 `,
 	"auth": `Usage:
-  yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--house-id <id>]
-  yeelight-home auth login --qr [--json] [--profile <name>] [--region <region>] [--house-id <id>]
-  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+  yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
+  yeelight-home auth login --qr [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
+  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]
   yeelight-home auth token delete [--profile <name>] [--json]
 
 Tokens are stored in the system credential store when available. Profile files keep only non-secret metadata.
 `,
 	"auth login": `Usage:
-  yeelight-home auth login --qr [--json] [--profile <name>] [--region <region>] [--house-id <id>] [--qr-png <path>]
+  yeelight-home auth login --qr [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--qr-png <path>]
 
 Starts QR login for the selected region. houseId is optional profile context, not an authentication requirement.
 `,
@@ -156,12 +177,12 @@ Starts QR login for the selected region. houseId is optional profile context, no
 Checks a QR login request and saves credentials locally when the QR status reaches LOGIN.
 `,
 	"auth status": `Usage:
-  yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
 
 Reports local credential presence and resolved profile context without printing token values.
 `,
 	"auth token": `Usage:
-  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]
   yeelight-home auth token delete [--profile <name>] [--json]
 
 Imports or deletes a token in the local credential store. Use --stdin to avoid putting secrets in shell history.
@@ -173,19 +194,19 @@ Tokens are never written to profile metadata.
 Deletes the selected profile token from the local credential store and protected fallback.
 `,
 	"auth token set": `Usage:
-  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]
+  yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]
 
 Imports a token into local credential storage. Omit houseId for token-only account-scoped use.
 For interactive use, prefer: printf '%s' "$TOKEN" | yeelight-home auth token set --stdin --profile dev --region dev
 `,
 	"config": `Usage:
-  yeelight-home config get [--json] [--profile <name>] [--region <region>] [--house-id <id>]
-  yeelight-home config list [--json] [--profile <name>]
-  yeelight-home config set [--profile <name>] [--region <region>] [--house-id <id>] [--qr-device <mac>] [--json]
-  yeelight-home config unset [--profile <name>] [--region] [--house-id] [--qr-device] [--json]
+	  yeelight-home config get [--json] [--profile <name>] [--region <region>] [--house-id <id>] [--language <locale>] [--control-mode <mode>] [--gateway-ip <ip>] [--lan-endpoint <url>]
+	  yeelight-home config list [--json] [--profile <name>]
+	  yeelight-home config set [--profile <name>] [--region <region>] [--house-id <id>] [--qr-device <mac>] [--language <zh-CN|en-US>] [--control-mode <cloud|local-preferred|local-only>] [--gateway-ip <ip>|--lan-endpoint <url>] [--json]
+	  yeelight-home config unset [--profile <name>] [--region] [--house-id] [--qr-device] [--language] [--control-mode] [--gateway-ip] [--lan-endpoint] [--json]
 `,
 	"config get": `Usage:
-  yeelight-home config get [--json] [--profile <name>] [--region <region>] [--house-id <id>]
+	  yeelight-home config get [--json] [--profile <name>] [--region <region>] [--house-id <id>] [--language <locale>] [--control-mode <mode>] [--gateway-ip <ip>] [--lan-endpoint <url>]
 
 Shows resolved non-secret configuration and credential presence using standard precedence.
 `,
@@ -195,12 +216,12 @@ Shows resolved non-secret configuration and credential presence using standard p
 Alias of config get for resolved local configuration.
 `,
 	"config set": `Usage:
-  yeelight-home config set [--profile <name>] [--region <region>] [--house-id <id>] [--qr-device <mac>] [--json]
+	  yeelight-home config set [--profile <name>] [--region <region>] [--house-id <id>] [--qr-device <mac>] [--language <zh-CN|en-US>] [--control-mode <cloud|local-preferred|local-only>] [--gateway-ip <ip>|--lan-endpoint <url>] [--json]
 
 Updates non-secret profile metadata only. It never stores token values.
 `,
 	"config unset": `Usage:
-  yeelight-home config unset [--profile <name>] [--region] [--house-id] [--qr-device] [--json]
+	  yeelight-home config unset [--profile <name>] [--region] [--house-id] [--qr-device] [--language] [--control-mode] [--gateway-ip] [--lan-endpoint] [--json]
 
 Clears selected non-secret metadata fields from a profile.
 `,
@@ -232,18 +253,18 @@ Development-only fixture commands. Writes require explicit dev region and --allo
   yeelight-home dev seed-scene --json --region dev --house-id <id> --device-id <id> --name <name> --allow-write-dev
 `,
 	"doctor": `Usage:
-  yeelight-home doctor [--json] [--online] [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home doctor [--json] [--online] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
 
-Prints local paths, active profile, token presence, region, houseId, and install diagnostics.
+Prints local paths, active profile, token presence, region, bizType, houseId, and install diagnostics.
 Pass --online to also check public GitHub, npm, and Homebrew latest versions.
 `,
 	"home list": `Usage:
-  yeelight-home home list [--json] [--profile <name>] [--region <region>]
+  yeelight-home home list [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>]
 
 Lists homes visible to the selected account. It is account-scoped and does not require houseId.
 `,
 	"home select": `Usage:
-  yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--json]
+  yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--biz-type <0|1>] [--json]
 
 Stores a default home id for later house-scoped commands. It does not change the token.
 `,
@@ -292,10 +313,44 @@ Use yeelight-home help home <action> for resource action flags.
 Reads one Skill Runtime JSON request from stdin and returns one JSON response.
 Flags override environment/profile defaults before request parameters are resolved.
 `,
+	"mcp": `Usage:
+  yeelight-home mcp serve --stdio [--profile <name>] [--region <region>] [--house-id <id>] [--lang <zh-CN|en-US>]
+
+Starts a local MCP server over stdio. It exposes the same validated Yeelight Home Runtime used by the CLI and Skill.
+The server writes only JSON-RPC messages to stdout; diagnostics use stderr.
+`,
+	"mcp serve": `Usage:
+  yeelight-home mcp serve --stdio [--profile <name>] [--region <region>] [--house-id <id>] [--lang <zh-CN|en-US>]
+
+Starts the local MCP server with the same Runtime validation, target resolution, backend routing, and write verification used by CLI and Skill. stdout is reserved for JSON-RPC messages; diagnostics use stderr.
+`,
+	"lan": `Usage:
+  yeelight-home lan inspect [--json] [--profile <name>] [--gateway-ip <ip>|--lan-endpoint <url>]
+  yeelight-home lan tools [--json] [--profile <name>] [--gateway-ip <ip>|--lan-endpoint <url>]
+  yeelight-home lan call <tool> [--args-json <json>] [--yes] [--profile <name>] [--gateway-ip <ip>|--lan-endpoint <url>]
+
+Discovers the gateway's live MCP tool catalog. Raw tool calls are preview-only unless --yes is supplied.
+Ordinary users should prefer the resource commands, Skill, or local MCP server so Runtime policy and verification remain active.
+`,
+	"lan inspect": `Usage:
+  yeelight-home lan inspect [--json] [--profile <name>] [--gateway-ip <ip>|--lan-endpoint <url>]
+
+Connects to the configured home gateway, negotiates MCP, follows tools/list pagination, and prints the live tool contract without executing a tool.
+`,
+	"lan tools": `Usage:
+  yeelight-home lan tools [--json] [--profile <name>] [--gateway-ip <ip>|--lan-endpoint <url>]
+
+Alias of lan inspect for listing the live gateway MCP tools without execution.
+`,
+	"lan call": `Usage:
+  yeelight-home lan call <tool> [--args-json <json>] [--yes] [--json] [--profile <name>] [--gateway-ip <ip>|--lan-endpoint <url>]
+
+Validates the tool against the gateway's live tools/list response. Without --yes it prints a no-write preview; with --yes it executes exactly one raw diagnostic call. Ordinary control should use Runtime resource commands instead.
+`,
 	"profile": `Usage:
   yeelight-home profile list [--json]
-  yeelight-home profile show [--json] [--profile <name>] [--region <region>] [--house-id <id>]
-  yeelight-home profile use --profile <name> [--region <region>] [--house-id <id>] [--json]
+  yeelight-home profile show [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
+  yeelight-home profile use --profile <name> [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]
   yeelight-home profile delete --profile <name> [--json]
 `,
 	"profile delete": `Usage:
@@ -309,12 +364,12 @@ Deletes profile metadata and local credentials for the selected profile.
 Lists saved profiles, active profile marker, region, selected houseId, and token presence.
 `,
 	"profile show": `Usage:
-  yeelight-home profile show [--json] [--profile <name>] [--region <region>] [--house-id <id>]
+  yeelight-home profile show [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
 
 Shows the resolved profile context without exposing token values.
 `,
 	"profile use": `Usage:
-  yeelight-home profile use --profile <name> [--region <region>] [--house-id <id>] [--json]
+  yeelight-home profile use --profile <name> [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]
 
 Persists the active profile and optional non-secret profile metadata.
 `,

@@ -7,18 +7,19 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/i18n"
 	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
 func lightPowerSetResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.DevicePropertySetResult, verification api.StateQueryResult) contract.Response {
-	return lightPropertySetResponse(request, entities, entity, execution, verification, executionValueFromRequest(request), "已设置 %s 的开关状态。", "light-power-set-command")
+	return lightPropertySetResponse(request, entities, entity, execution, verification, executionValueFromRequest(request), i18n.LightPowerSet, "light-power-set-command")
 }
 
-func lightNumericSetResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.DevicePropertySetResult, verification api.StateQueryResult, expected any, messageTemplate string, traceID string) contract.Response {
-	return lightPropertySetResponse(request, entities, entity, execution, verification, expected, messageTemplate, traceID)
+func lightNumericSetResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.DevicePropertySetResult, verification api.StateQueryResult, expected any, messageKey string, traceID string) contract.Response {
+	return lightPropertySetResponse(request, entities, entity, execution, verification, expected, messageKey, traceID)
 }
 
-func lightPropertySetResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.DevicePropertySetResult, verification api.StateQueryResult, expected any, messageTemplate string, traceID string) contract.Response {
+func lightPropertySetResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, execution api.DevicePropertySetResult, verification api.StateQueryResult, expected any, messageKey string, traceID string) contract.Response {
 	result := map[string]any{
 		semantic.FieldRegion:        entities.Region,
 		semantic.FieldHouseID:       entities.HouseID,
@@ -35,7 +36,7 @@ func lightPropertySetResponse(request contract.Request, entities api.EntityListR
 			ContractVersion: contract.Version,
 			RequestID:       request.RequestID,
 			Status:          "partial",
-			UserMessage:     fmt.Sprintf("%s 的控制指令已发送，但写后验证未匹配。", entity.Name),
+			UserMessage:     i18n.Text(request.Locale, i18n.LightWriteVerificationMismatch, entity.Name),
 			Result:          result,
 			Warnings:        append(entities.Warnings, "write_verification_mismatch"),
 			TraceID:         strings.TrimSuffix(traceID, "-command") + "-verification-mismatch",
@@ -53,7 +54,7 @@ func lightPropertySetResponse(request contract.Request, entities api.EntityListR
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     fmt.Sprintf(messageTemplate, entity.Name),
+		UserMessage:     i18n.Text(request.Locale, messageKey, entity.Name),
 		Result:          result,
 		Warnings:        entities.Warnings,
 		TraceID:         traceID,
@@ -64,7 +65,7 @@ func lightPropertySetResponse(request contract.Request, entities api.EntityListR
 	}
 }
 
-func lightAdjustResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, before api.StateQueryResult, execution api.DevicePropertyAdjustResult, verification api.StateQueryResult, delta int, expected int, messageTemplate string, traceID string) contract.Response {
+func lightAdjustResponse(request contract.Request, entities api.EntityListResult, entity api.EntitySummary, before api.StateQueryResult, execution api.DevicePropertyAdjustResult, verification api.StateQueryResult, delta int, expected int, messageKey string, traceID string) contract.Response {
 	result := map[string]any{
 		semantic.FieldRegion:        entities.Region,
 		semantic.FieldHouseID:       entities.HouseID,
@@ -83,7 +84,7 @@ func lightAdjustResponse(request contract.Request, entities api.EntityListResult
 			ContractVersion: contract.Version,
 			RequestID:       request.RequestID,
 			Status:          "partial",
-			UserMessage:     fmt.Sprintf("%s 的调节指令已发送，但写后验证未匹配。", entity.Name),
+			UserMessage:     i18n.Text(request.Locale, i18n.LightAdjustVerificationMismatch, entity.Name),
 			Result:          result,
 			Warnings:        append(entities.Warnings, "write_verification_mismatch"),
 			TraceID:         strings.TrimSuffix(traceID, "-command") + "-verification-mismatch",
@@ -101,7 +102,7 @@ func lightAdjustResponse(request contract.Request, entities api.EntityListResult
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     fmt.Sprintf(messageTemplate, entity.Name),
+		UserMessage:     i18n.Text(request.Locale, messageKey, entity.Name),
 		Result:          result,
 		Warnings:        entities.Warnings,
 		TraceID:         traceID,
@@ -117,7 +118,7 @@ func lightAdjustUnsupportedStateResponse(request contract.Request, entities api.
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "not_supported",
-		UserMessage:     fmt.Sprintf("%s 当前属性值不是可验证的数值，已取消调节。", entity.Name),
+		UserMessage:     i18n.Text(request.Locale, i18n.LightNonNumericState, entity.Name),
 		Result: map[string]any{
 			semantic.FieldRegion:   entities.Region,
 			semantic.FieldHouseID:  entities.HouseID,
@@ -151,7 +152,7 @@ func lightControlClarificationResponse(request contract.Request, reason string, 
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "clarification_required",
-		UserMessage:     "请明确要控制的灯光设备和目标状态。",
+		UserMessage:     i18n.Text(request.Locale, i18n.LightClarification),
 		Clarification: map[string]any{
 			semantic.FieldReason:               reason,
 			semantic.FieldTarget:               target.toMap(),

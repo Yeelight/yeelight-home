@@ -9,6 +9,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/i18n"
 	"github.com/yeelight/yeelight-home/internal/operation"
 	localruntime "github.com/yeelight/yeelight-home/internal/runtime"
 	"github.com/yeelight/yeelight-home/internal/semantic"
@@ -82,7 +83,7 @@ func invalidSkillRequestResponse(data []byte, err error) (contract.Response, boo
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "not_supported",
-		UserMessage:     "当前 yeelight-home Runtime 不支持这个 intent。请改用 Skill 随附 intent-catalog.json 中的已支持意图，或先用 intent.explain 查询目标意图的公开契约。",
+		UserMessage:     i18n.Text(request.Locale, i18n.RuntimeUnsupportedIntent),
 		Result: map[string]any{
 			semantic.FieldIntent:      request.Intent,
 			semantic.FieldSafeToRetry: false,
@@ -108,7 +109,7 @@ func invokeErrorResponse(request contract.Request, err error) contract.Response 
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "error",
-		UserMessage:     "Runtime 执行失败，已返回可解析错误；调用方可以根据 error.code、error.message 和原始语义请求继续修正或重试。",
+		UserMessage:     i18n.Text(request.Locale, i18n.RuntimeInvokeFailed),
 		Result: map[string]any{
 			semantic.FieldIntent:      request.Intent,
 			semantic.FieldSafeToRetry: safeToRetry,
@@ -155,7 +156,11 @@ func (app *app) invoke(ctx context.Context, request contract.Request) (contract.
 }
 
 func (app *app) invokeWithFlags(ctx context.Context, request contract.Request, flags cliFlags) (response contract.Response, err error) {
-	return app.invokeWithFlagsDirect(ctx, request, flags)
+	response, err = app.invokeWithFlagsDirect(ctx, request, flags)
+	if err != nil {
+		return contract.Response{}, err
+	}
+	return localizeLegacyInvokeResponse(request.Locale, response), nil
 }
 
 func (app *app) invokeWithFlagsDirect(ctx context.Context, request contract.Request, flags cliFlags) (contract.Response, error) {
@@ -269,6 +274,7 @@ func (app *app) executeTransientPreparedOperation(ctx context.Context, request c
 	if err != nil {
 		return contract.Response{}, err
 	}
+	ctx = api.WithBizType(ctx, context.BizType)
 	if record.Profile != context.Profile {
 		return executionBlockedResponse(request, "profile_mismatch", "内部执行载荷不属于当前本地 profile。"), nil
 	}
@@ -344,6 +350,23 @@ func (app *app) invokeWithFlagsRaw(ctx context.Context, request contract.Request
 	if err != nil {
 		return contract.Response{}, err
 	}
+	lanFallback := false
+	defer func() {
+		if err != nil || !lanFallback {
+			return
+		}
+		response.Warnings = appendWarning(response.Warnings, "lan_fallback_to_cloud")
+		if response.Result == nil {
+			response.Result = map[string]any{}
+		}
+		response.Result["backend"] = "cloud"
+		response.Result["fallbackFrom"] = "lan"
+	}()
+	lanRoute := app.tryInvokeLAN(ctx, request, context)
+	if lanRoute.Handled {
+		return lanRoute.Response, nil
+	}
+	lanFallback = lanRoute.Fallback
 	profile := context.Profile
 	if !context.TokenPresent && !isLocalOnlyInvokeIntent(request.Intent) {
 		return localruntime.NewEngine(false).Invoke(request), nil

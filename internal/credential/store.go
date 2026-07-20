@@ -30,11 +30,16 @@ type TokenMetadata struct {
 }
 
 type ProfileMetadata struct {
-	Profile  string `json:"profile"`
-	Region   string `json:"region"`
-	ClientID string `json:"clientId,omitempty"`
-	HouseID  string `json:"houseId,omitempty"`
-	QRDevice string `json:"qrDevice,omitempty"`
+	Profile     string `json:"profile"`
+	Region      string `json:"region"`
+	ClientID    string `json:"clientId,omitempty"`
+	HouseID     string `json:"houseId,omitempty"`
+	BizType     string `json:"bizType,omitempty"`
+	QRDevice    string `json:"qrDevice,omitempty"`
+	Language    string `json:"language,omitempty"`
+	ControlMode string `json:"controlMode,omitempty"`
+	GatewayIP   string `json:"gatewayIp,omitempty"`
+	LANEndpoint string `json:"lanEndpoint,omitempty"`
 }
 
 func (record TokenRecord) Metadata() TokenMetadata {
@@ -126,7 +131,12 @@ func (store FileMetadataStore) Save(metadata ProfileMetadata) error {
 	metadata.Region = strings.TrimSpace(metadata.Region)
 	metadata.ClientID = strings.TrimSpace(metadata.ClientID)
 	metadata.HouseID = strings.TrimSpace(metadata.HouseID)
+	metadata.BizType = strings.TrimSpace(metadata.BizType)
 	metadata.QRDevice = strings.TrimSpace(metadata.QRDevice)
+	metadata.Language = strings.TrimSpace(metadata.Language)
+	metadata.ControlMode = strings.TrimSpace(metadata.ControlMode)
+	metadata.GatewayIP = strings.TrimSpace(metadata.GatewayIP)
+	metadata.LANEndpoint = strings.TrimSpace(metadata.LANEndpoint)
 	document, err := store.load()
 	if err != nil {
 		return err

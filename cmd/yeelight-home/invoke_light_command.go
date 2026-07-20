@@ -6,6 +6,7 @@ import (
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/i18n"
 	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
@@ -15,21 +16,21 @@ const (
 )
 
 type lightPropertySpec struct {
-	propertyID      string
-	missingReason   string
-	messageTemplate string
-	traceID         string
-	resolveValue    func(contract.Request) (any, any, bool)
+	propertyID    string
+	missingReason string
+	messageKey    string
+	traceID       string
+	resolveValue  func(contract.Request) (any, any, bool)
 }
 
 type lightAdjustSpec struct {
-	propertyID      string
-	missingReason   string
-	messageTemplate string
-	traceID         string
-	min             int
-	max             int
-	resolveDelta    func(contract.Request) (int, bool)
+	propertyID    string
+	missingReason string
+	messageKey    string
+	traceID       string
+	min           int
+	max           int
+	resolveDelta  func(contract.Request) (int, bool)
 }
 
 func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec lightPropertySpec) (contract.Response, error) {
@@ -47,7 +48,7 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 			return contract.Response{}, err
 		}
 		entities := api.EntityListResult{Region: endpoint.Region, HouseID: houseID, Warnings: []string{}}
-		return nodePropertySetResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), execution, expectedValue, 0, semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
+		return nodePropertySetResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), execution, expectedValue, 0, semantic.LightPropertyName, i18n.Template(request.Locale, spec.messageKey), spec.traceID), nil
 	}
 	if target.id == "" && target.name == "" {
 		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
@@ -79,7 +80,7 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 		if err != nil {
 			return contract.Response{}, err
 		}
-		return nodePropertySetResponse(request, entities, match, execution, expectedValue, entityListAPICalls(entities), semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
+		return nodePropertySetResponse(request, entities, match, execution, expectedValue, entityListAPICalls(entities), semantic.LightPropertyName, i18n.Template(request.Locale, spec.messageKey), spec.traceID), nil
 	}
 	execution, err := api.NewDevicePropertySetClient(endpoint, nil).Run(ctx, api.DevicePropertySetRequest{
 		HouseID:      houseID,
@@ -99,7 +100,7 @@ func (app *app) invokeLightPropertySet(ctx context.Context, request contract.Req
 	if err != nil {
 		return contract.Response{}, err
 	}
-	return lightNumericSetResponse(request, entities, match, execution, verification, expectedValue, spec.messageTemplate, spec.traceID), nil
+	return lightNumericSetResponse(request, entities, match, execution, verification, expectedValue, spec.messageKey, spec.traceID), nil
 }
 
 func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string, spec lightAdjustSpec) (contract.Response, error) {
@@ -117,7 +118,7 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 			return contract.Response{}, err
 		}
 		entities := api.EntityListResult{Region: endpoint.Region, HouseID: houseID, Warnings: []string{}}
-		return nodePropertyAdjustResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), execution, delta, 0, semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
+		return nodePropertyAdjustResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), execution, delta, 0, semantic.LightPropertyName, i18n.Template(request.Locale, spec.messageKey), spec.traceID), nil
 	}
 	if target.id == "" && target.name == "" {
 		return lightControlClarificationResponse(request, "missing_target", target, nil, 0), nil
@@ -149,7 +150,7 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 		if err != nil {
 			return contract.Response{}, err
 		}
-		return nodePropertyAdjustResponse(request, entities, match, execution, delta, entityListAPICalls(entities), semantic.LightPropertyName, spec.messageTemplate, spec.traceID), nil
+		return nodePropertyAdjustResponse(request, entities, match, execution, delta, entityListAPICalls(entities), semantic.LightPropertyName, i18n.Template(request.Locale, spec.messageKey), spec.traceID), nil
 	}
 	before, err := api.NewStateQueryClient(endpoint, nil).Run(ctx, api.StateQueryRequest{
 		DeviceID:     match.ID,
@@ -183,7 +184,7 @@ func (app *app) invokeLightPropertyAdjust(ctx context.Context, request contract.
 	if err != nil {
 		return contract.Response{}, err
 	}
-	return lightAdjustResponse(request, entities, match, before, execution, verification, delta, expected, spec.messageTemplate, spec.traceID), nil
+	return lightAdjustResponse(request, entities, match, before, execution, verification, delta, expected, spec.messageKey, spec.traceID), nil
 }
 
 func queryLightStateUntilExpected(ctx context.Context, endpoint api.Endpoint, deviceID string, propertyID string, authorization string, clientID string, expected any) (api.StateQueryResult, error) {
@@ -217,10 +218,10 @@ func queryLightStateUntilExpected(ctx context.Context, endpoint api.Endpoint, de
 
 func lightPowerSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldPower),
-		missingReason:   "missing_power_value",
-		messageTemplate: "已设置 %s 的开关状态。",
-		traceID:         "light-power-set-command",
+		propertyID:    semantic.InternalField(semantic.DomainAction, semantic.FieldPower),
+		missingReason: "missing_power_value",
+		messageKey:    i18n.LightPowerSet,
+		traceID:       "light-power-set-command",
 		resolveValue: func(request contract.Request) (any, any, bool) {
 			value, ok := lightPowerValue(request)
 			return value, value, ok
@@ -230,10 +231,10 @@ func lightPowerSpec() lightPropertySpec {
 
 func lightBrightnessSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness),
-		missingReason:   "missing_brightness_value",
-		messageTemplate: "已设置 %s 的亮度。",
-		traceID:         "light-brightness-set-command",
+		propertyID:    semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness),
+		missingReason: "missing_brightness_value",
+		messageKey:    i18n.LightBrightnessSet,
+		traceID:       "light-brightness-set-command",
 		resolveValue: func(request contract.Request) (any, any, bool) {
 			value, ok := lightIntegerValue(request, 1, 100, semantic.FieldBrightness, semantic.FieldValue)
 			return value, float64(value), ok
@@ -243,12 +244,12 @@ func lightBrightnessSpec() lightPropertySpec {
 
 func lightBrightnessAdjustSpec() lightAdjustSpec {
 	return lightAdjustSpec{
-		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness),
-		missingReason:   "missing_brightness_delta",
-		messageTemplate: "已调整 %s 的亮度。",
-		traceID:         "light-brightness-adjust-command",
-		min:             1,
-		max:             100,
+		propertyID:    semantic.InternalField(semantic.DomainAction, semantic.FieldBrightness),
+		missingReason: "missing_brightness_delta",
+		messageKey:    i18n.LightBrightnessAdjusted,
+		traceID:       "light-brightness-adjust-command",
+		min:           1,
+		max:           100,
 		resolveDelta: func(request contract.Request) (int, bool) {
 			return lightIntegerValue(request, -100, 100, semantic.FieldDelta, semantic.FieldStep, semantic.FieldValue)
 		},
@@ -257,10 +258,10 @@ func lightBrightnessAdjustSpec() lightAdjustSpec {
 
 func lightColorTemperatureSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature),
-		missingReason:   "missing_color_temperature_value",
-		messageTemplate: "已设置 %s 的色温。",
-		traceID:         "light-color-temperature-set-command",
+		propertyID:    semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature),
+		missingReason: "missing_color_temperature_value",
+		messageKey:    i18n.LightColorTemperatureSet,
+		traceID:       "light-color-temperature-set-command",
 		resolveValue: func(request contract.Request) (any, any, bool) {
 			value, ok := lightIntegerValue(request, 2700, 6500, semantic.FieldColorTemperature, semantic.FieldValue)
 			return value, float64(value), ok
@@ -270,10 +271,10 @@ func lightColorTemperatureSpec() lightPropertySpec {
 
 func lightColorSpec() lightPropertySpec {
 	return lightPropertySpec{
-		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldColor),
-		missingReason:   "missing_color_value",
-		messageTemplate: "已设置 %s 的颜色。",
-		traceID:         "light-color-set-command",
+		propertyID:    semantic.InternalField(semantic.DomainAction, semantic.FieldColor),
+		missingReason: "missing_color_value",
+		messageKey:    i18n.LightColorSet,
+		traceID:       "light-color-set-command",
 		resolveValue: func(request contract.Request) (any, any, bool) {
 			value, ok := lightColorValue(request)
 			return value, float64(value), ok
@@ -283,12 +284,12 @@ func lightColorSpec() lightPropertySpec {
 
 func lightColorTemperatureAdjustSpec() lightAdjustSpec {
 	return lightAdjustSpec{
-		propertyID:      semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature),
-		missingReason:   "missing_color_temperature_delta",
-		messageTemplate: "已调整 %s 的色温。",
-		traceID:         "light-color-temperature-adjust-command",
-		min:             2700,
-		max:             6500,
+		propertyID:    semantic.InternalField(semantic.DomainAction, semantic.FieldColorTemperature),
+		missingReason: "missing_color_temperature_delta",
+		messageKey:    i18n.LightColorTemperatureAdjusted,
+		traceID:       "light-color-temperature-adjust-command",
+		min:           2700,
+		max:           6500,
 		resolveDelta: func(request contract.Request) (int, bool) {
 			return lightIntegerValue(request, -3800, 3800, semantic.FieldDelta, semantic.FieldStep, semantic.FieldValue)
 		},

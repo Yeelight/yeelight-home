@@ -61,8 +61,12 @@ func callJSONBody(ctx context.Context, client *http.Client, method string, url s
 		request.Header.Set("houseId", houseID)
 		request.Header.Set("house-id", houseID)
 	}
-	if strings.TrimSpace(credentials.BizType) != "" {
-		request.Header.Set("bizType", strings.TrimSpace(credentials.BizType))
+	bizType := strings.TrimSpace(credentials.BizType)
+	if bizType == "" {
+		bizType = bizTypeFromContext(ctx)
+	}
+	if bizType != "" {
+		request.Header.Set("bizType", bizType)
 	}
 
 	response, err := client.Do(request)

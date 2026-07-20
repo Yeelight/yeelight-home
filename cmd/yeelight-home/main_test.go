@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/credential"
 	"github.com/yeelight/yeelight-home/internal/semantic"
@@ -29,6 +30,11 @@ func TestRootHelpAndVersionFlags(t *testing.T) {
 		{name: "short help", args: []string{"-h"}, wantOutput: "Global flags:"},
 		{name: "root help explains command model", args: []string{"--help"}, wantOutput: "Human-friendly operations use: yeelight-home <resource> <action> [flags]"},
 		{name: "help command", args: []string{"help", "home"}, wantOutput: "yeelight-home home list"},
+		{name: "menu help command", args: []string{"help", "menu"}, wantOutput: "bilingual interactive home console"},
+		{name: "MCP serve help command", args: []string{"help", "mcp", "serve"}, wantOutput: "stdout is reserved for JSON-RPC messages"},
+		{name: "LAN inspect help command", args: []string{"help", "lan", "inspect"}, wantOutput: "without executing a tool"},
+		{name: "LAN tools help command", args: []string{"help", "lan", "tools"}, wantOutput: "Alias of lan inspect"},
+		{name: "LAN call help command", args: []string{"help", "lan", "call"}, wantOutput: "Without --yes it prints a no-write preview"},
 		{name: "module help command", args: []string{"help", "device"}, wantOutput: "yeelight-home device detail --device-id <id> --json"},
 		{name: "intent help command", args: []string{"help", "intent"}, wantOutput: "yeelight-home intent explain --intent <intent> [--json]"},
 		{name: "intent explain help command", args: []string{"help", "intent", "explain"}, wantOutput: "Returns accepted parameter fields, nested payloadShape, examples, and nextStep"},
@@ -2042,8 +2048,8 @@ func TestHomeListJSONReturnsAllAccountHomesWithSelectedHouse(t *testing.T) {
 		t.Fatalf("home list must not send selected house headers: %#v", houseHeaderCalls)
 	}
 	for index, bizType := range gotBizTypes {
-		if bizType != "" {
-			t.Fatalf("bizType[%d] = %q, want backend default PRO", index, bizType)
+		if bizType != api.BizTypeConsumer {
+			t.Fatalf("bizType[%d] = %q, want consumer home", index, bizType)
 		}
 	}
 	var response map[string]any

@@ -1,10 +1,9 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/contract"
+	"github.com/yeelight/yeelight-home/internal/i18n"
 	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
@@ -13,7 +12,7 @@ func sceneExecuteResponse(request contract.Request, entities api.EntityListResul
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "success",
-		UserMessage:     fmt.Sprintf("已执行情景：%s。", entity.Name),
+		UserMessage:     i18n.Text(request.Locale, i18n.SceneExecuted, entity.Name),
 		Result: map[string]any{
 			semantic.FieldRegion:  entities.Region,
 			semantic.FieldHouseID: entities.HouseID,
@@ -41,7 +40,7 @@ func sceneExecuteClarificationResponse(request contract.Request, reason string, 
 		ContractVersion: contract.Version,
 		RequestID:       request.RequestID,
 		Status:          "clarification_required",
-		UserMessage:     "请明确要执行的情景。",
+		UserMessage:     i18n.Text(request.Locale, i18n.SceneClarification),
 		Clarification: map[string]any{
 			semantic.FieldReason:               reason,
 			semantic.FieldTarget:               target.toMap(),

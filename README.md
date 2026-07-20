@@ -16,22 +16,33 @@ issues and contribute changes on GitHub.
 
 The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-home` through `YEELIGHT_HOME_BIN` or `PATH` and sends one JSON request to `yeelight-home invoke --stdin`.
 
-## Yeelight AI Capability Matrix
+## The Ecosystem In Plain Language
 
-These projects form a complementary stack. Choose the entry point that matches
-how you integrate with Yeelight; they can also be combined.
+You only install one foundation: **Yeelight Home**. The other projects are
+different ways for an AI to use Yeelight, not competing replacements.
 
-| Project | Role and capabilities | Best for | GitHub |
+| Term | Plain-language meaning | Yeelight project | Depends on |
 | --- | --- | --- | --- |
-| Yeelight Home | Recommended local semantic Runtime with one structured `invoke --stdin` boundary for queries, control, scenes, automations, lighting design, diagnostics, product knowledge, and generated apps. | Agent hosts, local automation, and applications that need a stable and policy-aware smart-home execution layer. | [Yeelight/yeelight-home](https://github.com/Yeelight/yeelight-home) |
-| Yeelight Smart Home Skills | Official Agent Skills: Smart Home turns natural language into safe Runtime operations; PRO App Builder generates focused local apps from proven Runtime capabilities. | Agent hosts that need conversational smart-home workflows or app generation. | [Yeelight/yeelight-smart-home-skills](https://github.com/Yeelight/yeelight-smart-home-skills) |
-| Yeelight AI CLI | Unified terminal workspace and MCP client for Cloud, Metadata, and LAN services, with local profiles, safe shortcuts, diagnostics, scripting, and AI client configuration. | People, scripts, and CI that want one general MCP and automation entry point. | [Yeelight/yeelight-cli](https://github.com/Yeelight/yeelight-cli) |
-| Yeelight Metadata MCP | Recommended cloud MCP entry for new integrations, with guarded workflows for homes, rooms, devices, groups, panels, scenes, automations, favorites, maintenance, accounts, multi-region authorization, and request-scoped home selection. | New MCP integrations and AI clients that need broad discovery, inspection, and management workflows. | [Yeelight/yeelight-metadata-mcp](https://github.com/Yeelight/yeelight-metadata-mcp) |
-| Yeelight IoT MCP | Focused companion MCP for direct topology and live-state access, device control, and scene execution not yet fully covered by Metadata MCP. | Existing integrations or clients that specifically need `control_node`, `execute_scene`, or focused live control. | [Yeelight/yeelight-iot-mcp](https://github.com/Yeelight/yeelight-iot-mcp) |
+| CLI / Runtime | The Yeelight program on your computer. It signs in, knows the selected home, performs checked operations, and can also be used directly by people or scripts. | **`yeelight-home`** | Nothing else in this matrix |
+| Skill | A Yeelight playbook for an AI: home rules, lighting knowledge, safe operating steps, and best practices. | **`yeelight-smart-home`** | `yeelight-home` |
+| MCP | A standard connector for AI clients that cannot install Skills. Metadata MCP is the primary cloud connector; IoT MCP is an optional focused-control companion. | **`yeelight-metadata-mcp`**, optionally **`yeelight-iot-mcp`** | Configured by `yeelight-home`; neither service is a Runtime dependency |
 
-Yeelight Home also provides system credential storage, local QR login, secret-redacted diagnostics, preview and validation, caller confirmation and Runtime policy/readback behavior, local memory and recommendation support, operation lessons, and machine-readable intent schema/explanations. Cross-platform binaries are distributed through GitHub Releases, npm, and supported package managers.
+**Recommended for most people:** install Yeelight Home, then let setup add the
+Smart Home Skill. Choose MCP only when your AI client cannot install Skills.
+Use the CLI workbench directly when you are scripting, troubleshooting, or
+deliberately working from a terminal.
 
-Typical paths: smart-home agents and generated apps -> Skills -> Yeelight Home; terminal users and scripts -> Yeelight AI CLI; new MCP integrations -> Metadata MCP; add IoT MCP only for focused direct control or scene execution that Metadata MCP does not yet cover.
+## Three Paths, One CLI
+
+Users do not need to learn CLI, Skill, and MCP terminology first. Install `yeelight-home`, then choose an outcome:
+
+| Path | What you get | Best for |
+| --- | --- | --- |
+| Full intelligence (recommended) | The `yeelight-smart-home` Skill brings Yeelight home rules, lighting knowledge, and safety boundaries, then executes through `yeelight-home`. | People who want to control, manage, and design their home in everyday language. |
+| Lightweight connection | An AI client starts `yeelight-home mcp serve --stdio`; choose Metadata MCP only for a cloud-only connection and add IoT MCP only for focused live-control compatibility. | MCP clients that cannot install Agent Skills. |
+| CLI workbench | Select homes, rooms, devices, and scenes by name, or use stable resource commands and `invoke --stdin`. | Advanced users, scripts, CI, and troubleshooting. |
+
+All three paths share one profile, Yeelight Pro app QR sign-in, Runtime semantics, safety checks, and write verification. Cloud and home-gateway LAN are Runtime execution backends, not competing products.
 
 ## Features
 
@@ -44,6 +55,10 @@ Typical paths: smart-home agents and generated apps -> Skills -> Yeelight Home; 
 - Redacted JSON output for Skill hosts and diagnostics.
 - Local preference memory and recommendation feedback stored under the Runtime data directory, not in Skill prompts.
 - Human-friendly resource commands plus a stable `invoke --stdin` contract for Skills and generated apps.
+- `yeelight-home setup` completes QR sign-in, Skill/MCP client installation, and read-only verification in Chinese or English; MCP setup supports automatic detection, multiple clients, and every verified adapter.
+- A TTY with no arguments opens the interactive workbench; `yeelight-home menu` opens it explicitly, while non-TTY no-argument behavior remains deterministic help output.
+- `yeelight-home mcp serve --stdio` exposes the same Runtime to local MCP clients without saving Yeelight Authorization in client configuration.
+- `cloud`, `local-preferred`, and `local-only` choose between Cloud and home-gateway LAN safely; an uncertain LAN write never triggers a blind Cloud retry.
 - Cross-platform distribution through the GoReleaser-backed GitHub Releases pipeline, with Homebrew, Scoop, npm, Linux packages, and optional container/package-manager channels.
 - Optional Docker/GHCR and Docker Hub images for NAS, server, and scheduled automation use.
 
@@ -114,12 +129,16 @@ Debian, Ubuntu, Fedora, Arch, AUR, Snap, Docker, GHCR, Docker Hub, and Winget ch
 If you use a local AI assistant that can run terminal commands, paste this single request:
 
 ```text
-Install the official Yeelight Home Runtime CLI for my operating system from Yeelight's GitHub Release or supported package manager, then install the Yeelight Smart Home Skill from the official Yeelight Skill release or ClawHub source. Verify the CLI with `yeelight-home doctor --json`, and guide me through `yeelight-home auth login --qr`; do not ask me to paste tokens, passwords, or cookies into chat.
+Install `yeelight-home` from an official Yeelight GitHub Release, official mirror, or supported package manager. Then run `yeelight-home setup --lang en-US`, prefer Full intelligence, guide me to Yeelight Pro app Home -> top-right `+` -> MCP Authorization, and wait for my scan. Never request or print a token, password, cookie, Client ID, or QR result. Finish with `yeelight-home doctor --json` and read-only home discovery.
 ```
 
 ## Quick Start
 
 ```sh
+yeelight-home setup --lang en-US
+yeelight-home setup --lang en-US --mode skill --agent auto --yes
+yeelight-home setup --lang en-US --mode mcp --agent auto --yes
+yeelight-home menu
 yeelight-home version
 yeelight-home doctor
 yeelight-home doctor --json
@@ -135,7 +154,19 @@ yeelight-home light on --device-id <device-id> --json
 yeelight-home automation enable --automation-id <automation-id> --json
 ```
 
+LAN-preferred setup:
+
+```sh
+yeelight-home setup --lang en-US --mode lan --gateway-ip 192.168.1.2 --agent auto --yes
+yeelight-home lan inspect --json
+yeelight-home config set --control-mode local-only --gateway-ip 192.168.1.2
+```
+
+MCP clients start the unified local Runtime through `yeelight-home mcp serve --stdio` by default. Use `--mcp-source cloud` or `--mcp-source gateway` only for explicit advanced compatibility needs. Cloud MCP setup stores only local `yeelight-home mcp proxy` launch arguments in the AI client; the proxy reads Authorization from the local credential store at runtime, so the token is not copied into client configuration.
+
 The default region is `cn`. Pass `--region sg`, `--region us`, or `--region eu` when your Yeelight account belongs to another cloud region.
+
+Ordinary Yeelight Pro homes are the default (`bizType=0`). For a commercial-lighting project, run `yeelight-home setup --lang en-US --biz-type 1` or add `--biz-type 1` to `auth login` and `home list`. Switching the business type clears the previously selected home unless you explicitly select a project from the new type, so a consumer House ID is never reused as a commercial project ID.
 
 For non-interactive local setup, import a token outside chat. Prefer `--stdin` in real shells so the token is not saved in shell history:
 
@@ -161,6 +192,7 @@ Default values:
 
 - Profile: `default`
 - Region: `cn`
+- Business type: `0` (ordinary Yeelight Pro home); use `1` for commercial-lighting projects
 - Home: unset until selected, and only required for house-scoped operations
 
 Common environment variables:
@@ -170,6 +202,7 @@ Common environment variables:
 | `YEELIGHT_HOME_BIN` | Absolute path used by Skills to find the CLI. |
 | `YEELIGHT_HOME_PROFILE` | Selects a profile for this process. |
 | `YEELIGHT_CLOUD_REGION` | Overrides region for this process: `cn`, `sg`, `us`, `eu`, or `dev` for development. |
+| `YEELIGHT_HOME_BIZ_TYPE` | Selects ordinary homes (`0`) or commercial-lighting projects (`1`) for this process. |
 | `YEELIGHT_HOME_HOUSE_ID` | Temporarily overrides selected home. |
 | `YEELIGHT_HOME_ACCESS_TOKEN` | Temporary token for local smoke tests or CI; not written to profile metadata. |
 | `YEELIGHT_HOME_DIR` | Overrides Runtime home directory. |
@@ -316,8 +349,8 @@ Prefer `--stdin` in real shells to avoid saving secrets in command history.
 
 ```sh
 yeelight-home profile list [--json]
-yeelight-home profile show [--json] [--profile <name>] [--region <region>] [--house-id <id>]
-yeelight-home profile use --profile <name> [--region <region>] [--house-id <id>] [--json]
+yeelight-home profile show [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
+yeelight-home profile use --profile <name> [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]
 yeelight-home profile delete --profile <name> [--json]
 ```
 

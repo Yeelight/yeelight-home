@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/yeelight/yeelight-home/internal/i18n"
 )
 
 const Version = "1.0"
@@ -55,8 +57,8 @@ func DecodeRequest(data []byte) (Request, error) {
 	if strings.TrimSpace(request.RequestID) == "" {
 		return Request{}, fmt.Errorf("requestId is required")
 	}
-	if request.Locale != "zh-CN" {
-		return Request{}, fmt.Errorf("locale must be zh-CN")
+	if !i18n.IsSupported(request.Locale) {
+		return Request{}, fmt.Errorf("locale must be zh-CN or en-US")
 	}
 	if strings.TrimSpace(request.Utterance) == "" {
 		return Request{}, fmt.Errorf("utterance is required")

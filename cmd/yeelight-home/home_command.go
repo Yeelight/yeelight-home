@@ -54,9 +54,11 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 		_, _ = fmt.Fprintln(stderr, "home list: missing token; run auth login --qr or auth token set")
 		return exitInvalidInput
 	}
-	summary, err := api.NewHomeSummaryClient(contextInfo.Endpoint, nil).RunList(context.Background(), api.HomeSummaryCredentials{
+	ctx := api.WithBizType(context.Background(), contextInfo.BizType)
+	summary, err := api.NewHomeSummaryClient(contextInfo.Endpoint, nil).RunList(ctx, api.HomeSummaryCredentials{
 		Authorization: contextInfo.AccessToken,
 		ClientID:      contextInfo.ClientID,
+		BizType:       contextInfo.BizType,
 	})
 	if err != nil {
 		var statusErr api.HTTPStatusError
@@ -72,6 +74,7 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 			semantic.FieldOK:         true,
 			semantic.FieldProfile:    contextInfo.Profile,
 			semantic.FieldRegion:     contextInfo.Region,
+			semantic.FieldBizType:    contextInfo.BizType,
 			semantic.FieldHouses:     summary.Houses,
 			semantic.FieldHouseCount: summary.HouseCount,
 			semantic.FieldRawShape:   summary.RawShape,
@@ -106,7 +109,7 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 	}
 	houseID := flags.string("house-id", flags.string("id", ""))
 	if houseID == "" {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--json]")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--biz-type <0|1>] [--json]")
 		return exitInvalidInput
 	}
 	profile, err := app.resolveTargetProfile(flags)
@@ -119,9 +122,15 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
 		return exitInternalError
 	}
+	bizType, err := resolveBizType(flags, metadata.BizType)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
+		return exitInvalidInput
+	}
 	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
 		semantic.FieldRegion:  flags.string("region", ""),
 		semantic.FieldHouseID: houseID,
+		semantic.FieldBizType: bizType,
 	})
 	if metadata.Region == "" {
 		metadata.Region = defaultRuntimeRegion
@@ -130,7 +139,7 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
 		return exitInternalError
 	}
-	result := map[string]any{semantic.FieldOK: true, semantic.FieldProfile: metadata.Profile, semantic.FieldRegion: metadata.Region, semantic.FieldHouseID: metadata.HouseID}
+	result := map[string]any{semantic.FieldOK: true, semantic.FieldProfile: metadata.Profile, semantic.FieldRegion: metadata.Region, semantic.FieldHouseID: metadata.HouseID, semantic.FieldBizType: metadata.BizType}
 	if flags.bool("json") {
 		return writeJSON(stdout, stderr, result)
 	}

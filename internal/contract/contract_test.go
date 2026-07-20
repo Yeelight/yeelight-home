@@ -19,6 +19,23 @@ func TestDecodeRequestAcceptsKnownIntent(t *testing.T) {
 	}
 }
 
+func TestDecodeRequestAcceptsEnglishLocale(t *testing.T) {
+	request, err := DecodeRequest([]byte(`{"contractVersion":"1.0","requestId":"req-en","locale":"en-US","utterance":"Show my home","intent":"home.summary"}`))
+	if err != nil {
+		t.Fatalf("DecodeRequest error: %v", err)
+	}
+	if request.Locale != "en-US" {
+		t.Fatalf("locale = %s", request.Locale)
+	}
+}
+
+func TestDecodeRequestRejectsUnsupportedLocale(t *testing.T) {
+	_, err := DecodeRequest([]byte(`{"contractVersion":"1.0","requestId":"req-fr","locale":"fr-FR","utterance":"Maison","intent":"home.summary"}`))
+	if err == nil || err.Error() != "locale must be zh-CN or en-US" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestDecodeRequestAcceptsIntentExplain(t *testing.T) {
 	request, err := DecodeRequest([]byte(`{"contractVersion":"1.0","requestId":"req-intent-explain","locale":"zh-CN","utterance":"解释参数","intent":"intent.explain","parameters":{"intent":"lighting.design.import"}}`))
 	if err != nil {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/yeelight/yeelight-home/internal/auth"
 	"github.com/yeelight/yeelight-home/internal/config"
 	"github.com/yeelight/yeelight-home/internal/credential"
@@ -40,6 +42,9 @@ type app struct {
 	memoryStore       storage.JSONStore
 	topologyCache     topologyCache
 	sleep             func(context.Context, time.Duration) error
+	terminal          func(io.Reader) bool
+	process           func(context.Context, []string, io.Writer, io.Writer) error
+	processInput      func(context.Context, []string, io.Reader, io.Writer, io.Writer) error
 }
 
 func newAppFromEnv() *app {
@@ -56,6 +61,9 @@ func newAppFromEnv() *app {
 
 func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
+		if app.isTerminal(stdin) {
+			return app.runMenu(stdin, stdout, stderr)
+		}
 		return printRootHelp(stdout)
 	}
 	if code, ok := printHelpForArgs(stdout, stderr, args); ok {
@@ -99,6 +107,18 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 			return printCommandHelp(stdout, stderr, "invoke")
 		}
 		return app.runInvoke(args[1:], stdin, stdout, stderr)
+	case "mcp":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "mcp")
+		}
+		return app.runMCP(args[1:], stdin, stdout, stderr)
+	case "menu":
+		return app.runMenu(stdin, stdout, stderr)
+	case "lan":
+		if hasSubcommandHelp(args[1:]) {
+			return printCommandHelp(stdout, stderr, "lan")
+		}
+		return app.runLAN(args[1:], stdout, stderr)
 	case "intent":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "intent")
@@ -114,6 +134,8 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 			return printCommandHelp(stdout, stderr, "release")
 		}
 		return runRelease(args[1:], stdout, stderr)
+	case "setup":
+		return app.runSetup(args[1:], stdin, stdout, stderr)
 	default:
 		if _, ok := moduleCommands[args[0]]; ok {
 			if hasSubcommandHelp(args[1:]) {
@@ -127,6 +149,14 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 		_, _ = fmt.Fprintf(stderr, "unsupported command %q\n", args[0])
 		return exitInvalidInput
 	}
+}
+
+func (app *app) isTerminal(reader io.Reader) bool {
+	if app.terminal != nil {
+		return app.terminal(reader)
+	}
+	file, ok := reader.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
 }
 
 func hasSubcommandHelp(args []string) bool {

@@ -14,6 +14,7 @@ import (
 type HomeSummaryCredentials struct {
 	Authorization string
 	ClientID      string
+	BizType       string
 }
 
 type HouseSummary struct {
@@ -49,6 +50,10 @@ func NewHomeSummaryClient(endpoint Endpoint, client *http.Client) HomeSummaryCli
 }
 
 func (client HomeSummaryClient) Run(ctx context.Context, credentials HomeSummaryCredentials) (HomeSummaryResult, error) {
+	credentials.BizType = effectiveBizType(ctx, credentials.BizType)
+	if credentials.BizType == BizTypeCommercial {
+		return client.runCommercialList(ctx, credentials)
+	}
 	response, err := client.callHomeList(ctx, "/v1/house/r/list", credentials)
 	if err != nil {
 		return HomeSummaryResult{}, err
@@ -68,6 +73,10 @@ func (client HomeSummaryClient) Run(ctx context.Context, credentials HomeSummary
 }
 
 func (client HomeSummaryClient) RunList(ctx context.Context, credentials HomeSummaryCredentials) (HomeSummaryResult, error) {
+	credentials.BizType = effectiveBizType(ctx, credentials.BizType)
+	if credentials.BizType == BizTypeCommercial {
+		return client.runCommercialList(ctx, credentials)
+	}
 	allResponse, err := client.callHomeList(ctx, "/v1/house/r/all", credentials)
 	if err != nil {
 		return HomeSummaryResult{}, err
@@ -111,10 +120,12 @@ func (client HomeSummaryClient) callHomeList(ctx context.Context, path string, c
 	return callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+path, map[string]any{}, requestCredentials{
 		Authorization: credentials.Authorization,
 		ClientID:      credentials.ClientID,
+		BizType:       credentials.BizType,
 	})
 }
 
 func (client HomeSummaryClient) RunSearch(ctx context.Context, parameters map[string]any, credentials HomeSummaryCredentials) (HomeSummaryResult, error) {
+	credentials.BizType = effectiveBizType(ctx, credentials.BizType)
 	fuzzyName := strings.TrimSpace(firstNonEmpty(
 		stringFromAny(parameters[semantic.FieldFuzzyName]),
 		stringFromAny(parameters[semantic.FieldName]),
@@ -124,6 +135,22 @@ func (client HomeSummaryClient) RunSearch(ctx context.Context, parameters map[st
 	if fuzzyName == "" {
 		return HomeSummaryResult{}, fmt.Errorf("home search requires fuzzyName or name")
 	}
+	if credentials.BizType == BizTypeCommercial {
+		summary, err := client.runCommercialList(ctx, credentials)
+		if err != nil {
+			return HomeSummaryResult{}, err
+		}
+		ranked := semantic.RankNameMatches(fuzzyName, summary.Houses, func(house HouseSummary) string { return house.Name })
+		summary.Houses = make([]HouseSummary, 0, len(ranked))
+		for _, match := range ranked {
+			house := match.Value
+			house.Source = match.Match.Kind
+			summary.Houses = append(summary.Houses, house)
+		}
+		summary.HouseCount = len(summary.Houses)
+		summary.Source += "+local_name_match"
+		return summary, nil
+	}
 	body := map[string]any{
 		semantic.FieldFuzzyName: fuzzyName,
 		semantic.FieldPageNo:    positiveInt(parameters[semantic.FieldPageNo], 1),
@@ -132,6 +159,7 @@ func (client HomeSummaryClient) RunSearch(ctx context.Context, parameters map[st
 	response, err := callJSON(ctx, client.client, http.MethodPost, strings.TrimRight(client.endpoint.BaseURL, "/")+"/v1/house/r/fuzzy", body, requestCredentials{
 		Authorization: credentials.Authorization,
 		ClientID:      credentials.ClientID,
+		BizType:       credentials.BizType,
 	})
 	if err != nil {
 		return HomeSummaryResult{}, err

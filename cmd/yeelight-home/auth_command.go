@@ -61,9 +61,24 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 		_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
 		return exitInvalidInput
 	}
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
+		return exitInternalError
+	}
+	metadata, _, err := app.metadataStore.Load(profile)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
+		return exitInternalError
+	}
+	bizType, err := resolveBizType(flags, metadata.BizType)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
+		return exitInvalidInput
+	}
 	client := app.qrClient
 	if client == nil {
-		client = auth.NewQRLoginClient(endpoint.AccountBaseURL(), &http.Client{Timeout: 15 * time.Second})
+		client = auth.NewQRLoginClientWithBizType(endpoint.AccountBaseURL(), &http.Client{Timeout: 15 * time.Second}, bizType)
 	}
 	info, err := client.Check(context.Background(), qrCodeID)
 	if err != nil {
@@ -80,11 +95,6 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 			_, _ = fmt.Fprintln(stderr, "auth qr-check: QR login response did not contain access token")
 			return exitInternalError
 		}
-		profile, err := app.resolveTargetProfile(flags)
-		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
-			return exitInternalError
-		}
 		device, err := app.resolveQRDevice(profile, flags.string("device", ""))
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
@@ -94,19 +104,14 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 			_, _ = fmt.Fprintf(stderr, "auth qr-check: save credential: %v\n", err)
 			return exitInternalError
 		}
-		if err := app.metadataStore.Save(credential.ProfileMetadata{
-			Profile:  profile,
-			Region:   endpoint.Region,
-			ClientID: credentials.ClientID,
-			HouseID:  credentials.HouseID,
-			QRDevice: device,
-		}); err != nil {
+		if err := app.saveQRProfileMetadata(profile, endpoint.Region, bizType, credentials.ClientID, credentials.HouseID, device); err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth qr-check: save profile metadata: %v\n", err)
 			return exitInternalError
 		}
 		response[semantic.FieldCredentials] = map[string]any{
 			semantic.FieldAccessTokenPresent: true,
 			semantic.FieldHouseID:            credentials.HouseID,
+			semantic.FieldBizType:            bizType,
 		}
 	}
 	return writeJSON(stdout, stderr, response)
@@ -125,10 +130,11 @@ func (app *app) authStatus(flags cliFlags) map[string]any {
 		}
 	}
 	response := map[string]any{
-		semantic.FieldAuthenticated: context.TokenPresent || status.Authenticated,
+		semantic.FieldAuthenticated: context.TokenPresent,
 		semantic.FieldProfile:       context.Profile,
 		semantic.FieldRegion:        context.Region,
 		semantic.FieldHouseID:       context.HouseID,
+		semantic.FieldBizType:       context.BizType,
 		semantic.FieldTokenPresent:  context.TokenPresent,
 		semantic.FieldTokenSource:   context.TokenSource,
 		semantic.FieldTokenStore:    status.TokenStore,
@@ -141,6 +147,7 @@ func writeAuthStatusText(stdout io.Writer, response map[string]any) int {
 	_, _ = fmt.Fprintf(stdout, "Authenticated: %t\n", boolFromDiagnostic(response, semantic.FieldAuthenticated))
 	_, _ = fmt.Fprintf(stdout, "Profile: %s\n", stringFromDiagnostic(response, semantic.FieldProfile))
 	_, _ = fmt.Fprintf(stdout, "Region: %s\n", stringFromDiagnostic(response, semantic.FieldRegion))
+	_, _ = fmt.Fprintf(stdout, "Biz type: %s\n", stringFromDiagnostic(response, semantic.FieldBizType))
 	houseID := stringFromDiagnostic(response, semantic.FieldHouseID)
 	if houseID == "" {
 		houseID = "(not selected)"
@@ -165,7 +172,7 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInvalidInput
 	}
 	if !flags.bool("qr") {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth login --qr [--json] [--region cn]")
+		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth login --qr [--json] [--region cn] [--biz-type <0|1>]")
 		return exitInvalidInput
 	}
 	asJSON := flags.bool("json")
@@ -173,6 +180,16 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "auth login: %v\n", err)
 		return exitInternalError
+	}
+	metadata, _, err := app.metadataStore.Load(profile)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "auth login: %v\n", err)
+		return exitInternalError
+	}
+	bizType, err := resolveBizType(flags, metadata.BizType)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "auth login: %v\n", err)
+		return exitInvalidInput
 	}
 	qrPNGPath := flags.string("qr-png", "")
 	endpoint, err := resolveEndpointForFlags(flags)
@@ -182,7 +199,7 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 	}
 	client := app.qrClient
 	if client == nil {
-		client = auth.NewQRLoginClient(endpoint.AccountBaseURL(), &http.Client{Timeout: 15 * time.Second})
+		client = auth.NewQRLoginClientWithBizType(endpoint.AccountBaseURL(), &http.Client{Timeout: 15 * time.Second}, bizType)
 	}
 	device, err := app.resolveQRDevice(profile, flags.string("device", ""))
 	if err != nil {
@@ -217,18 +234,13 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 			_, _ = fmt.Fprintf(stderr, "auth login: save credential: %v\n", err)
 			return exitInternalError
 		}
-		if err := app.metadataStore.Save(credential.ProfileMetadata{
-			Profile:  profile,
-			Region:   endpoint.Region,
-			ClientID: result.Credentials.ClientID,
-			HouseID:  result.Credentials.HouseID,
-			QRDevice: result.Device,
-		}); err != nil {
+		if err := app.saveQRProfileMetadata(profile, endpoint.Region, bizType, result.Credentials.ClientID, result.Credentials.HouseID, result.Device); err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth login: save profile metadata: %v\n", err)
 			return exitInternalError
 		}
 	}
 	response := sanitizeQRLoginResult(profile, endpoint.Region, result)
+	response[semantic.FieldBizType] = bizType
 	if qrPNGPath != "" {
 		if err := writeQRPNG(qrPNGPath, result.Payload); err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth login: write QR png: %v\n", err)
@@ -246,6 +258,21 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 		_, _ = fmt.Fprintf(stdout, "已保存凭据 profile=%s region=%s\n", profile, endpoint.Region)
 	}
 	return exitOK
+}
+
+func (app *app) saveQRProfileMetadata(profile string, region string, bizType string, clientID string, houseID string, device string) error {
+	metadata, _, err := app.metadataStore.Load(profile)
+	if err != nil {
+		return err
+	}
+	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
+		semantic.FieldRegion:   region,
+		semantic.FieldBizType:  bizType,
+		semantic.FieldClientID: clientID,
+		semantic.FieldHouseID:  houseID,
+		semantic.FieldQRDevice: device,
+	})
+	return app.metadataStore.Save(metadata)
 }
 
 func (app *app) runAuthToken(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
@@ -282,24 +309,31 @@ func (app *app) runAuthToken(args []string, stdin io.Reader, stdout io.Writer, s
 			token = strings.TrimSpace(os.Getenv("YEELIGHT_HOME_ACCESS_TOKEN"))
 		}
 		if token == "" {
-			_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--house-id <id>] [--json]")
+			_, _ = fmt.Fprintln(stderr, "usage: yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]")
 			return exitInvalidInput
-		}
-		if err := app.tokenStore.Save(credential.TokenRecord{Profile: profile, AccessToken: token}); err != nil {
-			_, _ = fmt.Fprintf(stderr, "auth token set: save credential: %v\n", err)
-			return exitInternalError
 		}
 		metadata, _, err := app.metadataStore.Load(profile)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth token set: load profile metadata: %v\n", err)
 			return exitInternalError
 		}
+		bizType, err := resolveBizType(flags, metadata.BizType)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "auth token set: %v\n", err)
+			return exitInvalidInput
+		}
+		clearHouseIDForBizTypeChange(&metadata, flags, bizType)
 		metadata = mergeProfileMetadata(metadata, profile, map[string]string{
 			semantic.FieldRegion:  flags.string("region", ""),
 			semantic.FieldHouseID: flags.string("house-id", ""),
+			semantic.FieldBizType: bizType,
 		})
 		if metadata.Region == "" {
 			metadata.Region = defaultRuntimeRegion
+		}
+		if err := app.tokenStore.Save(credential.TokenRecord{Profile: profile, AccessToken: token}); err != nil {
+			_, _ = fmt.Fprintf(stderr, "auth token set: save credential: %v\n", err)
+			return exitInternalError
 		}
 		if err := app.metadataStore.Save(metadata); err != nil {
 			_, _ = fmt.Fprintf(stderr, "auth token set: save profile metadata: %v\n", err)
@@ -311,6 +345,7 @@ func (app *app) runAuthToken(args []string, stdin io.Reader, stdout io.Writer, s
 			semantic.FieldTokenPresent: true,
 			semantic.FieldRegion:       metadata.Region,
 			semantic.FieldHouseID:      metadata.HouseID,
+			semantic.FieldBizType:      metadata.BizType,
 		}
 		if flags.bool("json") {
 			return writeJSON(stdout, stderr, result)

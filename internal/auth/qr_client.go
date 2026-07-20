@@ -13,6 +13,7 @@ import (
 type QRLoginClient struct {
 	baseURL string
 	client  *http.Client
+	bizType string
 }
 
 func NewQRLoginClient(baseURL string, client *http.Client) QRLoginClient {
@@ -22,7 +23,16 @@ func NewQRLoginClient(baseURL string, client *http.Client) QRLoginClient {
 	return QRLoginClient{
 		baseURL: NormalizeQRLoginBaseURL(baseURL),
 		client:  client,
+		bizType: "1",
 	}
+}
+
+func NewQRLoginClientWithBizType(baseURL string, client *http.Client, bizType string) QRLoginClient {
+	result := NewQRLoginClient(baseURL, client)
+	if bizType == "0" || bizType == "1" {
+		result.bizType = bizType
+	}
+	return result
 }
 
 func (client QRLoginClient) Create(ctx context.Context, device string) (QRInfo, error) {
@@ -40,7 +50,7 @@ func (client QRLoginClient) post(ctx context.Context, path string) (QRInfo, erro
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Accept-Language", "zh-CN")
-	request.Header.Set("bizType", "1")
+	request.Header.Set("bizType", client.bizType)
 
 	response, err := client.client.Do(request)
 	if err != nil {

@@ -96,3 +96,19 @@ func TestQRLoginClientRejectsBusinessFailure(t *testing.T) {
 		t.Fatal("expected business error")
 	}
 }
+
+func TestQRLoginClientUsesSelectedBizType(t *testing.T) {
+	var got string
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		got = request.Header.Get("bizType")
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"qrCodeId":"qr-1","status":"CREATED"}}`))
+	}))
+	defer server.Close()
+	client := NewQRLoginClientWithBizType(server.URL, server.Client(), "0")
+	if _, err := client.Create(context.Background(), "F8:24:41:00:00:01"); err != nil {
+		t.Fatalf("Create error: %v", err)
+	}
+	if got != "0" {
+		t.Fatalf("bizType = %q", got)
+	}
+}
