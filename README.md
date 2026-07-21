@@ -25,7 +25,7 @@ different ways for an AI to use Yeelight, not competing replacements.
 | --- | --- | --- | --- |
 | CLI / Runtime | The Yeelight program on your computer. It signs in, knows the selected home, performs checked operations, and can also be used directly by people or scripts. | **`yeelight-home`** | Nothing else in this matrix |
 | Skill | A Yeelight playbook for an AI: home rules, lighting knowledge, safe operating steps, and best practices. | **`yeelight-smart-home`** | `yeelight-home` |
-| MCP | A standard connector for AI clients that cannot install Skills. Metadata MCP is the primary cloud connector; IoT MCP is an optional focused-control companion. | **`yeelight-metadata-mcp`**, optionally **`yeelight-iot-mcp`** | Configured by `yeelight-home`; neither service is a Runtime dependency |
+| MCP | A standard cloud connection for AI clients that cannot install Skills. One **Yeelight MCP** setup includes home understanding, management, live state, and control. | **`yeelight-metadata-mcp`** + **`yeelight-iot-mcp`** | Configured together by `yeelight-home`; neither cloud service depends on the Runtime to execute requests |
 
 **Recommended for most people:** install Yeelight Home, then let setup add the
 Smart Home Skill. Choose MCP only when your AI client cannot install Skills.
@@ -39,10 +39,10 @@ Users do not need to learn CLI, Skill, and MCP terminology first. Install `yeeli
 | Path | What you get | Best for |
 | --- | --- | --- |
 | Full intelligence (recommended) | The `yeelight-smart-home` Skill brings Yeelight home rules, lighting knowledge, and safety boundaries, then executes through `yeelight-home`. | People who want to control, manage, and design their home in everyday language. |
-| Lightweight connection | An AI client starts `yeelight-home mcp serve --stdio`; choose Metadata MCP only for a cloud-only connection and add IoT MCP only for focused live-control compatibility. | MCP clients that cannot install Agent Skills. |
+| Lightweight connection | One `yeelight-home setup --mode mcp --mcp-source cloud` flow configures the complete Yeelight MCP cloud suite through credential proxies, without placing Authorization in client configuration. | MCP clients that cannot install Agent Skills. |
 | CLI workbench | Select homes, rooms, devices, and scenes by name, or use stable resource commands and `invoke --stdin`. | Advanced users, scripts, CI, and troubleshooting. |
 
-All three paths share one profile, Yeelight Pro app QR sign-in, Runtime semantics, safety checks, and write verification. Cloud and home-gateway LAN are Runtime execution backends, not competing products.
+The setup paths share one local profile and Yeelight Pro app QR sign-in. The Skill and local MCP execute through the Runtime; cloud Yeelight MCP connects directly to the Yeelight PRO cloud through two independently deployed services. Cloud and home-gateway LAN remain distinct execution routes, not competing products.
 
 ## Features
 

@@ -24,7 +24,7 @@ Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH
 | --- | --- | --- | --- |
 | CLI / Runtime | 装在电脑里的易来程序。它负责扫码、记住当前家庭、安全执行操作；人和脚本也能直接使用。 | **`yeelight-home`** | 不依赖矩阵里的其他项目 |
 | Skill | 给 AI 的“易来使用说明书”：包含家庭规则、照明经验、安全步骤和最佳实践。 | **`yeelight-smart-home`** | 依赖 `yeelight-home` |
-| MCP | 给不能安装 Skill 的 AI 客户端使用的标准连接方式。Metadata MCP 是云端主入口，IoT MCP 只是按需增加的实时控制补充。 | **`yeelight-metadata-mcp`**，按需增加 **`yeelight-iot-mcp`** | 由 `yeelight-home` 帮你配置；两个服务都不是 Runtime 的依赖 |
+| MCP | 给不能安装 Skill 的 AI 客户端使用的标准云端连接方式。一套 **Yeelight MCP** 同时包含家庭理解与管理、实时状态与控制。 | **`yeelight-metadata-mcp`** + **`yeelight-iot-mcp`** | 由 `yeelight-home` 一次配置；两个云端服务执行请求时都不依赖 Runtime |
 
 **大多数人这样选：**先安装 Yeelight Home，再让 setup 添加 Smart Home Skill。
 只有 AI 客户端不能安装 Skill 时才选 MCP；写脚本、排障或明确想用终端时，
@@ -37,10 +37,10 @@ Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH
 | 路线 | 你会得到什么 | 适合谁 |
 | --- | --- | --- |
 | 完整智能模式（推荐） | `yeelight-smart-home` Skill 带着易来的家庭规则、照明经验和安全边界，通过 `yeelight-home` 执行。 | 希望直接用日常语言控制、管理和设计家庭的用户。 |
-| 轻量连接模式 | AI 客户端连接 `yeelight-home mcp serve --stdio`；需要纯云端 MCP 时再选择 Metadata MCP，实时控制兼容场景再增加 IoT MCP。 | 客户端支持 MCP，但不方便安装 Skill 的用户。 |
+| 轻量连接模式 | 一次运行 `yeelight-home setup --mode mcp --mcp-source cloud`，通过本机凭据代理配置完整 Yeelight MCP 云端能力，客户端配置中不保存 Authorization。 | 客户端支持 MCP，但不方便安装 Skill 的用户。 |
 | CLI 工作台 | 在终端按名称选择家庭、房间、设备和情景，或使用稳定资源命令与 `invoke --stdin`。 | 极客用户、脚本、CI 和排障人员。 |
 
-三条路线共用同一套 profile、Yeelight Pro APP 扫码登录、Runtime 语义、安全检查和写后验证。Cloud 与家庭网关 LAN 是 Runtime 的执行后端，不是两套互相冲突的产品。
+三条路线共用本地 profile 和 Yeelight Pro APP 扫码登录体验。Skill 与本地 MCP 通过 Runtime 执行；云端 Yeelight MCP 由两个独立服务直接连接 Yeelight PRO 云。Cloud 与家庭网关 LAN 是不同执行路线，不是互相冲突的产品。
 
 ## 主要特性
 
