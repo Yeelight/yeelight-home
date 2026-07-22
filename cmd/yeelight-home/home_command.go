@@ -1,17 +1,21 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
 	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
-func (app *app) runHome(args []string, stdout io.Writer, stderr io.Writer) int {
+func (app *app) runHome(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home home <list|select>")
 		return exitInvalidInput
@@ -20,7 +24,7 @@ func (app *app) runHome(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "list":
 		return app.runHomeList(args[1:], stdout, stderr)
 	case "select":
-		return app.runHomeSelect(args[1:], stdout, stderr)
+		return app.runHomeSelect(args[1:], stdin, stdout, stderr)
 	default:
 		_, _ = fmt.Fprintf(stderr, "unsupported home command %q\n", args[0])
 		return exitInvalidInput
@@ -101,17 +105,13 @@ func (app *app) runHomeList(args []string, stdout io.Writer, stderr io.Writer) i
 	return exitOK
 }
 
-func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer) int {
+func (app *app) runHomeSelect(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	flags, err := parseFlags(args)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
 		return exitInvalidInput
 	}
 	houseID := flags.string("house-id", flags.string("id", ""))
-	if houseID == "" {
-		_, _ = fmt.Fprintln(stderr, "usage: yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--biz-type <0|1>] [--json]")
-		return exitInvalidInput
-	}
 	profile, err := app.resolveTargetProfile(flags)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
@@ -126,6 +126,48 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
 		return exitInvalidInput
+	}
+	selectedName := ""
+	if houseID == "" {
+		if !app.isTerminal(stdin) {
+			_, _ = fmt.Fprintln(stderr, "home select: run this command in an interactive terminal to choose by name, or provide --house-id <id> for automation")
+			return exitInvalidInput
+		}
+		listArgs := []string{"--json"}
+		if profile != "" {
+			listArgs = append(listArgs, "--profile", profile)
+		}
+		if region := flags.string("region", ""); region != "" {
+			listArgs = append(listArgs, "--region", region)
+		}
+		if bizType != "" {
+			listArgs = append(listArgs, "--biz-type", bizType)
+		}
+		var listOutput bytes.Buffer
+		var listError bytes.Buffer
+		if code := app.runHomeList(listArgs, &listOutput, &listError); code != exitOK {
+			_, _ = io.Copy(stderr, &listError)
+			return code
+		}
+		var result struct {
+			Houses []setupHomeChoice `json:"houses"`
+		}
+		if err := json.Unmarshal(listOutput.Bytes(), &result); err != nil {
+			_, _ = fmt.Fprintf(stderr, "home select: parse home list: %v\n", err)
+			return exitInternalError
+		}
+		prompt := &setupPrompt{reader: bufio.NewReader(stdin), stdout: stdout}
+		houseID, err = prompt.chooseHome(firstNonEmpty(metadata.Language, "zh-CN"), result.Houses)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
+			return exitInvalidInput
+		}
+		for _, home := range result.Houses {
+			if home.ID == houseID {
+				selectedName = home.Name
+				break
+			}
+		}
 	}
 	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
 		semantic.FieldRegion:  flags.string("region", ""),
@@ -143,6 +185,10 @@ func (app *app) runHomeSelect(args []string, stdout io.Writer, stderr io.Writer)
 	if flags.bool("json") {
 		return writeJSON(stdout, stderr, result)
 	}
-	_, _ = fmt.Fprintf(stdout, "selected houseId=%s for profile=%s\n", metadata.HouseID, metadata.Profile)
+	if strings.TrimSpace(selectedName) != "" {
+		_, _ = fmt.Fprintf(stdout, "selected home=%s for profile=%s\n", selectedName, metadata.Profile)
+	} else {
+		_, _ = fmt.Fprintf(stdout, "selected houseId=%s for profile=%s\n", metadata.HouseID, metadata.Profile)
+	}
 	return exitOK
 }

@@ -84,7 +84,7 @@ func (prompt *setupPrompt) chooseHome(locale string, homes []setupHomeChoice) (s
 	}
 	_, _ = fmt.Fprintln(prompt.stdout, i18n.Text(locale, i18n.SetupChooseHome))
 	for index, home := range homes {
-		_, _ = fmt.Fprintf(prompt.stdout, "  %d. %s (%s)\n", index+1, home.Name, home.ID)
+		_, _ = fmt.Fprintf(prompt.stdout, "  %d. %s\n", index+1, home.Name)
 	}
 	value, err := prompt.readLine()
 	if err == io.EOF || value == "" {

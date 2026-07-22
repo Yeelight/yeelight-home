@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,7 +45,7 @@ func TestSetupInteractiveDefaultsToSkillAndCanCancel(t *testing.T) {
 	app.terminal = func(io.Reader) bool { return true }
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	code := app.run([]string{"setup", "--lang", "zh-CN", "--home-dir", t.TempDir()}, strings.NewReader("\nn\n"), &stdout, &stderr)
+	code := app.run([]string{"setup", "--lang", "zh-CN", "--agent", "codex", "--home-dir", t.TempDir()}, strings.NewReader("\nn\n"), &stdout, &stderr)
 	if code != exitOK || !strings.Contains(stdout.String(), "已取消安装") {
 		t.Fatalf("code = %d, stdout = %s, stderr = %s", code, stdout.String(), stderr.String())
 	}
@@ -179,5 +182,71 @@ func TestMCPJSONMergePreservesExistingConfigAndUsesProtectedPermissions(t *testi
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %v", info.Mode().Perm())
+	}
+}
+
+func TestSkillInstallerDoesNotTreatPartialAgentFailureAsSuccess(t *testing.T) {
+	app := newTestApp(t)
+	app.process = func(_ context.Context, _ []string, _ io.Writer, stderr io.Writer) error {
+		_, _ = fmt.Fprintln(stderr, "PromptScript: PromptScript does not support global skill installation")
+		return nil
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills", "add", "https://example.com/skills", "--global", "--yes"},
+	}
+	err := app.runSkillInstaller(step, setupExecutionOptions{Stdout: io.Discard, Stderr: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "partial Skill installation failure") {
+		t.Fatalf("runSkillInstaller error = %v", err)
+	}
+}
+
+func TestSkillInstallerFallsBackAcrossOfficialMirrors(t *testing.T) {
+	app := newTestApp(t)
+	var commands [][]string
+	app.process = func(_ context.Context, command []string, _ io.Writer, _ io.Writer) error {
+		commands = append(commands, append([]string(nil), command...))
+		if len(commands) < 3 {
+			return errors.New("source unavailable")
+		}
+		return nil
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills", "add", "https://github.com/Yeelight/yeelight-smart-home-skills", "--global", "--yes", "--agent", "codex"},
+		Sources: []string{
+			"https://github.com/Yeelight/yeelight-smart-home-skills",
+			"https://gitee.com/yeelight/yeelight-smart-home-skills.git",
+			"https://gitcode.com/Yeelight/yeelight-smart-home-skills.git",
+		},
+	}
+	if err := app.runSkillInstaller(step, setupExecutionOptions{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatalf("runSkillInstaller error: %v", err)
+	}
+	if len(commands) != 3 || !slices.Contains(commands[1], step.Sources[1]) || !slices.Contains(commands[2], step.Sources[2]) {
+		t.Fatalf("commands = %#v", commands)
+	}
+}
+
+func TestSkillInstallerFallsBackWhenSkillsCLIReportsNoSkillsWithExitZero(t *testing.T) {
+	app := newTestApp(t)
+	var commands [][]string
+	app.process = func(_ context.Context, command []string, stdout io.Writer, _ io.Writer) error {
+		commands = append(commands, append([]string(nil), command...))
+		if len(commands) == 1 {
+			_, _ = fmt.Fprintln(stdout, "No skills found at this URL.")
+		}
+		return nil
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills", "add", "https://example.com/first", "--global", "--yes", "--agent", "codex"},
+		Sources: []string{"https://example.com/first", "https://example.com/second.git"},
+	}
+	if err := app.runSkillInstaller(step, setupExecutionOptions{Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatalf("runSkillInstaller error: %v", err)
+	}
+	if len(commands) != 2 || !slices.Contains(commands[1], step.Sources[1]) {
+		t.Fatalf("commands = %#v", commands)
 	}
 }

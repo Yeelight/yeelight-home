@@ -11,8 +11,8 @@ import (
 
 var skillRepositories = []string{
 	"https://github.com/Yeelight/yeelight-smart-home-skills",
-	"https://gitee.com/yeelight/yeelight-smart-home-skills",
-	"https://gitcode.com/Yeelight/yeelight-smart-home-skills",
+	"https://gitee.com/yeelight/yeelight-smart-home-skills.git",
+	"https://gitcode.com/Yeelight/yeelight-smart-home-skills.git",
 }
 
 func BuildPlan(options Options) (Plan, error) {

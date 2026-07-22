@@ -1,7 +1,9 @@
 package setup
 
 import (
+	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -72,16 +74,23 @@ func TestBuildPlanDelegatesUnknownAgentToSkillsCLI(t *testing.T) {
 	}
 }
 
-func TestBuildPlanAutoDetectsAgentsWithoutMaintainingAList(t *testing.T) {
-	plan, err := BuildPlan(Options{Locale: "zh-CN", ClientID: "auto", Mode: ModeSkill, HomeDir: "/tmp/home"})
+func TestBuildPlanAutoDetectsAndPinsInstalledSkillAgents(t *testing.T) {
+	plan, err := BuildPlan(Options{
+		Locale: "zh-CN", ClientID: "auto", Mode: ModeSkill, HomeDir: "/tmp/home",
+		LookPath: func(command string) (string, error) {
+			if command == "codex" {
+				return "/usr/local/bin/codex", nil
+			}
+			return "", fmt.Errorf("not found")
+		},
+	})
 	if err != nil {
 		t.Fatalf("BuildPlan error: %v", err)
 	}
 	command := plan.Steps[2].Command
-	for index, item := range command {
-		if item == "--agent" || (index > 0 && command[index-1] == "--agent") {
-			t.Fatalf("auto command should delegate detection: %#v", command)
-		}
+	wantSuffix := []string{"--agent", "codex"}
+	if len(command) < len(wantSuffix) || !slices.Equal(command[len(command)-len(wantSuffix):], wantSuffix) {
+		t.Fatalf("auto command should pin detected agents: %#v", command)
 	}
 }
 

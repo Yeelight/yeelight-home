@@ -220,8 +220,10 @@ func updateJSONFile(path string, update func(map[string]any) error) error {
 	if data, err := os.ReadFile(path); err == nil {
 		original = data
 		originalExists = true
-		if err := json.Unmarshal(data, &document); err != nil {
-			return fmt.Errorf("parse existing MCP config: %w", err)
+		if len(bytes.TrimSpace(data)) > 0 {
+			if err := json.Unmarshal(data, &document); err != nil {
+				return fmt.Errorf("parse existing MCP config %s: %w", path, err)
+			}
 		}
 	} else if !os.IsNotExist(err) {
 		return err

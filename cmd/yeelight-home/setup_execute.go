@@ -109,7 +109,7 @@ func (app *app) executeSetupStep(plan setupdomain.Plan, step setupdomain.Step, o
 		}
 		homeArgs := appendProfileRegionArgs([]string{"list", "--json"}, options)
 		var homeOutput bytes.Buffer
-		if code := app.runHome(homeArgs, &homeOutput, options.Stderr); code != exitOK {
+		if code := app.runHome(homeArgs, strings.NewReader(""), &homeOutput, options.Stderr); code != exitOK {
 			return fmt.Errorf("home list returned exit code %d", code)
 		}
 		return app.selectDefaultSetupHome(homeOutput.Bytes(), options)
@@ -168,7 +168,7 @@ func (app *app) runSkillInstaller(step setupdomain.Step, options setupExecutionO
 		output = options.Stderr
 	}
 	if len(step.Sources) == 0 {
-		return app.runSetupProcess(context.Background(), command, output, options.Stderr)
+		return app.runSkillInstallerCommand(command, output, options.Stderr)
 	}
 	var lastErr error
 	for _, source := range step.Sources {
@@ -176,13 +176,42 @@ func (app *app) runSkillInstaller(step setupdomain.Step, options setupExecutionO
 		if index := slices.Index(candidate, step.Sources[0]); index >= 0 {
 			candidate[index] = source
 		}
-		if err := app.runSetupProcess(context.Background(), candidate, output, options.Stderr); err == nil {
+		if err := app.runSkillInstallerCommand(candidate, output, options.Stderr); err == nil {
 			return nil
+		} else if strings.Contains(err.Error(), "partial Skill installation failure") {
+			return err
 		} else {
 			lastErr = err
 		}
 	}
 	return lastErr
+}
+
+func (app *app) runSkillInstallerCommand(command []string, stdout io.Writer, stderr io.Writer) error {
+	if stdout == nil {
+		stdout = io.Discard
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	var diagnostics bytes.Buffer
+	err := app.runSetupProcess(
+		context.Background(),
+		command,
+		io.MultiWriter(stdout, &diagnostics),
+		io.MultiWriter(stderr, &diagnostics),
+	)
+	if err != nil {
+		return err
+	}
+	diagnosticText := strings.ToLower(diagnostics.String())
+	if strings.Contains(diagnosticText, "does not support global skill installation") || strings.Contains(diagnosticText, "failed to install") {
+		return fmt.Errorf("partial Skill installation failure: at least one selected Agent does not support global installation")
+	}
+	if strings.Contains(diagnosticText, "no skills found") {
+		return fmt.Errorf("Skill source did not expose any installable skills")
+	}
+	return nil
 }
 
 func (app *app) runSetupProcess(ctx context.Context, command []string, stdout io.Writer, stderr io.Writer) error {

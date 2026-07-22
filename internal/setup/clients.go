@@ -146,6 +146,9 @@ func resolveClient(homeDir string, id string, mode Mode, lookPath func(string) (
 		}
 		return known, nil
 	}
+	if mode == ModeSkill && normalized == "promptscript" {
+		return Client{}, fmt.Errorf("PromptScript is project-only and does not support global Skill installation; run skills add from the target project without --global")
+	}
 	if mode == ModeMCP {
 		return Client{}, fmt.Errorf("MCP auto-configuration is not verified for client %q", normalized)
 	}
@@ -155,13 +158,73 @@ func resolveClient(homeDir string, id string, mode Mode, lookPath func(string) (
 	skillAgents := []string{normalized}
 	name := normalized
 	if normalized == "auto" {
-		skillAgents = nil
-		name = "Auto-detect installed AI clients"
+		skillAgents = detectSkillAgents(homeDir, lookPath)
+		if len(skillAgents) == 0 {
+			return Client{}, fmt.Errorf("no supported Skill client was detected; choose one with --agent")
+		}
+		name = "Detected AI clients: " + strings.Join(skillAgents, ", ")
 	} else if normalized == "all" {
-		skillAgents = []string{"*"}
-		name = "All clients supported by the skills CLI"
+		skillAgents = globalSkillAgents(homeDir)
+		name = "All verified clients with global Skill support"
 	}
 	return Client{ID: normalized, Name: name, SkillAgents: skillAgents, SupportsSkill: true}, nil
+}
+
+func detectSkillAgents(homeDir string, lookPath func(string) (string, error)) []string {
+	if lookPath == nil {
+		lookPath = exec.LookPath
+	}
+	seen := map[string]bool{}
+	result := []string{}
+	for _, client := range MCPClients(homeDir) {
+		if !client.SupportsSkill || len(client.SkillAgents) == 0 || !skillClientDetected(client, lookPath) {
+			continue
+		}
+		for _, agent := range client.SkillAgents {
+			if agent == "promptscript" || seen[agent] {
+				continue
+			}
+			seen[agent] = true
+			result = append(result, agent)
+		}
+	}
+	return result
+}
+
+func globalSkillAgents(homeDir string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, client := range MCPClients(homeDir) {
+		if !client.SupportsSkill {
+			continue
+		}
+		for _, agent := range client.SkillAgents {
+			if agent == "promptscript" || seen[agent] {
+				continue
+			}
+			seen[agent] = true
+			result = append(result, agent)
+		}
+	}
+	return result
+}
+
+func skillClientDetected(client Client, lookPath func(string) (string, error)) bool {
+	// Cline and Roo are VS Code extensions. The generic `code` executable does
+	// not prove either extension is installed, so rely on their own data paths.
+	if client.ID != "cline" && client.ID != "roo" {
+		for _, command := range clientDetectionCommands(client.ID) {
+			if _, err := lookPath(command); err == nil {
+				return true
+			}
+		}
+	}
+	for _, path := range clientDetectionPaths(client) {
+		if _, err := os.Stat(path); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeAgentIDs(values []string) []string {

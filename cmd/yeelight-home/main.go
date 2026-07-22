@@ -142,7 +142,7 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 				return printCommandHelp(stdout, stderr, args[0])
 			}
 			if args[0] == "home" && isNativeHomeCommand(args[1:]) {
-				return app.runHome(args[1:], stdout, stderr)
+				return app.runHome(args[1:], stdin, stdout, stderr)
 			}
 			return app.runModuleCommand(args[0], args[1:], stdout, stderr)
 		}

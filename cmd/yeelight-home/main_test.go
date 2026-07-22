@@ -1671,8 +1671,8 @@ func TestAuthLoginQRNoWaitPlainTextPrintsTerminalQRCode(t *testing.T) {
 	if !strings.Contains(stdout.String(), "██") {
 		t.Fatalf("expected terminal QR output, got %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "Payload: cli&F8:24:41:00:00:01&qr-nowait-1") {
-		t.Fatalf("expected payload fallback, got %s", stdout.String())
+	if strings.Contains(stdout.String(), "cli&F8:24:41:00:00:01&qr-nowait-1") || !strings.Contains(stdout.String(), "二维码 ID: qr-nowait-1") {
+		t.Fatalf("raw payload leaked or QR id missing: %s", stdout.String())
 	}
 }
 
@@ -1689,7 +1689,7 @@ func TestAuthLoginQRPlainTextPrintsQRCodeBeforePollingCompletes(t *testing.T) {
 		}},
 	}
 	app.sleep = func(context.Context, time.Duration) error {
-		if !strings.Contains(stdout.String(), "Payload: cli&") || !strings.Contains(stdout.String(), "&qr-login-1") {
+		if !strings.Contains(stdout.String(), "██") || !strings.Contains(stdout.String(), "二维码 ID: qr-login-1") || strings.Contains(stdout.String(), "Payload:") {
 			t.Fatalf("expected QR prompt before polling, got %s", stdout.String())
 		}
 		return nil

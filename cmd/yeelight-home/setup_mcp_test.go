@@ -259,6 +259,39 @@ func TestMCPJSONWriterRejectsWrongSectionTypeWithoutChangingConfig(t *testing.T)
 	}
 }
 
+func TestMCPJSONWriterInitializesEmptyExistingConfig(t *testing.T) {
+	server := setupMCPServer{Name: "yeelight-home", Command: "yeelight-home", Args: []string{"mcp", "serve", "--stdio"}}
+	for _, content := range []string{"", " \n\t"} {
+		path := filepath.Join(t.TempDir(), "mcp.json")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile error: %v", err)
+		}
+		if err := writeMCPServersJSON(path, []setupMCPServer{server}); err != nil {
+			t.Fatalf("writeMCPServersJSON(%q) error: %v", content, err)
+		}
+		if readJSONObject(t, path)["mcpServers"] == nil {
+			t.Fatalf("mcpServers missing from initialized config: %s", path)
+		}
+	}
+}
+
+func TestMCPJSONWriterRejectsNonEmptyInvalidJSONWithoutChangingConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	original := []byte(`{"mcpServers":`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("WriteFile error: %v", err)
+	}
+	server := setupMCPServer{Name: "yeelight-home", Command: "yeelight-home", Args: []string{"mcp", "serve", "--stdio"}}
+	err := writeMCPServersJSON(path, []setupMCPServer{server})
+	if err == nil || !strings.Contains(err.Error(), "parse existing MCP config") {
+		t.Fatalf("writeMCPServersJSON error = %v", err)
+	}
+	current, readErr := os.ReadFile(path)
+	if readErr != nil || !bytes.Equal(current, original) {
+		t.Fatalf("config changed: got %s, err = %v", current, readErr)
+	}
+}
+
 func TestVerifyMCPConfigUnchangedDetectsConcurrentEdit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	original := []byte(`{"theme":"before"}`)

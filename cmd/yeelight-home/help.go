@@ -160,14 +160,14 @@ Runs account, home-list, and optional house-context smoke checks with the active
 `,
 	"auth": `Usage:
   yeelight-home auth status [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
-  yeelight-home auth login --qr [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
+  yeelight-home auth login --qr [--qr-size compact|normal|large] [--qr-png <path>] [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>]
   yeelight-home auth token set (--token <access-token>|--stdin) [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--json]
   yeelight-home auth token delete [--profile <name>] [--json]
 
 Tokens are stored in the system credential store when available. Profile files keep only non-secret metadata.
 `,
 	"auth login": `Usage:
-  yeelight-home auth login --qr [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--qr-png <path>]
+  yeelight-home auth login --qr [--qr-size compact|normal|large] [--json] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--house-id <id>] [--qr-png <path>]
 
 Starts QR login for the selected region. houseId is optional profile context, not an authentication requirement.
 `,
@@ -264,9 +264,9 @@ Pass --online to also check public GitHub, npm, and Homebrew latest versions.
 Lists homes visible to the selected account. It is account-scoped and does not require houseId.
 `,
 	"home select": `Usage:
-  yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--biz-type <0|1>] [--json]
+  yeelight-home home select [--house-id <id>] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--json]
 
-Stores a default home id for later house-scoped commands. It does not change the token.
+In an interactive terminal, omitting --house-id lists accessible homes by name. For automation, pass --house-id explicitly. It does not change the token.
 `,
 	"intent": `Usage:
   yeelight-home intent explain --intent <intent> [--json]
@@ -292,7 +292,7 @@ Returns the machine-readable SkillRequest schema for one Runtime intent, includi
 	"group":      moduleHelpText("group"),
 	"home": `Usage:
   yeelight-home home list [--json] [--profile <name>] [--region <region>]
-  yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--json]
+  yeelight-home home select [--house-id <id>] [--profile <name>] [--region <region>] [--json]
   yeelight-home home <summary|search|detail|stat|members|current-member|sort|sort-configure|create|update|delete|invite|accept-share|member-configure|member-remove|member-transfer|quit|lock-all|unlock-all> [flags]
 
 home list is account-scoped and requires only a token. houseId is optional until a house-scoped command is used.

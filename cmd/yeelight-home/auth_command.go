@@ -192,6 +192,11 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInvalidInput
 	}
 	qrPNGPath := flags.string("qr-png", "")
+	qrSize := localoutput.QRTextSize(flags.string("qr-size", string(localoutput.QRTextCompact)))
+	if qrSize != localoutput.QRTextCompact && qrSize != localoutput.QRTextNormal && qrSize != localoutput.QRTextLarge {
+		_, _ = fmt.Fprintln(stderr, "auth login: --qr-size must be compact, normal, or large")
+		return exitInvalidInput
+	}
 	endpoint, err := resolveEndpointForFlags(flags)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "auth login: %v\n", err)
@@ -220,7 +225,7 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 				_ = writeQRPNG(qrPNGPath, created.Payload)
 			}
 			if !asJSON {
-				printQRLoginPrompt(stdout, created)
+				printQRLoginPrompt(stdout, created, qrSize)
 				printedPrompt = true
 			}
 		},
@@ -252,7 +257,7 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 		return writeJSON(stdout, stderr, response)
 	}
 	if !printedPrompt {
-		printQRLoginPrompt(stdout, result)
+		printQRLoginPrompt(stdout, result, qrSize)
 	}
 	if result.Credentials != nil {
 		_, _ = fmt.Fprintf(stdout, "已保存凭据 profile=%s region=%s\n", profile, endpoint.Region)
@@ -422,12 +427,11 @@ func (app *app) saveQRDevice(profile string, device string) error {
 	return app.metadataStore.Save(metadata)
 }
 
-func printQRLoginPrompt(stdout io.Writer, result auth.QRLoginResult) {
+func printQRLoginPrompt(stdout io.Writer, result auth.QRLoginResult, size localoutput.QRTextSize) {
 	_, _ = fmt.Fprintln(stdout, "请使用 Yeelight / 易来 APP 扫描下面的授权内容，并在手机上确认。")
-	if rendered, err := localoutput.RenderQRText(result.Payload); err == nil {
+	if rendered, err := localoutput.RenderQRTextWithSize(result.Payload, size); err == nil {
 		_, _ = fmt.Fprintln(stdout, rendered)
 	}
-	_, _ = fmt.Fprintf(stdout, "Payload: %s\n", result.Payload)
 	if result.QRCodeID != "" {
 		_, _ = fmt.Fprintf(stdout, "二维码 ID: %s\n", result.QRCodeID)
 	}

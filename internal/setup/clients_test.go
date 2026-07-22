@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +121,37 @@ func TestResolveMCPAutoRequiresDetectedClient(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected auto detection failure")
+	}
+}
+
+func TestResolveSkillAutoUsesOnlyDetectedGlobalAgents(t *testing.T) {
+	lookup := func(command string) (string, error) {
+		if command == "codex" || command == "claude" {
+			return "/usr/local/bin/" + command, nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+	client, err := resolveClient(t.TempDir(), "auto", ModeSkill, lookup)
+	if err != nil {
+		t.Fatalf("resolveClient error: %v", err)
+	}
+	if len(client.SkillAgents) != 2 || client.SkillAgents[0] != "claude-code" || client.SkillAgents[1] != "codex" {
+		t.Fatalf("client = %#v", client)
+	}
+}
+
+func TestResolveSkillAutoRequiresDetectedAgent(t *testing.T) {
+	_, err := resolveClient(t.TempDir(), "auto", ModeSkill, func(string) (string, error) {
+		return "", fmt.Errorf("not found")
+	})
+	if err == nil || !strings.Contains(err.Error(), "no supported Skill client") {
+		t.Fatalf("resolveClient error = %v", err)
+	}
+}
+
+func TestResolveSkillRejectsProjectOnlyPromptScriptGlobalInstall(t *testing.T) {
+	_, err := resolveClient(t.TempDir(), "promptscript", ModeSkill, nil)
+	if err == nil || !strings.Contains(err.Error(), "project-only") {
+		t.Fatalf("resolveClient error = %v", err)
 	}
 }

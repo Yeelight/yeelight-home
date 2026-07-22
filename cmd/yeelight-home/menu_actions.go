@@ -27,7 +27,7 @@ func (menu *menuSession) chooseHome() {
 		return
 	}
 	selected, _ := rows[index-1].(map[string]any)
-	if code := menu.app.runHome([]string{"select", "--house-id", stringValue(selected["id"]), "--json"}, menu.stdout, menu.stderr); code == exitOK {
+	if code := menu.app.runHome([]string{"select", "--house-id", stringValue(selected["id"]), "--json"}, menu.reader, menu.stdout, menu.stderr); code == exitOK {
 		_, _ = fmt.Fprintln(menu.stdout, menu.text("已切换家庭。", "Home selected."))
 	}
 }
