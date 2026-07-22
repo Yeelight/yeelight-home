@@ -34,7 +34,8 @@ func buildInstallDiagnostics(executable string, pathLookup string, version strin
 	executableResolved := canonicalExecutablePath(executable)
 	pathLookupResolved := canonicalExecutablePath(pathLookup)
 	npmWrapperResolved := canonicalExecutablePath(npmWrapperPath)
-	if executable != "" && pathLookup != "" && executableResolved != "" && pathLookupResolved != "" && executableResolved != pathLookupResolved {
+	runningThroughPathWrapper := npmWrapperResolved != "" && npmWrapperResolved == pathLookupResolved
+	if !runningThroughPathWrapper && executable != "" && pathLookup != "" && executableResolved != "" && pathLookupResolved != "" && executableResolved != pathLookupResolved {
 		warnings = append(warnings, "path_lookup_differs_from_running_executable")
 	}
 	npm := npmGlobalDiagnostics(runCommand)
@@ -44,9 +45,6 @@ func buildInstallDiagnostics(executable string, pathLookup string, version strin
 	}
 	for _, warning := range homebrewVersionMismatchWarnings(version, homebrew) {
 		warnings = append(warnings, warning)
-	}
-	if containsPathSegment(pathLookupResolved, "node_modules/yeelight-home") {
-		warnings = append(warnings, "path_lookup_uses_npm_wrapper")
 	}
 	if npmWrapperResolved != "" && pathLookupResolved != "" && npmWrapperResolved != pathLookupResolved {
 		warnings = append(warnings, "npm_wrapper_differs_from_path_lookup")
@@ -89,7 +87,7 @@ func installRemediations(warnings []string, npm map[string]any, homebrew map[str
 	if containsDiagnostic(warnings, "path_lookup_differs_from_running_executable") {
 		actions = append(actions, "Run `command -v yeelight-home` and restart the shell or Skill host so PATH resolves the intended binary.")
 	}
-	if containsDiagnostic(warnings, "path_lookup_uses_npm_wrapper") || containsDiagnostic(warnings, "npm_global_package_version_differs_from_runtime_version") {
+	if containsDiagnostic(warnings, "npm_global_package_version_differs_from_runtime_version") {
 		if boolFromMap(npm, semantic.FieldInstalled) {
 			actions = append(actions, "Upgrade the npm wrapper with `npm install -g yeelight-home@latest`, then restart the shell or Skill host.")
 		}

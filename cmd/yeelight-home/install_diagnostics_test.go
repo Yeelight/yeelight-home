@@ -65,6 +65,32 @@ func TestInstallDiagnosticsReportsPackageManagerVersionSkew(t *testing.T) {
 	}
 }
 
+func TestInstallDiagnosticsAcceptsMatchingNPMWrapper(t *testing.T) {
+	tempDir := t.TempDir()
+	executable := tempDir + "/npm-cache/v0.1.24/darwin-arm64/yeelight-home"
+	pathLookup := tempDir + "/node_modules/yeelight-home/bin/yeelight-home.js"
+	runner := func(command string, args ...string) (string, error) {
+		return "", os.ErrNotExist
+	}
+	diagnostics := buildInstallDiagnostics(
+		executable,
+		pathLookup,
+		"0.1.24",
+		"darwin",
+		"arm64",
+		pathLookup,
+		runner,
+		nil,
+	)
+	warnings := diagnostics["warnings"].([]string)
+	if containsString(warnings, "path_lookup_differs_from_running_executable") {
+		t.Fatalf("matching npm wrapper reported PATH drift: %#v", warnings)
+	}
+	if len(diagnostics["remediations"].([]string)) != 0 {
+		t.Fatalf("matching npm wrapper reported remediation: %#v", diagnostics["remediations"])
+	}
+}
+
 func TestInstallDiagnosticsReportsUnavailablePackageManagers(t *testing.T) {
 	runner := func(command string, args ...string) (string, error) {
 		return "", os.ErrNotExist

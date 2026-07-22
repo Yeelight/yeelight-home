@@ -1540,7 +1540,7 @@ func TestDoctorTextPrintsInstallRemediations(t *testing.T) {
 					"cask":      map[string]any{"installed": true, "version": "0.1.5"},
 				},
 			},
-			"warnings":     []string{"path_lookup_uses_npm_wrapper"},
+			"warnings":     []string{"npm_global_package_version_differs_from_runtime_version"},
 			"remediations": []string{"Upgrade the npm wrapper with `npm install -g yeelight-home@latest`, then restart the shell or Skill host."},
 			"latest": map[string]any{
 				"checked": true,
