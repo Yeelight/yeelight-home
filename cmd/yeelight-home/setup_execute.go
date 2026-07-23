@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
+	"github.com/yeelight/yeelight-home/internal/credential"
 	"github.com/yeelight/yeelight-home/internal/semantic"
 	setupdomain "github.com/yeelight/yeelight-home/internal/setup"
 )
@@ -26,6 +28,7 @@ type setupExecutionOptions struct {
 	Prompt      *setupPrompt
 	Stdout      io.Writer
 	Stderr      io.Writer
+	Account     *setupAccountSwitch
 }
 
 type setupHomeChoice struct {
@@ -33,9 +36,21 @@ type setupHomeChoice struct {
 	Name string
 }
 
+type setupAccountSwitch struct {
+	Profile     string
+	Token       credential.TokenRecord
+	HadToken    bool
+	Metadata    credential.ProfileMetadata
+	HadMetadata bool
+	Changed     bool
+}
+
 func (app *app) executeSetupPlan(plan setupdomain.Plan, options setupExecutionOptions) (setupdomain.Result, error) {
 	if options.Locale == "" {
 		options.Locale = plan.Locale
+	}
+	if options.Account == nil {
+		options.Account = &setupAccountSwitch{}
 	}
 	result := setupdomain.Result{Locale: plan.Locale, Client: plan.Client.ID, Mode: plan.Mode}
 	for _, step := range plan.Steps {
@@ -45,8 +60,11 @@ func (app *app) executeSetupPlan(plan setupdomain.Plan, options setupExecutionOp
 		if err != nil {
 			stepResult.Status = "failed"
 			result.Steps[len(result.Steps)-1] = stepResult
-			return result, fmt.Errorf("step %s failed: %w", step.ID, err)
+			return result, app.rollbackSetupAccountSwitch(options.Account, fmt.Errorf("step %s failed: %w", step.ID, err))
 		}
+	}
+	if err := app.persistSetupLocale(options.Profile, options.Locale); err != nil {
+		return result, app.rollbackSetupAccountSwitch(options.Account, fmt.Errorf("save setup language: %w", err))
 	}
 	result.OK = true
 	if plan.Locale == "zh-CN" {
@@ -57,17 +75,46 @@ func (app *app) executeSetupPlan(plan setupdomain.Plan, options setupExecutionOp
 	return result, nil
 }
 
+func (app *app) persistSetupLocale(profile string, locale string) error {
+	flags := cliFlags{values: map[string]string{}}
+	if profile != "" {
+		flags.values["profile"] = profile
+	}
+	resolvedProfile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		return err
+	}
+	metadata, _, err := app.metadataStore.Load(resolvedProfile)
+	if err != nil {
+		return err
+	}
+	metadata = mergeProfileMetadata(metadata, resolvedProfile, map[string]string{semantic.FieldLanguage: locale})
+	return app.metadataStore.Save(metadata)
+}
+
 func (app *app) executeSetupStep(plan setupdomain.Plan, step setupdomain.Step, options setupExecutionOptions, result *setupdomain.StepResult) error {
 	switch step.Method {
 	case setupdomain.MethodRuntimeCheck:
 		result.Message = "running"
 		return nil
 	case setupdomain.MethodAuthQR:
-		flags := cliFlags{values: profileRegionFlags(options)}
-		if app.authStatus(flags)["authenticated"] == true {
+		reuseCurrentAccount, err := app.reuseCurrentSetupAccount(options)
+		if err != nil {
+			return err
+		}
+		if reuseCurrentAccount {
 			result.Status = "skipped"
 			result.Message = "already authenticated"
 			return nil
+		}
+		account, err := app.captureSetupAccount(options)
+		if err != nil {
+			return err
+		}
+		accountState := &account
+		if options.Account != nil {
+			*options.Account = account
+			accountState = options.Account
 		}
 		args := []string{"login", "--qr"}
 		args = appendProfileRegionArgs(args, options)
@@ -77,6 +124,10 @@ func (app *app) executeSetupStep(plan setupdomain.Plan, step setupdomain.Step, o
 		}
 		if code := app.runAuth(args, nil, qrOutput, options.Stderr); code != exitOK {
 			return fmt.Errorf("QR login returned exit code %d", code)
+		}
+		accountState.Changed = accountState.HadToken || accountState.HadMetadata
+		if err := app.clearSetupHomeSelection(options); err != nil {
+			return app.rollbackSetupAccountSwitch(accountState, err)
 		}
 		return nil
 	case setupdomain.MethodSkillsCLI:
@@ -116,6 +167,78 @@ func (app *app) executeSetupStep(plan setupdomain.Plan, step setupdomain.Step, o
 	default:
 		return fmt.Errorf("unsupported setup method %q", step.Method)
 	}
+}
+
+func (app *app) captureSetupAccount(options setupExecutionOptions) (setupAccountSwitch, error) {
+	flags := cliFlags{values: profileRegionFlags(options)}
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		return setupAccountSwitch{}, err
+	}
+	token, hadToken, err := app.tokenStore.Load(profile)
+	if err != nil {
+		return setupAccountSwitch{}, fmt.Errorf("load current credential: %w", err)
+	}
+	metadata, hadMetadata, err := app.metadataStore.Load(profile)
+	if err != nil {
+		return setupAccountSwitch{}, fmt.Errorf("load current profile metadata: %w", err)
+	}
+	return setupAccountSwitch{
+		Profile: profile, Token: token, HadToken: hadToken,
+		Metadata: metadata, HadMetadata: hadMetadata,
+	}, nil
+}
+
+func (app *app) rollbackSetupAccountSwitch(account *setupAccountSwitch, cause error) error {
+	if account == nil || !account.Changed {
+		return cause
+	}
+	var rollbackErrors []error
+	if account.HadToken {
+		if err := app.tokenStore.Save(account.Token); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore previous credential: %w", err))
+		}
+	} else if err := app.tokenStore.Delete(account.Profile); err != nil {
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("remove replacement credential: %w", err))
+	}
+	if account.HadMetadata {
+		if err := app.metadataStore.Save(account.Metadata); err != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("restore previous profile metadata: %w", err))
+		}
+	} else if err := app.metadataStore.Delete(account.Profile); err != nil {
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("remove replacement profile metadata: %w", err))
+	}
+	if len(rollbackErrors) == 0 {
+		account.Changed = false
+		return cause
+	}
+	return errors.Join(append([]error{cause}, rollbackErrors...)...)
+}
+
+func (app *app) reuseCurrentSetupAccount(options setupExecutionOptions) (bool, error) {
+	flags := cliFlags{values: profileRegionFlags(options)}
+	if app.authStatus(flags)["authenticated"] != true {
+		return false, nil
+	}
+	if !options.Interactive || options.Prompt == nil {
+		return true, nil
+	}
+	return options.Prompt.reuseCurrentAccount(options.Locale)
+}
+
+func (app *app) clearSetupHomeSelection(options setupExecutionOptions) error {
+	flags := cliFlags{values: profileRegionFlags(options)}
+	profile, err := app.resolveTargetProfile(flags)
+	if err != nil {
+		return err
+	}
+	metadata, _, err := app.metadataStore.Load(profile)
+	if err != nil {
+		return err
+	}
+	metadata.Profile = profile
+	metadata.HouseID = ""
+	return app.metadataStore.Save(metadata)
 }
 
 func (app *app) selectDefaultSetupHome(data []byte, options setupExecutionOptions) error {

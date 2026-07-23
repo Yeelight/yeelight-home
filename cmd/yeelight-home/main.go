@@ -37,7 +37,7 @@ func run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 type app struct {
 	qrClient          auth.QRClient
 	tokenStore        credential.Store
-	metadataStore     credential.FileMetadataStore
+	metadataStore     profileMetadataStore
 	preparedOperation *operation.Prepared
 	memoryStore       storage.JSONStore
 	topologyCache     topologyCache
@@ -45,6 +45,16 @@ type app struct {
 	terminal          func(io.Reader) bool
 	process           func(context.Context, []string, io.Writer, io.Writer) error
 	processInput      func(context.Context, []string, io.Reader, io.Writer, io.Writer) error
+}
+
+type profileMetadataStore interface {
+	Save(credential.ProfileMetadata) error
+	Load(string) (credential.ProfileMetadata, bool, error)
+	Delete(string) error
+	List() ([]credential.ProfileMetadata, error)
+	ActiveProfile() (string, error)
+	SetActiveProfile(string) error
+	Path() string
 }
 
 func newAppFromEnv() *app {
@@ -62,7 +72,7 @@ func newAppFromEnv() *app {
 func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
 	if len(args) == 0 {
 		if app.isTerminal(stdin) {
-			return app.runMenu(stdin, stdout, stderr)
+			return app.runMenu(nil, stdin, stdout, stderr)
 		}
 		return printRootHelp(stdout)
 	}
@@ -113,7 +123,7 @@ func (app *app) run(args []string, stdin io.Reader, stdout io.Writer, stderr io.
 		}
 		return app.runMCP(args[1:], stdin, stdout, stderr)
 	case "menu":
-		return app.runMenu(stdin, stdout, stderr)
+		return app.runMenu(args[1:], stdin, stdout, stderr)
 	case "lan":
 		if hasSubcommandHelp(args[1:]) {
 			return printCommandHelp(stdout, stderr, "lan")

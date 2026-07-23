@@ -181,6 +181,33 @@ func TestInvokeLightColorTemperatureDryRunDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestInvokeRoomBrightnessDryRunUsesNodePreviewWithoutWriting(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		t.Fatalf("node dry-run must not call cloud APIs: %s", request.URL.Path)
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newInvokeTestApp(t, "Bearer token-light-secret", "client-light-1", "house-1")
+
+	input := `{"contractVersion":"1.0","requestId":"req-room-brightness-dry-run","locale":"zh-CN","utterance":"把客厅亮度调到40%","intent":"light.brightness.set","targets":[{"entityType":"room","id":"room-living","name":"客厅"}],"parameters":{"brightness":40}}`
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	response := decodeInvokeResponse(t, stdout.Bytes())
+	if response["status"] != "success" || response["traceId"] != "direct-write-preview" {
+		t.Fatalf("response = %#v", response)
+	}
+	result := response["result"].(map[string]any)
+	planned := result["planned"].(map[string]any)
+	entity := planned["entity"].(map[string]any)
+	if result["dryRun"] != true || result["persistentWrites"] != false || planned["value"] != float64(40) || entity["type"] != "room" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestInvokeLightPowerSetResolvesDeviceWithinNamedRoom(t *testing.T) {
 	var writePath string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {

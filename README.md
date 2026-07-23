@@ -55,7 +55,7 @@ The setup paths share one local profile and Yeelight Pro app QR sign-in. The Ski
 - Redacted JSON output for Skill hosts and diagnostics.
 - Local preference memory and recommendation feedback stored under the Runtime data directory, not in Skill prompts.
 - Human-friendly resource commands plus a stable `invoke --stdin` contract for Skills and generated apps.
-- `yeelight-home setup` completes QR sign-in, Skill/MCP client installation, and read-only verification in Chinese or English; MCP setup supports automatic detection, multiple clients, and every verified adapter.
+- `yeelight-home setup` checks the current account, keeps it by default, or lets an interactive user scan again to switch accounts; it then installs the selected Skill/MCP clients and completes read-only verification in Chinese or English. MCP setup supports automatic detection, multiple clients, and every verified adapter.
 - A TTY with no arguments opens the interactive workbench; `yeelight-home menu` opens it explicitly, while non-TTY no-argument behavior remains deterministic help output.
 - `yeelight-home mcp serve --stdio` exposes the same Runtime to local MCP clients without saving Yeelight Authorization in client configuration.
 - `cloud`, `local-preferred`, and `local-only` choose between Cloud and home-gateway LAN safely; an uncertain LAN write never triggers a blind Cloud retry.
@@ -146,13 +146,15 @@ yeelight-home auth status --json
 yeelight-home auth login --qr
 yeelight-home home list --json
 # Optional: choose a default home before house-scoped device, room, scene, or automation operations.
-yeelight-home home select --house-id <house-id>
+yeelight-home home select --lang en-US
 yeelight-home device list --json
 yeelight-home product search --multi-field 青空灯 --json
 yeelight-home scene execute --scene-id <scene-id> --json
 yeelight-home light on --device-id <device-id> --json
 yeelight-home automation enable --automation-id <automation-id> --json
 ```
+
+When interactive setup finds an authenticated account, press Enter (or choose `1`) to keep it, or choose `2` to scan again and switch accounts. A successful switch selects a home from the new account; a failed scan keeps the previous credential and home. Non-interactive `--yes` always keeps the current account.
 
 LAN-preferred setup:
 
@@ -380,11 +382,11 @@ Prints a shell completion script to stdout. Install it using the standard mechan
 
 ```sh
 yeelight-home home list [--profile <name>] [--region <region>] [--json]
-yeelight-home home select --house-id <id> [--profile <name>] [--region <region>] [--json]
+yeelight-home home select [--house-id <id>] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--lang <zh-CN|en-US>] [--json]
 ```
 
 Lists homes available to the selected credential and stores the default home for later Skill calls.
-Run `home select` only when you want future house-scoped commands to use a default home. You can also pass a one-time `--house-id` or `YEELIGHT_HOME_HOUSE_ID`.
+Run `home select --lang en-US` in an interactive terminal to choose by number or complete home name. Automation can pass `--house-id` directly. Use it only when you want future house-scoped commands to use a default home; a one-time `--house-id` or `YEELIGHT_HOME_HOUSE_ID` remains available.
 
 ### `invoke`
 

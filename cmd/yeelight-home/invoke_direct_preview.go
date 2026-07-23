@@ -98,19 +98,30 @@ func (app *app) previewLightPropertySet(ctx context.Context, request contract.Re
 	if requestHouseID := requestHouseID(request); requestHouseID != "" {
 		houseID = requestHouseID
 	}
-	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
-	if err != nil {
-		return contract.Response{}, true, err
-	}
-	if response, ok := directPreviewEntityClarification(request, resolved, target, "device", lightControlClarificationResponse); ok {
-		return response, true, nil
-	}
-	return directWritePreviewResponse(request, resolved.Entities, resolved.Match, map[string]any{
+	planned := map[string]any{
 		semantic.FieldIntent:   request.Intent,
 		semantic.FieldProperty: semantic.LightPropertyName(spec.propertyID),
 		semantic.FieldValue:    writeValue,
 		semantic.FieldCommand:  "set",
-	}), true, nil
+	}
+	if direct, ok := directNodePropertyTarget(request, houseID, target); ok && direct.entityType != "device" {
+		entities := api.EntityListResult{Region: endpoint.Region, HouseID: houseID, Warnings: []string{}}
+		return directWritePreviewResponse(request, entities, entitySummaryFromNodeTarget(direct, houseID), planned), true, nil
+	}
+	resolved, err := app.resolveEntity(ctx, endpoint, profile, region, houseID, authorization, clientID, target)
+	if err != nil {
+		return contract.Response{}, true, err
+	}
+	if resolved.Match.ID == "" {
+		return lightControlClarificationResponse(request, "entity_not_found", target, resolved.Candidates, entityListAPICalls(resolved.Entities)), true, nil
+	}
+	if len(resolved.Candidates) > 1 && target.id == "" {
+		return lightControlClarificationResponse(request, "ambiguous_target", target, resolved.Candidates, entityListAPICalls(resolved.Entities)), true, nil
+	}
+	if resolved.Match.Type != "device" && !nodePropertySetEntityTypeSupported(resolved.Match.Type) {
+		return lightControlClarificationResponse(request, "target_not_supported_node", target, []api.EntitySummary{resolved.Match}, entityListAPICalls(resolved.Entities)), true, nil
+	}
+	return directWritePreviewResponse(request, resolved.Entities, resolved.Match, planned), true, nil
 }
 
 func (app *app) previewSceneExecute(ctx context.Context, request contract.Request, endpoint api.Endpoint, profile string, region string, houseID string, authorization string, clientID string) (contract.Response, bool, error) {

@@ -342,7 +342,7 @@ func TestInvokeDeviceMoveResolvesDeviceAndTargetRoomNames(t *testing.T) {
 	}
 }
 
-func TestInvokeGroupUpdateResolvesCurrentGroupName(t *testing.T) {
+func TestInvokeGroupUpdateDryRunResolvesNameWithoutWriting(t *testing.T) {
 	var gotCalls []string
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		gotCalls = append(gotCalls, request.Method+" "+request.URL.Path)
@@ -359,6 +359,11 @@ func TestInvokeGroupUpdateResolvesCurrentGroupName(t *testing.T) {
 	code := app.run([]string{"invoke", "--stdin", "--dry-run"}, strings.NewReader(input), &stdout, &stderr)
 	if code != exitOK {
 		t.Fatalf("exit code = %d, stderr = %s", code, stderr.String())
+	}
+	for _, call := range gotCalls {
+		if strings.Contains(call, "/group/600001/w/modify") {
+			t.Fatalf("group.update dry-run should not write: %#v", gotCalls)
+		}
 	}
 	response := decodeInvokeResponse(t, stdout.Bytes())
 	if response[semantic.FieldStatus] != "success" || response[semantic.FieldTraceID] != "invoke-preview" {

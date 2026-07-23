@@ -73,3 +73,13 @@ func TestMenuUsesSavedEnglishLanguage(t *testing.T) {
 		t.Fatalf("code=%d stdout=%s", code, stdout.String())
 	}
 }
+
+func TestMenuUsesExplicitLanguage(t *testing.T) {
+	app := newTestApp(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"menu", "--lang", "en-US"}, strings.NewReader("0\n"), &stdout, &stderr)
+	if code != exitOK || stderr.Len() != 0 || !strings.Contains(stdout.String(), "Choose home") {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}

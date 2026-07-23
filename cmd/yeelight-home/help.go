@@ -134,7 +134,7 @@ var moduleCommandExamples = map[string][]string{
 
 var commandHelpText = map[string]string{
 	"menu": `Usage:
-  yeelight-home menu
+  yeelight-home menu [--lang <zh-CN|en-US>]
 
 Opens the bilingual interactive home console. Choose homes, rooms, devices,
 scenes, and common lighting operations by readable name. A TTY with no command
@@ -143,7 +143,7 @@ opens the same console; non-TTY no-command usage prints deterministic help.
 	"setup": `Usage:
 	yeelight-home setup [--lang <zh-CN|en-US>] [--mode <skill|mcp|lan>] [--agent <id|id,id|auto|all>] [--mcp-source <local|cloud|gateway>] [--gateway-ip <ip>] [--control-mode <local-preferred|local-only>] [--profile <name>] [--biz-type <0|1>] [--plan] [--yes] [--json]
 
-Guides a beginner through Runtime checks, Yeelight Pro APP QR sign-in, AI client setup, and read-only verification.
+Guides a beginner through Runtime checks, Yeelight Pro sign-in verification, QR sign-in only when needed, AI client setup, and read-only verification.
 Skill installation delegates client discovery and 70+ integrations to the open Vercel skills CLI. Use --plan to inspect a redacted installation plan without changing files.
 MCP setup uses the local yeelight-home stdio server by default. Use --mcp-source cloud for the lightweight hosted MCP services, or --mode lan --mcp-source gateway only for direct gateway compatibility.
 LAN setup verifies the gateway before reporting success. Use --control-mode local-only to skip cloud sign-in and keep control on the local network.
@@ -264,7 +264,7 @@ Pass --online to also check public GitHub, npm, and Homebrew latest versions.
 Lists homes visible to the selected account. It is account-scoped and does not require houseId.
 `,
 	"home select": `Usage:
-  yeelight-home home select [--house-id <id>] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--json]
+  yeelight-home home select [--house-id <id>] [--profile <name>] [--region <region>] [--biz-type <0|1>] [--lang <zh-CN|en-US>] [--json]
 
 In an interactive terminal, omitting --house-id lists accessible homes by name. For automation, pass --house-id explicitly. It does not change the token.
 `,
@@ -292,7 +292,7 @@ Returns the machine-readable SkillRequest schema for one Runtime intent, includi
 	"group":      moduleHelpText("group"),
 	"home": `Usage:
   yeelight-home home list [--json] [--profile <name>] [--region <region>]
-  yeelight-home home select [--house-id <id>] [--profile <name>] [--region <region>] [--json]
+  yeelight-home home select [--house-id <id>] [--profile <name>] [--region <region>] [--lang <zh-CN|en-US>] [--json]
   yeelight-home home <summary|search|detail|stat|members|current-member|sort|sort-configure|create|update|delete|invite|accept-share|member-configure|member-remove|member-transfer|quit|lock-all|unlock-all> [flags]
 
 home list is account-scoped and requires only a token. houseId is optional until a house-scoped command is used.

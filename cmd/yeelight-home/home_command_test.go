@@ -45,6 +45,33 @@ func TestHomeSelectLetsInteractiveUserChooseByName(t *testing.T) {
 	}
 }
 
+func TestHomeSelectUsesAndPersistsExplicitLanguage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"id":"house-1","name":"Home"},{"id":"house-2","name":"Parents"}]}}`))
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newTestApp(t)
+	app.terminal = func(io.Reader) bool { return true }
+	if err := app.tokenStore.Save(credential.TokenRecord{Profile: "default", AccessToken: "Bearer test-token"}); err != nil {
+		t.Fatalf("Save token error: %v", err)
+	}
+	if err := app.metadataStore.Save(credential.ProfileMetadata{Profile: "default", Region: "dev", Language: "zh-CN"}); err != nil {
+		t.Fatalf("Save metadata error: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := app.run([]string{"home", "select", "--region", "dev", "--lang", "en-US"}, strings.NewReader("2\n"), &stdout, &stderr)
+	metadata, ok, err := app.metadataStore.Load("default")
+	if code != exitOK || err != nil || !ok || metadata.HouseID != "house-2" || metadata.Language != "en-US" {
+		t.Fatalf("code=%d metadata=%#v ok=%v err=%v stdout=%s stderr=%s", code, metadata, ok, err, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Choose the default home") {
+		t.Fatalf("prompt was not localized: %s", stdout.String())
+	}
+}
+
 func TestHomeSelectWithoutIDExplainsHowToRecoverInNonInteractiveUse(t *testing.T) {
 	app := newTestApp(t)
 	var stdout bytes.Buffer

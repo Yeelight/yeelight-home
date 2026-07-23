@@ -53,7 +53,7 @@ Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH
 - 输出默认脱敏，适合 Skill host、脚本和诊断工具消费。
 - 本地偏好记忆和推荐反馈存储在 Runtime 数据目录中，不写入 Skill prompt。
 - 同时提供面向人的资源命令和面向 Skill 的稳定 `invoke --stdin` 协议。
-- `yeelight-home setup` 用中文或英文完成扫码、Skill/MCP 客户端安装和只读验证；MCP 支持自动探测、多个客户端和全部已验证客户端。
+- `yeelight-home setup` 会检查当前登录账号：交互式运行时默认继续使用，也可以重新扫码切换账号；随后用中文或英文完成 Skill/MCP 客户端安装和只读验证。MCP 支持自动探测、多个客户端和全部已验证客户端。
 - TTY 无参数启动交互工作台；`yeelight-home menu` 可显式进入，非 TTY 无参数保持稳定帮助输出。
 - `yeelight-home mcp serve --stdio` 把同一 Runtime 暴露给本机 MCP 客户端，客户端配置不保存 Yeelight Authorization。
 - `cloud`、`local-preferred`、`local-only` 可让同一条命令安全选择云端或家庭网关 LAN；不确定写结果不会盲目改走云端重试。
@@ -141,13 +141,15 @@ yeelight-home doctor --json
 yeelight-home auth status --json
 yeelight-home auth login --qr
 yeelight-home home list --json
-yeelight-home home select --house-id <house-id>
+yeelight-home home select --lang zh-CN
 yeelight-home device list --json
 yeelight-home product search --multi-field 青空灯 --json
 yeelight-home scene execute --scene-id <scene-id> --json
 yeelight-home light on --device-id <device-id> --json
 yeelight-home automation enable --automation-id <automation-id> --json
 ```
+
+交互式 setup 检测到已登录账号时，直接回车（或选择 `1`）继续使用当前账号，选择 `2` 可重新扫码切换账号。切换成功后会从新账号重新选择家庭；扫码失败时保留原账号凭据和家庭。非交互 `--yes` 始终沿用当前账号。
 
 局域网优先模式：
 

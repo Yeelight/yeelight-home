@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
+	"github.com/yeelight/yeelight-home/internal/i18n"
 	"github.com/yeelight/yeelight-home/internal/semantic"
 )
 
@@ -122,6 +124,11 @@ func (app *app) runHomeSelect(args []string, stdin io.Reader, stdout io.Writer, 
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
 		return exitInternalError
 	}
+	locale, err := resolveInteractiveLocale(flags, metadata.Language)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
+		return exitInvalidInput
+	}
 	bizType, err := resolveBizType(flags, metadata.BizType)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
@@ -157,7 +164,7 @@ func (app *app) runHomeSelect(args []string, stdin io.Reader, stdout io.Writer, 
 			return exitInternalError
 		}
 		prompt := &setupPrompt{reader: bufio.NewReader(stdin), stdout: stdout}
-		houseID, err = prompt.chooseHome(firstNonEmpty(metadata.Language, "zh-CN"), result.Houses)
+		houseID, err = prompt.chooseHome(locale, result.Houses)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)
 			return exitInvalidInput
@@ -170,9 +177,10 @@ func (app *app) runHomeSelect(args []string, stdin io.Reader, stdout io.Writer, 
 		}
 	}
 	metadata = mergeProfileMetadata(metadata, profile, map[string]string{
-		semantic.FieldRegion:  flags.string("region", ""),
-		semantic.FieldHouseID: houseID,
-		semantic.FieldBizType: bizType,
+		semantic.FieldRegion:   flags.string("region", ""),
+		semantic.FieldHouseID:  houseID,
+		semantic.FieldBizType:  bizType,
+		semantic.FieldLanguage: locale,
 	})
 	if metadata.Region == "" {
 		metadata.Region = defaultRuntimeRegion
@@ -191,4 +199,21 @@ func (app *app) runHomeSelect(args []string, stdin io.Reader, stdout io.Writer, 
 		_, _ = fmt.Fprintf(stdout, "selected houseId=%s for profile=%s\n", metadata.HouseID, metadata.Profile)
 	}
 	return exitOK
+}
+
+func resolveInteractiveLocale(flags cliFlags, stored string) (string, error) {
+	if value := flags.string("lang", flags.string("language", "")); value != "" {
+		locale, ok := i18n.Normalize(value)
+		if !ok {
+			return "", fmt.Errorf("language must be zh-CN or en-US")
+		}
+		return locale, nil
+	}
+	if locale, ok := i18n.Normalize(stored); ok {
+		return locale, nil
+	}
+	if locale, ok := i18n.Detect(os.LookupEnv); ok {
+		return locale, nil
+	}
+	return i18n.Chinese, nil
 }

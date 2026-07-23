@@ -15,6 +15,9 @@ func TestBuildPlanUsesSkillsCLIForCodex(t *testing.T) {
 	if len(plan.Steps) != 4 || plan.Steps[2].Method != MethodSkillsCLI {
 		t.Fatalf("steps = %#v", plan.Steps)
 	}
+	if plan.Steps[1].Title != "检查 Yeelight Pro 登录账号；可继续使用或扫码切换" {
+		t.Fatalf("login step should describe account reuse and switching: %#v", plan.Steps[1])
+	}
 	if plan.Steps[2].Command[len(plan.Steps[2].Command)-1] != "codex" {
 		t.Fatalf("skill command = %#v", plan.Steps[2].Command)
 	}

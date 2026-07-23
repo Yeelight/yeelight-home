@@ -68,6 +68,9 @@ func (app *app) runSetup(args []string, stdin io.Reader, stdout io.Writer, stder
 	if agentID == "" && mode == setupdomain.ModeMCP && interactive {
 		agentID, err = prompt.chooseMCPClient(locale, setupdomain.MCPClients(homeDir))
 	}
+	if agentID == "" && mode == setupdomain.ModeSkill && interactive {
+		agentID, err = prompt.chooseSkillAgents(locale, setupdomain.DetectSkillClients(homeDir))
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "setup: %v\n", err)
 		return exitInvalidInput
@@ -106,7 +109,7 @@ func (app *app) runSetup(args []string, stdin io.Reader, stdout io.Writer, stder
 	}
 	result, err := app.executeSetupPlan(plan, setupExecutionOptions{
 		Profile: flags.string("profile", ""), Region: flags.string("region", ""), BizType: bizType,
-		HomeDir: homeDir, Quiet: flags.bool("json"), Interactive: interactive && !flags.bool("yes"), Prompt: prompt,
+		Locale: locale, HomeDir: homeDir, Quiet: flags.bool("json"), Interactive: interactive && !flags.bool("yes"), Prompt: prompt,
 		Stdout: stdout, Stderr: stderr,
 	})
 	if err != nil {

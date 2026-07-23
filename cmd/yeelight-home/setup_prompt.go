@@ -78,6 +78,60 @@ func (prompt *setupPrompt) chooseMCPClient(locale string, clients []setupdomain.
 	return "", fmt.Errorf("MCP auto-configuration is not verified for client %q", value)
 }
 
+func (prompt *setupPrompt) chooseSkillAgents(locale string, clients []setupdomain.Client) (string, error) {
+	if len(clients) == 0 {
+		_, _ = fmt.Fprint(prompt.stdout, i18n.Text(locale, i18n.SetupNoSkillAgentDetected))
+		value, err := prompt.readLine()
+		if err != nil {
+			return "", err
+		}
+		if value == "" {
+			return "", fmt.Errorf("no supported Skill client was detected; choose one with --agent")
+		}
+		return value, nil
+	}
+
+	_, _ = fmt.Fprintln(prompt.stdout, i18n.Text(locale, i18n.SetupChooseSkillAgents))
+	for index, client := range clients {
+		label := client.Name
+		if !strings.EqualFold(client.Name, client.ID) {
+			label += " (" + client.ID + ")"
+		}
+		_, _ = fmt.Fprintf(prompt.stdout, "  %d. %s\n", index+1, label)
+	}
+	value, err := prompt.readLine()
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return "auto", nil
+	}
+
+	selected := make([]string, 0, len(clients))
+	seen := map[string]bool{}
+	for _, token := range strings.Split(value, ",") {
+		token = strings.TrimSpace(token)
+		if token == "" {
+			continue
+		}
+		if index, parseErr := strconv.Atoi(token); parseErr == nil {
+			if index < 1 || index > len(clients) {
+				return "", fmt.Errorf("Skill client choice %d is out of range", index)
+			}
+			token = clients[index-1].ID
+		}
+		key := strings.ToLower(token)
+		if !seen[key] {
+			seen[key] = true
+			selected = append(selected, token)
+		}
+	}
+	if len(selected) == 0 {
+		return "", fmt.Errorf("choose at least one Skill client")
+	}
+	return strings.Join(selected, ","), nil
+}
+
 func (prompt *setupPrompt) chooseHome(locale string, homes []setupHomeChoice) (string, error) {
 	if len(homes) == 0 {
 		return "", fmt.Errorf("no Yeelight Pro home is available for setup")
@@ -102,6 +156,27 @@ func (prompt *setupPrompt) chooseHome(locale string, homes []setupHomeChoice) (s
 		}
 	}
 	return "", fmt.Errorf("unknown home %q", value)
+}
+
+func (prompt *setupPrompt) reuseCurrentAccount(locale string) (bool, error) {
+	_, _ = fmt.Fprintln(prompt.stdout, i18n.Text(locale, i18n.SetupChooseAccount))
+	_, _ = fmt.Fprintf(prompt.stdout, "  1. %s\n", i18n.Text(locale, i18n.SetupKeepCurrentAccount))
+	_, _ = fmt.Fprintf(prompt.stdout, "  2. %s\n", i18n.Text(locale, i18n.SetupSwitchAccount))
+	value, err := prompt.readLine()
+	if err == io.EOF || value == "" {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	switch strings.ToLower(value) {
+	case "1":
+		return true, nil
+	case "2":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s", i18n.Text(locale, i18n.SetupInvalidAccountChoice))
+	}
 }
 
 func (prompt *setupPrompt) confirm(locale string) (bool, error) {

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 )
 
@@ -189,6 +190,22 @@ func detectSkillAgents(homeDir string, lookPath func(string) (string, error)) []
 		}
 	}
 	return result
+}
+
+func DetectSkillClients(homeDir string) []Client {
+	agents := detectSkillAgents(homeDir, exec.LookPath)
+	clients := make([]Client, 0, len(agents))
+	for _, agent := range agents {
+		name := agent
+		for _, client := range MCPClients(homeDir) {
+			if slices.Contains(client.SkillAgents, agent) {
+				name = client.Name
+				break
+			}
+		}
+		clients = append(clients, Client{ID: agent, Name: name, SkillAgents: []string{agent}, SupportsSkill: true})
+	}
+	return clients
 }
 
 func globalSkillAgents(homeDir string) []string {

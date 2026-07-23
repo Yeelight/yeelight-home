@@ -20,8 +20,23 @@ type menuSession struct {
 	request uint64
 }
 
-func (app *app) runMenu(stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
-	locale := app.menuLocale()
+func (app *app) runMenu(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	flags, err := parseFlags(args)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "menu: %v\n", err)
+		return exitInvalidInput
+	}
+	for name := range flags.values {
+		if name != "lang" && name != "language" {
+			_, _ = fmt.Fprintln(stderr, "menu: unsupported flag")
+			return exitInvalidInput
+		}
+	}
+	locale, err := app.menuLocale(flags)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "menu: %v\n", err)
+		return exitInvalidInput
+	}
 	menu := &menuSession{app: app, reader: bufio.NewReader(stdin), stdout: stdout, stderr: stderr, locale: locale}
 	for {
 		menu.printMain()
@@ -54,14 +69,21 @@ func (app *app) runMenu(stdin io.Reader, stdout io.Writer, stderr io.Writer) int
 	}
 }
 
-func (app *app) menuLocale() string {
+func (app *app) menuLocale(flags cliFlags) (string, error) {
+	if value := flags.string("lang", flags.string("language", "")); value != "" {
+		locale, ok := i18n.Normalize(value)
+		if !ok {
+			return "", fmt.Errorf("language must be zh-CN or en-US")
+		}
+		return locale, nil
+	}
 	if contextInfo, err := app.resolveRuntimeContext(cliFlags{values: map[string]string{}}); err == nil && contextInfo.Language != "" {
-		return contextInfo.Language
+		return contextInfo.Language, nil
 	}
 	if locale, ok := i18n.Detect(os.LookupEnv); ok {
-		return locale
+		return locale, nil
 	}
-	return i18n.Chinese
+	return i18n.Chinese, nil
 }
 
 func (menu *menuSession) printMain() {

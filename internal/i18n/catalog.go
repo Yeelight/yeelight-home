@@ -39,8 +39,14 @@ const (
 	SetupPlanReady                  = "setup.plan_ready"
 	SetupChooseLanguage             = "setup.choose_language"
 	SetupChooseClient               = "setup.choose_client"
+	SetupChooseSkillAgents          = "setup.choose_skill_agents"
+	SetupNoSkillAgentDetected       = "setup.no_skill_agent_detected"
 	SetupChooseMode                 = "setup.choose_mode"
 	SetupChooseHome                 = "setup.choose_home"
+	SetupChooseAccount              = "setup.choose_account"
+	SetupKeepCurrentAccount         = "setup.keep_current_account"
+	SetupSwitchAccount              = "setup.switch_account"
+	SetupInvalidAccountChoice       = "setup.invalid_account_choice"
 	SetupConfirm                    = "setup.confirm"
 	SetupCancelled                  = "setup.cancelled"
 	SetupComplete                   = "setup.complete"
@@ -87,8 +93,14 @@ var catalogs = map[string]map[string]string{
 		SetupPlanReady:                  "安装计划已准备好，共 %d 步。",
 		SetupChooseLanguage:             "请选择语言：1. 中文  2. English：",
 		SetupChooseClient:               "请选择 AI 客户端：",
+		SetupChooseSkillAgents:          "请选择要安装 Skill 的 AI（可输入多个序号并用逗号分隔；直接回车使用全部已检测项）：",
+		SetupNoSkillAgentDetected:       "暂未检测到支持全局 Skill 的 AI。请输入要安装到的 Agent ID：",
 		SetupChooseMode:                 "请选择使用方式：1. 完整智能  2. 轻量连接  3. 局域网优先：",
 		SetupChooseHome:                 "请选择默认家庭（直接回车使用第一个）：",
+		SetupChooseAccount:              "已检测到登录账号。请选择：",
+		SetupKeepCurrentAccount:         "继续使用当前账号（默认）",
+		SetupSwitchAccount:              "重新扫码并切换账号",
+		SetupInvalidAccountChoice:       "请选择 1 继续使用当前账号，或选择 2 重新扫码切换账号。",
 		SetupConfirm:                    "确认执行以上安装计划吗？[Y/n]：",
 		SetupCancelled:                  "已取消安装，没有修改任何配置。",
 		SetupComplete:                   "Yeelight AI 已完成安装和基础验证。",
@@ -98,7 +110,7 @@ var catalogs = map[string]map[string]string{
 		SetupStepMCPCloud:               "连接易来云端轻量服务",
 		SetupStepMCPGateway:             "让 AI 客户端直接连接家庭网关",
 		SetupStepLAN:                    "连接家庭网关的局域网能力",
-		SetupStepLogin:                  "使用 Yeelight Pro APP 扫码登录",
+		SetupStepLogin:                  "检查 Yeelight Pro 登录账号；可继续使用或扫码切换",
 		SetupStepVerify:                 "检查登录并读取家庭信息",
 		SetupModeSkill:                  "完整智能（推荐，AI 更懂易来家庭）",
 		SetupModeMCP:                    "轻量连接（由 AI 自己组织工具）",
@@ -133,8 +145,14 @@ var catalogs = map[string]map[string]string{
 		SetupPlanReady:                  "The setup plan is ready with %d steps.",
 		SetupChooseLanguage:             "Choose a language: 1. 中文  2. English: ",
 		SetupChooseClient:               "Choose an AI client: ",
+		SetupChooseSkillAgents:          "Choose where to install the Skill (use commas for multiple numbers; press Enter for every detected AI):",
+		SetupNoSkillAgentDetected:       "No AI with global Skill support was detected. Enter the target Agent ID: ",
 		SetupChooseMode:                 "Choose how to connect: 1. Full Skill  2. Lightweight MCP  3. LAN preferred: ",
 		SetupChooseHome:                 "Choose the default home (press Enter to use the first):",
+		SetupChooseAccount:              "A signed-in account was found. Choose an option:",
+		SetupKeepCurrentAccount:         "Keep using the current account (default)",
+		SetupSwitchAccount:              "Scan again and switch accounts",
+		SetupInvalidAccountChoice:       "Choose 1 to keep the current account or 2 to scan again and switch accounts.",
 		SetupConfirm:                    "Run this setup plan? [Y/n]: ",
 		SetupCancelled:                  "Setup was cancelled. No configuration was changed.",
 		SetupComplete:                   "Yeelight AI setup and basic verification are complete.",
@@ -144,7 +162,7 @@ var catalogs = map[string]map[string]string{
 		SetupStepMCPCloud:               "Connect the lightweight Yeelight cloud services",
 		SetupStepMCPGateway:             "Connect the AI client directly to the home gateway",
 		SetupStepLAN:                    "Connect the home gateway over the local network",
-		SetupStepLogin:                  "Sign in with the Yeelight Pro APP",
+		SetupStepLogin:                  "Check the Yeelight Pro account; keep it or scan to switch",
 		SetupStepVerify:                 "Check sign-in and read the home list",
 		SetupModeSkill:                  "Full intelligence (recommended, with Yeelight home guidance)",
 		SetupModeMCP:                    "Lightweight connection (your AI organizes the tools)",

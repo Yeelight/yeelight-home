@@ -100,12 +100,8 @@ func (app *app) runAuthQRCheck(args []string, stdout io.Writer, stderr io.Writer
 			_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
 			return exitInvalidInput
 		}
-		if err := app.tokenStore.Save(credential.TokenRecord{Profile: profile, AccessToken: credentials.Authorization}); err != nil {
-			_, _ = fmt.Fprintf(stderr, "auth qr-check: save credential: %v\n", err)
-			return exitInternalError
-		}
-		if err := app.saveQRProfileMetadata(profile, endpoint.Region, bizType, credentials.ClientID, credentials.HouseID, device); err != nil {
-			_, _ = fmt.Fprintf(stderr, "auth qr-check: save profile metadata: %v\n", err)
+		if err := app.saveQRLoginCredentials(profile, endpoint.Region, bizType, credentials.ClientID, credentials.HouseID, device, credentials.Authorization); err != nil {
+			_, _ = fmt.Fprintf(stderr, "auth qr-check: %v\n", err)
 			return exitInternalError
 		}
 		response[semantic.FieldCredentials] = map[string]any{
@@ -235,12 +231,8 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 		return exitInternalError
 	}
 	if result.Credentials != nil {
-		if err := app.tokenStore.Save(credential.TokenRecord{Profile: profile, AccessToken: result.Credentials.Authorization}); err != nil {
-			_, _ = fmt.Fprintf(stderr, "auth login: save credential: %v\n", err)
-			return exitInternalError
-		}
-		if err := app.saveQRProfileMetadata(profile, endpoint.Region, bizType, result.Credentials.ClientID, result.Credentials.HouseID, result.Device); err != nil {
-			_, _ = fmt.Fprintf(stderr, "auth login: save profile metadata: %v\n", err)
+		if err := app.saveQRLoginCredentials(profile, endpoint.Region, bizType, result.Credentials.ClientID, result.Credentials.HouseID, result.Device, result.Credentials.Authorization); err != nil {
+			_, _ = fmt.Fprintf(stderr, "auth login: %v\n", err)
 			return exitInternalError
 		}
 	}
@@ -265,6 +257,27 @@ func (app *app) runAuthLogin(args []string, stdout io.Writer, stderr io.Writer) 
 	return exitOK
 }
 
+func (app *app) saveQRLoginCredentials(profile string, region string, bizType string, clientID string, houseID string, device string, authorization string) error {
+	previous, hadPrevious, err := app.tokenStore.Load(profile)
+	if err != nil {
+		return fmt.Errorf("load previous credential: %w", err)
+	}
+	if err := app.tokenStore.Save(credential.TokenRecord{Profile: profile, AccessToken: authorization}); err != nil {
+		return fmt.Errorf("save credential: %w", err)
+	}
+	if err := app.saveQRProfileMetadata(profile, region, bizType, clientID, houseID, device); err != nil {
+		rollbackErr := app.tokenStore.Delete(profile)
+		if hadPrevious {
+			rollbackErr = app.tokenStore.Save(previous)
+		}
+		if rollbackErr != nil {
+			return fmt.Errorf("save profile metadata: %w; restore previous credential: %v", err, rollbackErr)
+		}
+		return fmt.Errorf("save profile metadata: %w", err)
+	}
+	return nil
+}
+
 func (app *app) saveQRProfileMetadata(profile string, region string, bizType string, clientID string, houseID string, device string) error {
 	metadata, _, err := app.metadataStore.Load(profile)
 	if err != nil {
@@ -277,6 +290,10 @@ func (app *app) saveQRProfileMetadata(profile string, region string, bizType str
 		semantic.FieldHouseID:  houseID,
 		semantic.FieldQRDevice: device,
 	})
+	// QR login replaces account-scoped identity. Empty values must not retain
+	// identifiers from a previously signed-in account.
+	metadata.ClientID = strings.TrimSpace(clientID)
+	metadata.HouseID = strings.TrimSpace(houseID)
 	return app.metadataStore.Save(metadata)
 }
 
