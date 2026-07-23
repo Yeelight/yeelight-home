@@ -84,6 +84,16 @@ func TestResolveMultipleStandardSkillAgents(t *testing.T) {
 	}
 }
 
+func TestResolveMultipleSkillAgentsKeepsKiloInstallerIdentifier(t *testing.T) {
+	client, err := ResolveClient("/tmp/home", "codex,kilo-code", ModeSkill)
+	if err != nil {
+		t.Fatalf("ResolveClient error: %v", err)
+	}
+	if client.ID != "codex,kilo-code" || client.Name != "Codex, Kilo Code" || len(client.SkillAgents) != 2 || client.SkillAgents[1] != "kilo" {
+		t.Fatalf("client = %#v", client)
+	}
+}
+
 func TestResolveMCPAutoUsesOnlyDetectedClients(t *testing.T) {
 	homeDir := t.TempDir()
 	cursorDir := filepath.Join(homeDir, ".cursor")
@@ -136,6 +146,22 @@ func TestResolveSkillAutoUsesOnlyDetectedGlobalAgents(t *testing.T) {
 		t.Fatalf("resolveClient error: %v", err)
 	}
 	if len(client.SkillAgents) != 2 || client.SkillAgents[0] != "claude-code" || client.SkillAgents[1] != "codex" {
+		t.Fatalf("client = %#v", client)
+	}
+}
+
+func TestResolveSkillAutoMapsKiloCodeToSkillsCLIIdentifier(t *testing.T) {
+	lookup := func(command string) (string, error) {
+		if command == "kilo" {
+			return "/usr/local/bin/kilo", nil
+		}
+		return "", fmt.Errorf("not found")
+	}
+	client, err := resolveClient(t.TempDir(), "auto", ModeSkill, lookup)
+	if err != nil {
+		t.Fatalf("resolveClient error: %v", err)
+	}
+	if len(client.SkillAgents) != 1 || client.SkillAgents[0] != "kilo" {
 		t.Fatalf("client = %#v", client)
 	}
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -163,7 +162,7 @@ func (app *app) runHomeSelect(args []string, stdin io.Reader, stdout io.Writer, 
 			_, _ = fmt.Fprintf(stderr, "home select: parse home list: %v\n", err)
 			return exitInternalError
 		}
-		prompt := &setupPrompt{reader: bufio.NewReader(stdin), stdout: stdout}
+		prompt := newSetupPrompt(stdin, stdout, isTerminalWriter(stdout) && !flags.bool("json"))
 		houseID, err = prompt.chooseHome(locale, result.Houses)
 		if err != nil {
 			_, _ = fmt.Fprintf(stderr, "home select: %v\n", err)

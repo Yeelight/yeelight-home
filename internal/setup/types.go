@@ -96,15 +96,16 @@ type Plan struct {
 }
 
 type Options struct {
-	Locale      string
-	ClientID    string
-	Mode        Mode
-	MCPSource   string
-	GatewayIP   string
-	ControlMode string
-	BizType     string
-	HomeDir     string
-	LookPath    func(string) (string, error)
+	Locale                     string
+	ClientID                   string
+	Mode                       Mode
+	MCPSource                  string
+	GatewayIP                  string
+	ControlMode                string
+	BizType                    string
+	HomeDir                    string
+	LookPath                   func(string) (string, error)
+	InteractiveSkillsInstaller bool
 }
 
 func ParseControlMode(value string, mode Mode) (string, error) {

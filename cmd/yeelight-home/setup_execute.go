@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"slices"
 	"strings"
 
 	"github.com/yeelight/yeelight-home/internal/api"
@@ -18,17 +17,19 @@ import (
 )
 
 type setupExecutionOptions struct {
-	Profile     string
-	Region      string
-	BizType     string
-	Locale      string
-	HomeDir     string
-	Quiet       bool
-	Interactive bool
-	Prompt      *setupPrompt
-	Stdout      io.Writer
-	Stderr      io.Writer
-	Account     *setupAccountSwitch
+	Profile                    string
+	Region                     string
+	BizType                    string
+	Locale                     string
+	HomeDir                    string
+	Quiet                      bool
+	Interactive                bool
+	InteractiveSkillsInstaller bool
+	Prompt                     *setupPrompt
+	Stdin                      io.Reader
+	Stdout                     io.Writer
+	Stderr                     io.Writer
+	Account                    *setupAccountSwitch
 }
 
 type setupHomeChoice struct {
@@ -53,18 +54,39 @@ func (app *app) executeSetupPlan(plan setupdomain.Plan, options setupExecutionOp
 		options.Account = &setupAccountSwitch{}
 	}
 	result := setupdomain.Result{Locale: plan.Locale, Client: plan.Client.ID, Mode: plan.Mode}
+	var deferredErrors []error
+	reporter := newSetupStepReporter(options)
 	for _, step := range plan.Steps {
 		stepResult := setupdomain.StepResult{ID: step.ID, Status: "ok"}
+		if !options.Quiet {
+			reporter.start(step)
+		}
 		err := app.executeSetupStep(plan, step, options, &stepResult)
 		result.Steps = append(result.Steps, stepResult)
 		if err != nil {
 			stepResult.Status = "failed"
 			result.Steps[len(result.Steps)-1] = stepResult
-			return result, app.rollbackSetupAccountSwitch(options.Account, fmt.Errorf("step %s failed: %w", step.ID, err))
+			if !options.Quiet {
+				reporter.finish(step, stepResult, err)
+			}
+			stepError := fmt.Errorf("step %s failed: %w", step.ID, err)
+			if step.Method == setupdomain.MethodSkillsCLI {
+				deferredErrors = append(deferredErrors, stepError)
+				continue
+			}
+			deferredErrors = append(deferredErrors, stepError)
+			return result, app.rollbackSetupAccountSwitch(options.Account, errors.Join(deferredErrors...))
+		}
+		if !options.Quiet {
+			reporter.finish(step, stepResult, nil)
 		}
 	}
 	if err := app.persistSetupLocale(options.Profile, options.Locale); err != nil {
-		return result, app.rollbackSetupAccountSwitch(options.Account, fmt.Errorf("save setup language: %w", err))
+		deferredErrors = append(deferredErrors, fmt.Errorf("save setup language: %w", err))
+		return result, app.rollbackSetupAccountSwitch(options.Account, errors.Join(deferredErrors...))
+	}
+	if len(deferredErrors) > 0 {
+		return result, app.rollbackSetupAccountSwitch(options.Account, errors.Join(deferredErrors...))
 	}
 	result.OK = true
 	if plan.Locale == "zh-CN" {
@@ -95,7 +117,7 @@ func (app *app) persistSetupLocale(profile string, locale string) error {
 func (app *app) executeSetupStep(plan setupdomain.Plan, step setupdomain.Step, options setupExecutionOptions, result *setupdomain.StepResult) error {
 	switch step.Method {
 	case setupdomain.MethodRuntimeCheck:
-		result.Message = "running"
+		result.Message = "ready"
 		return nil
 	case setupdomain.MethodAuthQR:
 		reuseCurrentAccount, err := app.reuseCurrentSetupAccount(options)
@@ -131,7 +153,12 @@ func (app *app) executeSetupStep(plan setupdomain.Plan, step setupdomain.Step, o
 		}
 		return nil
 	case setupdomain.MethodSkillsCLI:
-		return app.runSkillInstaller(step, options)
+		report, err := app.runSkillInstallerWithReport(step, options)
+		if len(report.Failed) > 0 && len(report.Installed) > 0 {
+			result.Status = "warning"
+			result.Message = formatSkillInstallSummary(options.Locale, report)
+		}
+		return err
 	case setupdomain.MethodDirectSkill:
 		return app.installDirectSkill(step, options)
 	case setupdomain.MethodNativeMCP:
@@ -279,62 +306,6 @@ func (app *app) selectDefaultSetupHome(data []byte, options setupExecutionOption
 		semantic.FieldBizType: selectedBizType,
 	})
 	return app.metadataStore.Save(metadata)
-}
-
-func (app *app) runSkillInstaller(step setupdomain.Step, options setupExecutionOptions) error {
-	command := append([]string(nil), step.Command...)
-	if len(command) == 0 {
-		return fmt.Errorf("skill installer command is empty")
-	}
-	output := options.Stdout
-	if options.Quiet {
-		output = options.Stderr
-	}
-	if len(step.Sources) == 0 {
-		return app.runSkillInstallerCommand(command, output, options.Stderr)
-	}
-	var lastErr error
-	for _, source := range step.Sources {
-		candidate := append([]string(nil), command...)
-		if index := slices.Index(candidate, step.Sources[0]); index >= 0 {
-			candidate[index] = source
-		}
-		if err := app.runSkillInstallerCommand(candidate, output, options.Stderr); err == nil {
-			return nil
-		} else if strings.Contains(err.Error(), "partial Skill installation failure") {
-			return err
-		} else {
-			lastErr = err
-		}
-	}
-	return lastErr
-}
-
-func (app *app) runSkillInstallerCommand(command []string, stdout io.Writer, stderr io.Writer) error {
-	if stdout == nil {
-		stdout = io.Discard
-	}
-	if stderr == nil {
-		stderr = io.Discard
-	}
-	var diagnostics bytes.Buffer
-	err := app.runSetupProcess(
-		context.Background(),
-		command,
-		io.MultiWriter(stdout, &diagnostics),
-		io.MultiWriter(stderr, &diagnostics),
-	)
-	if err != nil {
-		return err
-	}
-	diagnosticText := strings.ToLower(diagnostics.String())
-	if strings.Contains(diagnosticText, "does not support global skill installation") || strings.Contains(diagnosticText, "failed to install") {
-		return fmt.Errorf("partial Skill installation failure: at least one selected Agent does not support global installation")
-	}
-	if strings.Contains(diagnosticText, "no skills found") {
-		return fmt.Errorf("Skill source did not expose any installable skills")
-	}
-	return nil
 }
 
 func (app *app) runSetupProcess(ctx context.Context, command []string, stdout io.Writer, stderr io.Writer) error {

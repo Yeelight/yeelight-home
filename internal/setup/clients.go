@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 )
 
@@ -39,7 +38,7 @@ func MCPClients(homeDir string) []Client {
 		mcpClient("gemini-cli", "Gemini CLI", MCPAdapterGeminiJSON, filepath.Join(homeDir, ".gemini", "settings.json"), "gemini-cli"),
 		mcpClient("qwen-code", "Qwen Code", MCPAdapterGeminiJSON, filepath.Join(homeDir, ".qwen", "settings.json"), "qwen-code"),
 		mcpClient("kiro-cli", "Kiro CLI", MCPAdapterStandardJSON, filepath.Join(homeDir, ".kiro", "settings", "mcp.json"), "kiro-cli"),
-		mcpClient("kilo-code", "Kilo Code", MCPAdapterOpenCodeJSON, filepath.Join(homeDir, ".config", "kilo", "kilo.json"), "kilo-code"),
+		mcpClient("kilo-code", "Kilo Code", MCPAdapterOpenCodeJSON, filepath.Join(homeDir, ".config", "kilo", "kilo.json"), "kilo"),
 		mcpClient("zed", "Zed", MCPAdapterZedJSON, paths.zed, "zed"),
 		mcpClient("amp", "Amp", MCPAdapterAmpJSON, filepath.Join(homeDir, ".config", "amp", "settings.json"), "amp"),
 		mcpClient("windsurf", "Windsurf", MCPAdapterStandardJSON, filepath.Join(homeDir, ".codeium", "windsurf", "mcp_config.json"), "windsurf"),
@@ -125,7 +124,18 @@ func resolveClient(homeDir string, id string, mode Mode, lookPath func(string) (
 				return Client{}, fmt.Errorf("client %q cannot be combined in a standard Skill install", agent)
 			}
 		}
-		return Client{ID: strings.Join(agents, ","), Name: strings.Join(agents, ", "), SkillAgents: agents, SupportsSkill: true}, nil
+		names := make([]string, 0, len(agents))
+		for _, agent := range agents {
+			if client, ok := FindMCPClient(homeDir, agent); ok {
+				names = append(names, client.Name)
+				continue
+			}
+			names = append(names, agent)
+		}
+		return Client{
+			ID: strings.Join(agents, ","), Name: strings.Join(names, ", "),
+			SkillAgents: resolveSkillInstallerAgents(homeDir, agents), SupportsSkill: true,
+		}, nil
 	}
 	normalized := normalizeAgentID(id)
 	if normalized == "" {
@@ -171,6 +181,26 @@ func resolveClient(homeDir string, id string, mode Mode, lookPath func(string) (
 	return Client{ID: normalized, Name: name, SkillAgents: skillAgents, SupportsSkill: true}, nil
 }
 
+func resolveSkillInstallerAgents(homeDir string, agentIDs []string) []string {
+	result := make([]string, 0, len(agentIDs))
+	seen := map[string]bool{}
+	for _, agentID := range agentIDs {
+		installerAgents := []string{agentID}
+		if client, ok := FindMCPClient(homeDir, agentID); ok && client.SupportsSkill && len(client.SkillAgents) > 0 {
+			installerAgents = client.SkillAgents
+		}
+		for _, installerAgent := range installerAgents {
+			key := strings.ToLower(strings.TrimSpace(installerAgent))
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			result = append(result, installerAgent)
+		}
+	}
+	return result
+}
+
 func detectSkillAgents(homeDir string, lookPath func(string) (string, error)) []string {
 	if lookPath == nil {
 		lookPath = exec.LookPath
@@ -190,22 +220,6 @@ func detectSkillAgents(homeDir string, lookPath func(string) (string, error)) []
 		}
 	}
 	return result
-}
-
-func DetectSkillClients(homeDir string) []Client {
-	agents := detectSkillAgents(homeDir, exec.LookPath)
-	clients := make([]Client, 0, len(agents))
-	for _, agent := range agents {
-		name := agent
-		for _, client := range MCPClients(homeDir) {
-			if slices.Contains(client.SkillAgents, agent) {
-				name = client.Name
-				break
-			}
-		}
-		clients = append(clients, Client{ID: agent, Name: name, SkillAgents: []string{agent}, SupportsSkill: true})
-	}
-	return clients
 }
 
 func globalSkillAgents(homeDir string) []string {

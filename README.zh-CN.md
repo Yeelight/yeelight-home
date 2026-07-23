@@ -15,6 +15,10 @@
 
 Runtime 不会被打包进 Skill。Skill 只通过 `YEELIGHT_HOME_BIN` 或 `PATH` 找到公开安装的 `yeelight-home`，然后向 `yeelight-home invoke --stdin` 发送一个 JSON 请求。
 
+## 官方分步教程
+
+第一次使用 Yeelight Home？请跟随[中文官方教程](https://ai-tutorials.yeelight.com/zh/guides/yeelight-home/)，从准备电脑环境、安装、扫码登录和选择家庭，一直完成第一次可验证的真实响应。也可以查看 [English tutorial](https://ai-tutorials.yeelight.com/en/guides/yeelight-home/)。
+
 ## 用普通人的话看懂整个体系
 
 你只需要安装一个底座：**Yeelight Home**。其他项目是 AI 使用易来的不同方式，

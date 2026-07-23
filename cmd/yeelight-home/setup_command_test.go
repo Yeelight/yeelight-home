@@ -53,48 +53,155 @@ func TestSetupInteractiveDefaultsToSkillAndCanCancel(t *testing.T) {
 	}
 }
 
-func TestSetupInteractiveSkillLetsUserChooseDetectedAgent(t *testing.T) {
-	homeDir := t.TempDir()
-	if err := os.MkdirAll(homeDir+"/.qclaw", 0o755); err != nil {
-		t.Fatalf("MkdirAll error: %v", err)
+func TestSetupYesAndJSONNeverPrompt(t *testing.T) {
+	for _, args := range [][]string{
+		{"setup", "--lang", "zh-CN", "--yes", "--home-dir", t.TempDir()},
+		{"setup", "--lang", "zh-CN", "--json", "--home-dir", t.TempDir()},
+	} {
+		app := newTestApp(t)
+		app.terminal = func(io.Reader) bool { return true }
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := app.run(args, strings.NewReader("1\n"), &stdout, &stderr)
+		if code != exitInvalidInput || !strings.Contains(stderr.String(), "请选择完整智能") || stdout.Len() != 0 {
+			t.Fatalf("args=%v code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
+		}
 	}
+}
+
+func TestMCPPromptListsDetectedClientsFirst(t *testing.T) {
+	all := []setupdomain.Client{{ID: "claude-code"}, {ID: "codex"}, {ID: "opencode"}}
+	detected := []setupdomain.Client{{ID: "opencode"}, {ID: "codex"}}
+	got := orderMCPClients(all, detected)
+	want := []string{"opencode", "codex", "claude-code"}
+	for index, id := range want {
+		if got[index].ID != id {
+			t.Fatalf("order=%#v", got)
+		}
+	}
+}
+
+func TestSetupCompletionDoesNotHidePartialSkillInstall(t *testing.T) {
+	result := setupdomain.Result{OK: true, Steps: []setupdomain.StepResult{{ID: "skill", Status: "warning"}}}
+	if !setupResultHasWarnings(result) {
+		t.Fatal("warning step must produce a warning completion message")
+	}
+	if setupResultHasWarnings(setupdomain.Result{OK: true, Steps: []setupdomain.StepResult{{ID: "skill", Status: "ok"}}}) {
+		t.Fatal("successful setup must not produce a warning completion message")
+	}
+}
+
+func TestInteractiveSkillInstallerDelegatesTTYAndVerifiesResult(t *testing.T) {
 	app := newTestApp(t)
-	app.terminal = func(io.Reader) bool { return true }
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	code := app.run([]string{"setup", "--lang", "zh-CN", "--home-dir", homeDir}, strings.NewReader("\nqclaw\nn\n"), &stdout, &stderr)
-	if code != exitOK || !strings.Contains(strings.ToLower(stdout.String()), "qclaw") || !strings.Contains(stdout.String(), "已取消安装") {
-		t.Fatalf("code = %d, stdout = %s, stderr = %s", code, stdout.String(), stderr.String())
+	stdin := strings.NewReader("vercel-input")
+	var installCommand []string
+	app.processInput = func(_ context.Context, command []string, gotStdin io.Reader, _ io.Writer, _ io.Writer) error {
+		installCommand = append([]string(nil), command...)
+		if gotStdin != stdin {
+			t.Fatal("interactive installer did not receive the original stdin")
+		}
+		return nil
+	}
+	app.process = func(_ context.Context, command []string, stdout io.Writer, _ io.Writer) error {
+		if slices.Contains(command, "list") {
+			_, _ = io.WriteString(stdout, `[{"name":"yeelight-smart-home","agents":["Codex","Claude Code"]}]`)
+		}
+		return nil
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills@1.5.20", "add", "https://example.com/skills", "--skill", "yeelight-smart-home", "--global"},
+		Sources: []string{"https://example.com/skills"},
+	}
+	report, err := app.runSkillInstallerWithReport(step, setupExecutionOptions{
+		InteractiveSkillsInstaller: true, Stdin: stdin, Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("runSkillInstallerWithReport error: %v", err)
+	}
+	if slices.Contains(installCommand, "--agent") || slices.Contains(installCommand, "--yes") {
+		t.Fatalf("Yeelight Home must not override Vercel's interactive choices: %#v", installCommand)
+	}
+	if len(report.Installed) != 2 || report.Installed[0] != "Codex" {
+		t.Fatalf("report=%#v", report)
 	}
 }
 
-func TestSetupPromptSupportsDefaultAndMultipleSkillAgents(t *testing.T) {
-	for name, input := range map[string]string{"default": "\n", "multiple": "1,2\n"} {
-		t.Run(name, func(t *testing.T) {
-			var stdout bytes.Buffer
-			prompt := &setupPrompt{reader: bufio.NewReader(strings.NewReader(input)), stdout: &stdout}
-			clients := []setupdomain.Client{{ID: "codex", Name: "Codex"}, {ID: "openclaw", Name: "OpenClaw"}}
-			selected, err := prompt.chooseSkillAgents("en-US", clients)
-			if err != nil {
-				t.Fatalf("chooseSkillAgents error: %v", err)
-			}
-			want := "auto"
-			if name == "multiple" {
-				want = "codex,openclaw"
-			}
-			if selected != want || !strings.Contains(strings.ToLower(stdout.String()), "codex") {
-				t.Fatalf("selected=%q want=%q output=%s", selected, want, stdout.String())
-			}
-		})
+func TestInteractiveSkillInstallerRemovesOnlyAgentIdentityEnvironment(t *testing.T) {
+	environment := []string{
+		"HOME=/tmp/home", "HTTPS_PROXY=http://proxy.example", "CODEX_THREAD_ID=thread", "CLAUDECODE=1", "AI_AGENT=codex",
+	}
+	got := sanitizeSkillsInstallerEnvironment(environment)
+	if !slices.Contains(got, "HOME=/tmp/home") || !slices.Contains(got, "HTTPS_PROXY=http://proxy.example") {
+		t.Fatalf("required environment was removed: %#v", got)
+	}
+	for _, entry := range got {
+		if strings.HasPrefix(entry, "CODEX_THREAD_ID=") || strings.HasPrefix(entry, "CLAUDECODE=") || strings.HasPrefix(entry, "AI_AGENT=") {
+			t.Fatalf("Agent identity leaked to Vercel installer: %#v", got)
+		}
 	}
 }
 
-func TestSetupPromptAcceptsAgentIDWhenNoneWasDetected(t *testing.T) {
+func TestInteractiveSkillInstallerPreflightsMirrorsButOpensOnlyOnePrompt(t *testing.T) {
+	app := newTestApp(t)
+	interactiveCalls := 0
+	var interactiveCommand []string
+	app.process = func(_ context.Context, command []string, _ io.Writer, _ io.Writer) error {
+		if slices.Contains(command, "--list") && slices.Contains(command, "https://example.com/github") {
+			return errors.New("source unavailable")
+		}
+		return nil
+	}
+	app.processInput = func(_ context.Context, command []string, _ io.Reader, _ io.Writer, _ io.Writer) error {
+		interactiveCalls++
+		interactiveCommand = append([]string(nil), command...)
+		return errors.New("user cancelled upstream prompt")
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills@1.5.20", "add", "https://example.com/github", "--skill", "yeelight-smart-home", "--global"},
+		Sources: []string{"https://example.com/github", "https://example.com/gitee"},
+	}
+	_, err := app.runSkillInstallerWithReport(step, setupExecutionOptions{
+		InteractiveSkillsInstaller: true, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if !errors.Is(err, errSetupCancelled) || interactiveCalls != 1 || !slices.Contains(interactiveCommand, "https://example.com/gitee") {
+		t.Fatalf("err=%v calls=%d command=%#v", err, interactiveCalls, interactiveCommand)
+	}
+}
+
+func TestInteractiveSkillInstallerVerifiesSuccessEvenWhenUpstreamExitsNonZero(t *testing.T) {
+	app := newTestApp(t)
+	app.processInput = func(_ context.Context, _ []string, _ io.Reader, _ io.Writer, _ io.Writer) error {
+		return errors.New("exit status 1")
+	}
+	app.process = func(_ context.Context, command []string, stdout io.Writer, _ io.Writer) error {
+		if slices.Contains(command, "list") {
+			_, _ = io.WriteString(stdout, `[{"name":"yeelight-smart-home","agents":["Codex"]}]`)
+		}
+		return nil
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills@1.5.20", "add", "https://example.com/skills", "--skill", "yeelight-smart-home", "--global"},
+		Sources: []string{"https://example.com/skills"},
+	}
+	report, err := app.runSkillInstallerWithReport(step, setupExecutionOptions{
+		InteractiveSkillsInstaller: true, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err != nil || len(report.Installed) != 1 || report.Installed[0] != "Codex" {
+		t.Fatalf("report=%#v err=%v", report, err)
+	}
+}
+
+func TestSetupModeChoicesDoNotPretendEveryModeIsSelected(t *testing.T) {
 	var stdout bytes.Buffer
-	prompt := &setupPrompt{reader: bufio.NewReader(strings.NewReader("codex\n")), stdout: &stdout}
-	selected, err := prompt.chooseSkillAgents("en-US", nil)
-	if err != nil || selected != "codex" || !strings.Contains(stdout.String(), "No AI") {
-		t.Fatalf("selected=%q err=%v output=%s", selected, err, stdout.String())
+	prompt := &setupPrompt{reader: bufio.NewReader(strings.NewReader("1\n")), stdout: &stdout}
+	if _, err := prompt.chooseMode("zh-CN"); err != nil {
+		t.Fatalf("chooseMode error: %v", err)
+	}
+	if strings.Contains(stdout.String(), "[x]") {
+		t.Fatalf("mode output must not mark every option selected: %q", stdout.String())
 	}
 }
 
@@ -553,5 +660,116 @@ func TestSkillInstallerFallsBackWhenSkillsCLIReportsNoSkillsWithExitZero(t *test
 	}
 	if len(commands) != 2 || !slices.Contains(commands[1], step.Sources[1]) {
 		t.Fatalf("commands = %#v", commands)
+	}
+}
+
+func TestSkillInstallerDoesNotRetryMirrorsForInvalidAgent(t *testing.T) {
+	app := newTestApp(t)
+	var commands [][]string
+	app.process = func(_ context.Context, command []string, _ io.Writer, stderr io.Writer) error {
+		commands = append(commands, append([]string(nil), command...))
+		_, _ = fmt.Fprintln(stderr, "Invalid agents: future-invalid")
+		return errors.New("exit status 1")
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills", "add", "https://example.com/first", "--global", "--yes", "--agent", "future-invalid"},
+		Sources: []string{"https://example.com/first", "https://example.com/second.git"},
+	}
+	if err := app.runSkillInstaller(step, setupExecutionOptions{Stdout: io.Discard, Stderr: io.Discard}); err == nil {
+		t.Fatal("expected invalid agent failure")
+	}
+	if len(commands) != 1 {
+		t.Fatalf("invalid agent must not trigger mirror retries: %#v", commands)
+	}
+}
+
+func TestSkillInstallerIsolatesInvalidAgentWithoutBlockingValidAgent(t *testing.T) {
+	app := newTestApp(t)
+	var commands [][]string
+	app.process = func(_ context.Context, command []string, _ io.Writer, stderr io.Writer) error {
+		commands = append(commands, append([]string(nil), command...))
+		if slices.Contains(command, "future-invalid") {
+			_, _ = fmt.Fprintln(stderr, "Invalid agents: future-invalid")
+			return errors.New("exit status 1")
+		}
+		return nil
+	}
+	step := setupdomain.Step{
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills", "add", "https://example.com/skills", "--global", "--yes", "--agent", "codex", "future-invalid"},
+		Sources: []string{"https://example.com/skills"},
+	}
+	if err := app.runSkillInstaller(step, setupExecutionOptions{Locale: "en-US", Stdout: io.Discard, Stderr: io.Discard}); err != nil {
+		t.Fatalf("valid Agent should still install: %v; commands=%#v", err, commands)
+	}
+	if len(commands) != 3 || !slices.Contains(commands[1], "codex") || slices.Contains(commands[1], "future-invalid") {
+		t.Fatalf("expected batch attempt followed by isolated Agents: %#v", commands)
+	}
+}
+
+func TestSkillSetupStepReportsPartialAgentInstallAsWarning(t *testing.T) {
+	app := newTestApp(t)
+	app.process = func(_ context.Context, command []string, _ io.Writer, stderr io.Writer) error {
+		if slices.Contains(command, "future-invalid") {
+			_, _ = fmt.Fprintln(stderr, "Invalid agents: future-invalid")
+			return errors.New("exit status 1")
+		}
+		return nil
+	}
+	step := setupdomain.Step{
+		ID:      "skill",
+		Method:  setupdomain.MethodSkillsCLI,
+		Command: []string{"npx", "-y", "skills", "add", "https://example.com/skills", "--global", "--yes", "--agent", "codex", "future-invalid"},
+		Sources: []string{"https://example.com/skills"},
+	}
+	result := setupdomain.StepResult{ID: step.ID, Status: "ok"}
+	err := app.executeSetupStep(setupdomain.Plan{}, step, setupExecutionOptions{
+		Locale: "zh-CN", Stdout: io.Discard, Stderr: io.Discard,
+	}, &result)
+	if err != nil || result.Status != "warning" || !strings.Contains(result.Message, "codex") || !strings.Contains(result.Message, "future-invalid") {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
+func TestSetupContinuesReadOnlyVerificationAfterSkillInstallFailure(t *testing.T) {
+	homeRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		if request.URL.Path != "/apis/iot/v1/house/r/all" {
+			http.NotFound(writer, request)
+			return
+		}
+		homeRequests++
+		_, _ = writer.Write([]byte(`{"success":true,"data":{"list":[{"id":"verified-house","name":"Home"}]}}`))
+	}))
+	defer server.Close()
+	t.Setenv("YEELIGHT_API_BASE_URL", server.URL+"/apis/iot")
+	app := newTestApp(t)
+	if err := app.tokenStore.Save(credential.TokenRecord{Profile: "default", AccessToken: "Bearer setup-secret"}); err != nil {
+		t.Fatalf("Save token error: %v", err)
+	}
+	if err := app.metadataStore.Save(credential.ProfileMetadata{Profile: "default", Region: "dev"}); err != nil {
+		t.Fatalf("Save metadata error: %v", err)
+	}
+	app.process = func(_ context.Context, _ []string, _ io.Writer, stderr io.Writer) error {
+		_, _ = fmt.Fprintln(stderr, "Invalid agents: future-invalid")
+		return errors.New("exit status 1")
+	}
+	plan, err := setupdomain.BuildPlan(setupdomain.Options{Locale: "en-US", ClientID: "future-invalid", Mode: setupdomain.ModeSkill, HomeDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("BuildPlan error: %v", err)
+	}
+	result, err := app.executeSetupPlan(plan, setupExecutionOptions{
+		Profile: "default", Region: "dev", Locale: "en-US", Stdout: io.Discard, Stderr: io.Discard,
+	})
+	if err == nil || result.OK {
+		t.Fatalf("all Agent installs failed but setup reported success: result=%#v err=%v", result, err)
+	}
+	if homeRequests == 0 {
+		t.Fatal("read-only home verification did not run after Skill installation failure")
+	}
+	if len(result.Steps) != 4 || result.Steps[2].Status != "failed" || result.Steps[3].Status != "ok" {
+		t.Fatalf("setup step results = %#v", result.Steps)
 	}
 }

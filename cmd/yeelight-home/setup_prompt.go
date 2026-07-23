@@ -12,11 +12,22 @@ import (
 )
 
 type setupPrompt struct {
+	input  io.Reader
 	reader *bufio.Reader
 	stdout io.Writer
+	rich   bool
+	// accessible keeps the rich component API testable without a real TTY.
+	accessible bool
+}
+
+func newSetupPrompt(input io.Reader, stdout io.Writer, rich bool) *setupPrompt {
+	return &setupPrompt{input: input, reader: bufio.NewReader(input), stdout: stdout, rich: rich}
 }
 
 func (prompt *setupPrompt) chooseLanguage() (string, error) {
+	if prompt.rich {
+		return prompt.chooseLanguageRich()
+	}
 	_, _ = fmt.Fprint(prompt.stdout, i18n.Text(i18n.Chinese, i18n.SetupChooseLanguage))
 	value, err := prompt.readLine()
 	if err != nil {
@@ -33,6 +44,9 @@ func (prompt *setupPrompt) chooseLanguage() (string, error) {
 }
 
 func (prompt *setupPrompt) chooseMode(locale string) (string, error) {
+	if prompt.rich {
+		return prompt.chooseModeRich(locale)
+	}
 	labels := []string{
 		i18n.Text(locale, i18n.SetupModeSkill),
 		i18n.Text(locale, i18n.SetupModeMCP),
@@ -59,6 +73,9 @@ func (prompt *setupPrompt) chooseMode(locale string) (string, error) {
 }
 
 func (prompt *setupPrompt) chooseMCPClient(locale string, clients []setupdomain.Client) (string, error) {
+	if prompt.rich {
+		return prompt.chooseMCPClientRich(locale, clients)
+	}
 	_, _ = fmt.Fprintln(prompt.stdout, i18n.Text(locale, i18n.SetupChooseClient))
 	for index, client := range clients {
 		_, _ = fmt.Fprintf(prompt.stdout, "  %d. %s\n", index+1, client.Name)
@@ -78,63 +95,12 @@ func (prompt *setupPrompt) chooseMCPClient(locale string, clients []setupdomain.
 	return "", fmt.Errorf("MCP auto-configuration is not verified for client %q", value)
 }
 
-func (prompt *setupPrompt) chooseSkillAgents(locale string, clients []setupdomain.Client) (string, error) {
-	if len(clients) == 0 {
-		_, _ = fmt.Fprint(prompt.stdout, i18n.Text(locale, i18n.SetupNoSkillAgentDetected))
-		value, err := prompt.readLine()
-		if err != nil {
-			return "", err
-		}
-		if value == "" {
-			return "", fmt.Errorf("no supported Skill client was detected; choose one with --agent")
-		}
-		return value, nil
-	}
-
-	_, _ = fmt.Fprintln(prompt.stdout, i18n.Text(locale, i18n.SetupChooseSkillAgents))
-	for index, client := range clients {
-		label := client.Name
-		if !strings.EqualFold(client.Name, client.ID) {
-			label += " (" + client.ID + ")"
-		}
-		_, _ = fmt.Fprintf(prompt.stdout, "  %d. %s\n", index+1, label)
-	}
-	value, err := prompt.readLine()
-	if err != nil {
-		return "", err
-	}
-	if value == "" {
-		return "auto", nil
-	}
-
-	selected := make([]string, 0, len(clients))
-	seen := map[string]bool{}
-	for _, token := range strings.Split(value, ",") {
-		token = strings.TrimSpace(token)
-		if token == "" {
-			continue
-		}
-		if index, parseErr := strconv.Atoi(token); parseErr == nil {
-			if index < 1 || index > len(clients) {
-				return "", fmt.Errorf("Skill client choice %d is out of range", index)
-			}
-			token = clients[index-1].ID
-		}
-		key := strings.ToLower(token)
-		if !seen[key] {
-			seen[key] = true
-			selected = append(selected, token)
-		}
-	}
-	if len(selected) == 0 {
-		return "", fmt.Errorf("choose at least one Skill client")
-	}
-	return strings.Join(selected, ","), nil
-}
-
 func (prompt *setupPrompt) chooseHome(locale string, homes []setupHomeChoice) (string, error) {
 	if len(homes) == 0 {
 		return "", fmt.Errorf("no Yeelight Pro home is available for setup")
+	}
+	if prompt.rich {
+		return prompt.chooseHomeRich(locale, homes)
 	}
 	_, _ = fmt.Fprintln(prompt.stdout, i18n.Text(locale, i18n.SetupChooseHome))
 	for index, home := range homes {
@@ -159,6 +125,9 @@ func (prompt *setupPrompt) chooseHome(locale string, homes []setupHomeChoice) (s
 }
 
 func (prompt *setupPrompt) reuseCurrentAccount(locale string) (bool, error) {
+	if prompt.rich {
+		return prompt.reuseCurrentAccountRich(locale)
+	}
 	_, _ = fmt.Fprintln(prompt.stdout, i18n.Text(locale, i18n.SetupChooseAccount))
 	_, _ = fmt.Fprintf(prompt.stdout, "  1. %s\n", i18n.Text(locale, i18n.SetupKeepCurrentAccount))
 	_, _ = fmt.Fprintf(prompt.stdout, "  2. %s\n", i18n.Text(locale, i18n.SetupSwitchAccount))
@@ -180,6 +149,9 @@ func (prompt *setupPrompt) reuseCurrentAccount(locale string) (bool, error) {
 }
 
 func (prompt *setupPrompt) confirm(locale string) (bool, error) {
+	if prompt.rich {
+		return prompt.confirmRich(locale)
+	}
 	_, _ = fmt.Fprint(prompt.stdout, i18n.Text(locale, i18n.SetupConfirm))
 	value, err := prompt.readLine()
 	if err != nil {

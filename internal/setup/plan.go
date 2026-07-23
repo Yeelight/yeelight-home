@@ -15,6 +15,8 @@ var skillRepositories = []string{
 	"https://gitcode.com/Yeelight/yeelight-smart-home-skills.git",
 }
 
+const skillsInstallerPackage = "skills@1.5.20"
+
 func BuildPlan(options Options) (Plan, error) {
 	if !i18n.IsSupported(options.Locale) {
 		return Plan{}, fmt.Errorf("locale must be zh-CN or en-US")
@@ -31,9 +33,14 @@ func BuildPlan(options Options) (Plan, error) {
 	if options.Mode == ModeLAN && mcpSource == MCPSourceGateway {
 		clientMode = ModeMCP
 	}
-	client, err := resolveClient(options.HomeDir, options.ClientID, clientMode, options.LookPath)
-	if err != nil {
-		return Plan{}, err
+	var client Client
+	if options.InteractiveSkillsInstaller && clientMode != ModeMCP {
+		client = Client{ID: "auto", Name: "Vercel Skills installer", SupportsSkill: true}
+	} else {
+		client, err = resolveClient(options.HomeDir, options.ClientID, clientMode, options.LookPath)
+		if err != nil {
+			return Plan{}, err
+		}
 	}
 	if options.Mode == ModeLAN && strings.TrimSpace(options.GatewayIP) == "" {
 		return Plan{}, fmt.Errorf("gateway IP is required for LAN mode")
@@ -85,8 +92,8 @@ func mcpStep(client Client, locale string, source MCPSource) Step {
 func skillStep(client Client, locale string) Step {
 	if len(client.SkillAgents) > 0 {
 		command := []string{
-			"npx", "-y", "skills", "add", skillRepositories[0],
-			"--skill", "yeelight-smart-home", "--global", "--yes",
+			"npx", "-y", skillsInstallerPackage, "add", skillRepositories[0],
+			"--skill", "yeelight-smart-home", "--global",
 		}
 		command = append(command, "--agent")
 		command = append(command, client.SkillAgents...)
@@ -104,8 +111,8 @@ func skillStep(client Client, locale string) Step {
 			Title:  i18n.Text(locale, i18n.SetupStepSkill),
 			Method: MethodSkillsCLI,
 			Command: []string{
-				"npx", "-y", "skills", "add", skillRepositories[0],
-				"--skill", "yeelight-smart-home", "--global", "--yes",
+				"npx", "-y", skillsInstallerPackage, "add", skillRepositories[0],
+				"--skill", "yeelight-smart-home", "--global",
 			},
 			Sources: append([]string(nil), skillRepositories...),
 		}

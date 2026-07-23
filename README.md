@@ -16,6 +16,10 @@ issues and contribute changes on GitHub.
 
 The Runtime is intentionally not bundled inside Skills. A Skill finds `yeelight-home` through `YEELIGHT_HOME_BIN` or `PATH` and sends one JSON request to `yeelight-home invoke --stdin`.
 
+## Official Step-by-Step Tutorial
+
+New to Yeelight Home? Follow the [official English tutorial](https://ai-tutorials.yeelight.com/en/guides/yeelight-home/) from computer setup and installation through QR sign-in, home selection, and the first verified response. A [Simplified Chinese tutorial](https://ai-tutorials.yeelight.com/zh/guides/yeelight-home/) is also available.
+
 ## The Ecosystem In Plain Language
 
 You only install one foundation: **Yeelight Home**. The other projects are

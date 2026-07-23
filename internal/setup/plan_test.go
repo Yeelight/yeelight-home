@@ -23,6 +23,17 @@ func TestBuildPlanUsesSkillsCLIForCodex(t *testing.T) {
 	}
 }
 
+func TestBuildPlanUsesUpstreamSkillsCLIIdentifierForKiloCode(t *testing.T) {
+	plan, err := BuildPlan(Options{Locale: "zh-CN", ClientID: "kilo-code", Mode: ModeSkill, HomeDir: "/tmp/home"})
+	if err != nil {
+		t.Fatalf("BuildPlan error: %v", err)
+	}
+	command := plan.Steps[2].Command
+	if command[len(command)-1] != "kilo" || slices.Contains(command, "kilo-code") {
+		t.Fatalf("skill command = %#v", command)
+	}
+}
+
 func TestBuildPlanUsesFirstPartySkillPathForQClaw(t *testing.T) {
 	plan, err := BuildPlan(Options{Locale: "zh-CN", ClientID: "qclaw", Mode: ModeSkill, HomeDir: "/tmp/home"})
 	if err != nil {
@@ -94,6 +105,23 @@ func TestBuildPlanAutoDetectsAndPinsInstalledSkillAgents(t *testing.T) {
 	wantSuffix := []string{"--agent", "codex"}
 	if len(command) < len(wantSuffix) || !slices.Equal(command[len(command)-len(wantSuffix):], wantSuffix) {
 		t.Fatalf("auto command should pin detected agents: %#v", command)
+	}
+}
+
+func TestBuildPlanDelegatesInteractiveSkillSelectionToVercel(t *testing.T) {
+	plan, err := BuildPlan(Options{
+		Locale: "zh-CN", ClientID: "auto", Mode: ModeSkill, HomeDir: "/tmp/home",
+		InteractiveSkillsInstaller: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildPlan error: %v", err)
+	}
+	command := plan.Steps[2].Command
+	if plan.Client.Name != "Vercel Skills installer" || slices.Contains(command, "--agent") || slices.Contains(command, "--yes") {
+		t.Fatalf("interactive Skill command must delegate selection to Vercel: client=%#v command=%#v", plan.Client, command)
+	}
+	if len(command) < 3 || command[2] != "skills@1.5.20" {
+		t.Fatalf("unexpected Vercel Skills package: %#v", command)
 	}
 }
 
